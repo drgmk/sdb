@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+
+from collections import OrderedDict
+import numpy as np
+from os import mkdir,rename,remove
+from os.path import isdir,isfile
+import glob
+import hashlib
+from astropy.table import Table,vstack,unique,Column
+import mysql.connector
+import config as cfg
+
+def sdb_write_rawphot(file,tphot,tspec):
+    """Write raw photometry to a file
+    
+    Takes filename to write to, and astropy Tables with photometry
+    and information on spectra. Each contains metadata that is
+    printed out as key=value. As the spectra are printed as
+    instrument=file these are stored in reverse in the meta
+    dictionary (i.e. instrument non-unique)"""
+    fh = open(file,'w')
+    print('# photometry etc for '+tphot.meta['id']+'\n',file=fh)
+    for key in tphot.meta:
+        print("{}={}".format(key,tphot.meta[key]),file=fh)
+    for key in tspec.meta:
+        print("{}={}".format(tspec.meta[key],key),file=fh)
+    print('',file=fh)
+    tphot.rename_column('Band','#Band')
+    tphot.write(fh,format='ascii.fixed_width',delimiter=' ')
+    tphot.rename_column('#Band','Band')
+    fh.close()
+
+def filehash(file):
+    """Return an md5 hash for a given file"""
+    hasher = hashlib.md5()
+    f = open(file, 'rb')
+    buf = f.read()
+    hasher.update(buf)
+    return hasher.hexdigest()
+
+def sdb_getphot_one(id):
+    """Extract photometry and other info from a database
+
+    Results are put in text files within sub-directories
+    for the given id. Assuming some photometry exists, a
+    'public' directory is always created, and as many
+    "private" ones as needed are created to ensure that
+    private data are separated from public data and each
+    other.
+    """
+    
+    # tmp file
+    tmpfile = '/Users/grant/Desktop/sdbtmpsed.txt'
+
+    # set up connection
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cursor = cnx.cursor(buffered=True)
+
+    # set up temporary table with what we'll want in the photometry output
+    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT NULL, SysErr double DEFAULT NULL, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
+
+    # get sdbid and xids
+    cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
+    if cursor.rowcount > 1:
+       print("Found multiple sdbids for given ID {}, exiting".format(id))
+       exit()
+    sdbid = cursor.fetchall()[0][0]
+    cursor.execute('SELECT DISTINCT xid FROM xids WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
+    xids = cursor.fetchall()
+
+    # make cross id table to match on
+    cursor.execute('DROP TABLE IF EXISTS TheIDs;')
+    cursor.execute('CREATE TEMPORARY TABLE TheIDs SELECT * from xids WHERE sdbid = %(tmp)s;',{'tmp':sdbid})
+    cursor.execute('ALTER TABLE TheIDs ADD INDEX (xid);')
+
+    # now add photometry to that table, use extra cursor
+    cursor1 = cnx.cursor(buffered=True)
+    cursor1.execute('SELECT * FROM xmatch;')
+    for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,ex,priv) in cursor1:
+        if incl != 1:
+            continue
+        stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid+' WHERE '+col+' IS NOT NULL'
+        if ex != '':
+           stmt += ' '+ex
+        cursor.execute(stmt,{'band':band,'bib':bib,'unit':unit,'priv':priv} )
+        
+    # now get the fluxes
+    cursor.execute("SELECT DISTINCT * FROM fluxes;")
+    tphot = Table(names=cursor.column_names,dtype=('S10','f','f','f','bool','S10','S25','S200','S200','S100','bool'))
+    for row in cursor:
+        tphot.add_row(row)
+
+    # get some addtional metadata like stellar params
+    cursor.execute('SELECT main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode from simbad WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
+    vals = cursor.fetchall()
+    keys = cursor.column_names
+    tphot.meta = OrderedDict( zip(keys,tuple(vals[0])) )
+    tphot.meta['id'] = sdbid
+
+    # get aors for any spectra and add file names
+    cursor.execute('SELECT instrument,aor_key,bibcode,private FROM spectra WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
+    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','bool'))
+    for row in cursor:
+        tspec.add_row(row)
+
+    # add empty column for file names, these need to
+    add = np.chararray(len(tspec),itemsize=200)
+    add[:] = ''
+    tspec.add_column(Column(add,name='file'))
+    for aor in tspec['aor_key']:
+        for inst in cfg.spectra.keys():
+            loc,g1,g2 = cfg.spectra[inst]
+            specfile = glob.glob(loc+g1+str(aor)+g2)
+            if len(specfile) > 1:
+                print("WARNING: More than one file for aor:",aor)
+            elif len(specfile) == 1:
+                tspec['file'][(tspec['aor_key']==aor)] = specfile[0]
+
+    # now add these as table metadata
+    for i in range(len(tspec)):
+        if tspec['file'][i] != b'':
+            tspec.meta[tspec['file'][i].decode()] = tspec['instrument'][i].decode()
+
+    # find any private data by making table from phot and spec,
+    # bibcode and private are the common columns
+    tpriv = vstack([tphot,tspec],join_type='inner')
+    if len(tpriv[tpriv['private'] == True]) == 0:
+        npriv = 0
+    else:
+        npriv = len(unique(tpriv[tpriv['private'] == True]))
+
+    # write file(s), organising things if there is private data
+    sedroot = cfg.file['sedroot']+sdbid+'/'
+    filename = sdbid+'-rawphot.txt'
+     # make list of new dirs needed
+    newdirs = np.array(['public'])
+    if npriv != 0:
+        newdirs = np.append(newdirs,tpriv[tpriv['private'] == True]['bibcode'])
+
+    # go through these, updating only if different
+    for dir in newdirs:
+        seddir = sedroot+dir+'/'
+        
+        # make dir if needed, if exists get or invent hash on old file
+        if isdir(seddir) == False:
+            mkdir(seddir)
+        else:
+            if isfile(seddir+filename):
+                oldhash = filehash(seddir+filename)
+            else:
+                oldhash = ''
+
+        # figure which rows to keep here and write temporary file
+        okphot = np.logical_or(tphot['private'] == False,
+                               tphot['bibcode'].astype(str) == dir.astype(str) )
+        okspec = np.logical_or(tspec['private'] == False,
+                               tspec['bibcode'].astype(str) == dir.astype(str) )
+        sdb_write_rawphot(tmpfile,tphot[okphot],tspec[okspec])
+
+        # see if update needed, if so move it, otherwise delete
+        if filehash(tmpfile) != oldhash:
+            print(sdbid,": Different hash, updating file")
+            rename(tmpfile,seddir+filename)
+        else:
+            print(sdbid,": Same hash, leaving old file")
+            remove(tmpfile)
+
+def sdb_getphot(idlist):
+    """Call sdb_getphot for a list of ids"""
+    if not isinstance(idlist, list):
+        raise TypeError
+    for id in idlist:
+        sdb_getphot_one(id)
+
+# run one as a test
+sdb_getphot(['sdb-v1-081823.95-123755.8'])
