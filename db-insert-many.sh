@@ -3,12 +3,13 @@
 # give a table name in the database to get IDs from
 
 db=sed_db
+dbroot=/Users/grant/astro/projects/sed-db/
 
 # given sample db name in $1
 mysql $db -N -e "SELECT name FROM $1" | while read name
 do
-    echo getting:$name
-    ./db-insert-one.sh "$name"
+    echo getting:"$name"
+    "$dbroot"sed-db/db-insert-one.sh "$name" 2>&1 | tee "$dbroot"logs/"$name".log
 done
 
 # modify source table, these bits may need to be done by hand

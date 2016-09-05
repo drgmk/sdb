@@ -139,6 +139,8 @@ def sdb_getphot_one(id):
         newdirs = np.append(newdirs,tpriv[tpriv['private'] == True]['bibcode'])
 
     # go through these, updating only if different
+    # TODO: note private dirs with seds that aren't either updated or skipped
+    # due to no update needed - these should probably be removed
     for dir in newdirs:
         seddir = sedroot+dir+'/'
         

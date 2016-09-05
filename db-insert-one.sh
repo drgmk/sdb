@@ -83,7 +83,6 @@ then
     echo "\nSesame using name:$id"
     co=`sesame "$id" | egrep -w 'jradeg|jdedeg' | sed s/\<jradeg\>// | sed s/\<\\\\/jradeg\>// | sed s/\<jdedeg\>// | sed s/\<\\\\/jdedeg\>//`
     cojoin=`echo $co | sed "s/ /,/"`
-    #cojoin=279.234734787,38.783688956 # Vega
     ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
     if [ "$cojoin" == "" ]
@@ -134,7 +133,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-#    exit
+    exit
 else
     echo "New target, going ahead"
 fi
@@ -169,14 +168,29 @@ then
     $stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1='keepcols sdbid' in2=$ft2 ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=simbad write=$mode
 fi
 
+# sanity check, that no xid matches the given id for another sdbid
+res=$(mysql $db -N -e "SELECT sdbid,xid FROM xids WHERE xid='$id' and sdbid != '$sdbid';")
+if [ "$res" != "" ]
+then
+    echo "\nERROR: Found xid for $id different to sdbid: $sdbid"
+    exit
+fi
+
 # add given id as a xid. this is a potential issue if the given id is not unique. by
 # leaving this option on we assume we'll only ever be given unique ids. this should be OK
 # as an id will either be a coordinate and so must be fairly precise, or will be
 # successfully resolved by sesame, and hence unambiguous.
 if [ "$id" != "" -a 1 == 1 ]
 then
-    echo "\nAdding given id as an xid"
-    echo $sdbid \"$id\" >> $ft
+    # check we don't have it as an xid already
+    res=$(mysql $db -N -e "SELECT xid FROM xids WHERE xid='$id';")
+    if [ "$res" == "" ]
+    then
+	echo "\nAdding given id as an xid"
+	echo $sdbid \"$id\" >> $ft
+    else
+	echo "\nNot adding given id as xid, already in list"
+    fi
 fi
 echo "\nUpdating xids to include sbdid"
 $stilts tpipe in=$ft ifmt=ascii cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=xids write=append
@@ -189,52 +203,58 @@ $stilts tpipe in=$ft ifmt=ascii cmd='random' omode=tosql protocol=mysql db=$sdb 
 res=$(mysql $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS F');")
 if [[ $res == "" ]]
 then
-    echo "IRAS FSC ID not present, looking"
+    echo "\nIRAS FSC ID not present, looking"
     $stilts sqlclient db='jdbc:mysql://localhost/photometry'$ssl user=$user password=$password sql="SELECT * from iras_fsc where _raj2000 between $ra-5.0 and $ra+5.0 and _dej2000 between $de-5.0 and $de+5.0" ofmt=votable > $ft
     $stilts tmatch2 in1=$fp ifmt1=votable in2=$ft ifmt2=votable ocmd='keepcols "sdbid IRAS_ID"' matcher=skyellipse values1='ra_ep1983p5 de_ep1983p5 1.0 1.0 0.0' values2='_RAJ2000 _DEJ2000 Major Minor PosAng' params='20' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=xids find=best write=append
 else
-    echo "Have IRAS FSC ID:$res"
+    echo "\nHave IRAS FSC ID:$res"
 fi
 
 # IRAS PSC, as above
 res=$(mysql $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS [0-9]');")
 if [[ $res == "" ]]
 then
-    echo "IRAS PSC ID not present, looking"
+    echo "\nIRAS PSC ID not present, looking"
     $stilts sqlclient db='jdbc:mysql://localhost/photometry'$ssl user=$user password=$password sql="SELECT * from iras_psc where _raj2000 between $ra-5.0 and $ra+5.0 and _dej2000 between $de-5.0 and $de+5.0" ofmt=votable > $ft
     $stilts tmatch2 in1=$fp ifmt1=votable in2=$ft ifmt2=votable ocmd='keepcols "sdbid IRAS_ID"' matcher=skyellipse values1='ra_ep1983p5 de_ep1983p5 1.0 1.0 0.0' values2='_RAJ2000 _DEJ2000 Major Minor PosAng' params='20' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=xids find=best write=append
 else
-    echo "Have IRAS PSC ID:$res"
+    echo "\nHave IRAS PSC ID:$res"
 fi
 
 #### now do catalogues we're not going to store in their entirety but download as we
 #### need. these are sorted roughly in wavelength order
 
 # Tycho-2, query against 1991.25 position
+echo "\nLooking for Tycho-2 entry"
 coty=$(mysql $db -N -e "SELECT CONCAT(ra_ep1991p25,',',de_ep1991p25) FROM sdb_pm WHERE sdbid='$sdbid';")
 echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
+echo "\nLooking for 2MASS entry"
 cotm=$(mysql $db -N -e "SELECT CONCAT(ra_ep1999p3,',',de_ep1999p3) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=2mass -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$cotm" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=2mass write=$mode
 
 # ALLWISE, assume 2010.3, midway through cryo lifetime
+echo "\nLooking for ALLWISE entry"
 cowise=$(mysql $db -N -e "SELECT CONCAT(ra_ep2010p3,',',de_ep2010p3) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=II/328/allwise -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$cowise" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=allwise write=$mode
 
 # AKARI IRC, assume 2007.0, midway through survey
+echo "\nLooking for AKARI IRC entry"
 coirc=$(mysql $db -N -e "SELECT CONCAT(ra_ep2007p0,',',de_ep2007p0) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=II/297 -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$coirc" | grep -v "^#" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=akari_irc write=$mode
 
 # SEIP, epoch less certain, roughly 2006.9 for mid-mission so use AKARI
+echo "\nLooking for SEIP entry"
 curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$coirc" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
 
 # look for IRS spectra in the observing log
+echo "\nLooking for IRS staring observation in Spitzer log"
 $stilts sqlclient db='jdbc:mysql://localhost/photometry'$ssl user=$user password=$password sql="SELECT name,ra,dec_,aor_key,'irsstare' as instrument, '2011ApJS..196....8L' as bibcode, 0 as private from spitzer_obslog where ra between $ra-5.0 and $ra+5.0 and dec_ between $de-5.0 and $de+5.0 and aot='irsstare'" ofmt=votable > $ft
 $stilts tmatch2 in1=$fp ifmt1=votable in2=$ft ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2007p0 de_ep2007p0 5.0 5.0 0.0' values2='ra dec_ 5.0 5.0 0.0' params='2' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra find=all write=append
