@@ -1,7 +1,9 @@
 #!/Users/grant/.virtualenvs/astropy-dev/bin/python3
 #!/usr/bin/env python3
 
-"""Generate HTML pages to browse database"""
+"""Generate HTML pages to browse database
+
+   Uses non-standard version of astropy to ensure html anchors in jsviewer tables"""
 
 from os.path import isdir,isfile
 from os import mkdir,remove,write
