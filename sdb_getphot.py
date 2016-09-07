@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 
+"""Extract photometry from command line
+
+When run from command line the arguments can either specify a number of
+individual sdbids, or a sample which resides in a table in
+sed_db_samples.
+"""        
+
+import argparse
 from collections import OrderedDict
 import numpy as np
 from os import mkdir,rename,remove
@@ -13,11 +21,13 @@ import config as cfg
 def sdb_write_rawphot(file,tphot,tspec):
     """Write raw photometry to a file
     
-    Takes filename to write to, and astropy Tables with photometry
-    and information on spectra. Each contains metadata that is
-    printed out as key=value. As the spectra are printed as
-    instrument=file these are stored in reverse in the meta
-    dictionary (i.e. instrument non-unique)"""
+    Takes filename to write to, and astropy Tables with photometry and
+    information on spectra. Each contains metadata that is printed out
+    as key=value. As the spectra are printed as instrument=file these
+    are stored in reverse in the meta dictionary (i.e. instrument
+    non-unique)
+    """
+    
     fh = open(file,'w')
     print('# photometry etc for '+tphot.meta['id']+'\n',file=fh)
     for key in tphot.meta:
@@ -40,17 +50,17 @@ def filehash(file):
 
 def sdb_getphot_one(id):
     """Extract photometry and other info from a database
-
-    Results are put in text files within sub-directories
-    for the given id. Assuming some photometry exists, a
-    'public' directory is always created, and as many
-    "private" ones as needed are created to ensure that
-    private data are separated from public data and each
-    other.
+    
+    Results are put in text files within sub-directories for the given
+    id. Assuming some photometry exists, a 'public' directory is always
+    created, and as many "private" ones as needed are created to ensure
+    that private data are separated from public data and each other. The
+    private directories also get an .htaccess file that requires a user
+    to be in the group of the same name to view the contents.    
     """
     
     # tmp file
-    tmpfile = '/Users/grant/Desktop/sdbtmpsed.txt'
+    tmpfile = '/tmp/sdbtmpsed.txt'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -58,7 +68,7 @@ def sdb_getphot_one(id):
     cursor = cnx.cursor(buffered=True)
 
     # set up temporary table with what we'll want in the photometry output
-    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT NULL, SysErr double DEFAULT NULL, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
+    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT NULL, Sys double DEFAULT NULL, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
 
     # get sdbid and xids
     cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
@@ -87,9 +97,14 @@ def sdb_getphot_one(id):
         
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
-    tphot = Table(names=cursor.column_names,dtype=('S10','f','f','f','bool','S10','S25','S200','S200','S100','bool'))
+    tphot = Table(names=cursor.column_names,dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool'))
     for row in cursor:
-        tphot.add_row(row)
+        try:
+            tphot.add_row(row)
+        except:
+            print("ERROR: "+sdbid+" not exported, returning.")
+            print("Probably wierd (+meaningless) characters in row\n",row)
+            return()
 
     # get some addtional metadata like stellar params
     cursor.execute('SELECT main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode from simbad WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
@@ -104,7 +119,7 @@ def sdb_getphot_one(id):
     for row in cursor:
         tspec.add_row(row)
 
-    # add empty column for file names, these need to
+    # add empty column for file names
     add = np.chararray(len(tspec),itemsize=200)
     add[:] = ''
     tspec.add_column(Column(add,name='file'))
@@ -130,28 +145,45 @@ def sdb_getphot_one(id):
     else:
         npriv = len(unique(tpriv[tpriv['private'] == True]))
 
+    # if there wasn't any photometry or spectra, then there's nothing to do
+    if len(tpriv) == 0:
+        print("No photometry or spectra for {}, exiting".format(sdbid))
+        exit()
+        
     # write file(s), organising things if there is private data
     sedroot = cfg.file['sedroot']+sdbid+'/'
+    if isdir(sedroot) == False:
+        mkdir(sedroot)
     filename = sdbid+'-rawphot.txt'
      # make list of new dirs needed
     newdirs = np.array(['public'])
     if npriv != 0:
-        newdirs = np.append(newdirs,tpriv[tpriv['private'] == True]['bibcode'])
+        newdirs = np.append(newdirs,unique(tpriv[tpriv['private'] == True])['bibcode'])
 
     # go through these, updating only if different
-    # TODO: note private dirs with seds that aren't either updated or skipped
-    # due to no update needed - these should probably be removed
+    # TODO: note private dirs with seds that aren't either updated or skipped due to no
+    # update needed - these should probably be removed after any necessary stuff is
+    # transferred
     for dir in newdirs:
         seddir = sedroot+dir+'/'
         
         # make dir if needed, if exists get or invent hash on old file
+        oldhash = ''
         if isdir(seddir) == False:
             mkdir(seddir)
         else:
             if isfile(seddir+filename):
                 oldhash = filehash(seddir+filename)
-            else:
-                oldhash = ''
+
+        # create the .htaccess file if necessary
+        if not isfile(seddir+'/.htaccess') and dir != 'public':
+            fd = open(seddir+'/.htaccess','w')
+            fd.write('AuthName "Must login"\n')
+            fd.write('AuthType Basic\n')
+            fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
+            fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
+            fd.write('require group '+dir+'\n')
+            fd.close()
 
         # figure which rows to keep here and write temporary file
         okphot = np.logical_or(tphot['private'] == False,
@@ -162,18 +194,43 @@ def sdb_getphot_one(id):
 
         # see if update needed, if so move it, otherwise delete
         if filehash(tmpfile) != oldhash:
-            print(sdbid,": Different hash, updating file")
+            print(sdbid,dir,": Different hash, updating file")
             rename(tmpfile,seddir+filename)
         else:
-            print(sdbid,": Same hash, leaving old file")
+            print(sdbid,dir,": Same hash, leaving old file")
             remove(tmpfile)
+
 
 def sdb_getphot(idlist):
     """Call sdb_getphot for a list of ids"""
     if not isinstance(idlist, list):
+        print("sdb_getphot expects a list")
         raise TypeError
     for id in idlist:
         sdb_getphot_one(id)
 
-# run one as a test
-sdb_getphot(['sdb-v1-081823.95-123755.8'])
+# run from the command line
+if __name__ == "__main__":
+
+    # inputs
+    parser1 = argparse.ArgumentParser(description='Export photometry from SED DB')
+    parser = parser1.add_mutually_exclusive_group(required=True)
+    parser.add_argument('--idlist','-i',nargs='+',action='append',
+                        dest='idlist',metavar='sdbid',help='Get photometry for one sdbid')
+    parser.add_argument('--sample','-s',type=str,metavar='table',help='Get photometry for sample')
+    parser1.add_argument('--dbname',type=str,help='Database containing sample table',
+                         default=cfg.mysql['sampledb'],metavar='sed_db_samples')
+    args = parser1.parse_args()
+
+    if args.idlist != None:
+        print("Running sdb_getphot for list:",args.idlist[0])
+        sdb_getphot(args.idlist[0])
+    else:
+        print("Running sdb_getphot for targets in sample:",args.sample)
+        cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
+                                      host=cfg.mysql['host'],database=args.dbname)
+        cursor = cnx.cursor(buffered=True)
+        cursor.execute("SELECT sdbid FROM sed_db_samples."+args.sample+";")
+        for id in cursor:
+#            print(id)
+            sdb_getphot_one(id[0])

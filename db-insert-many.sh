@@ -12,10 +12,13 @@ do
     "$dbroot"sed-db/db-insert-one.sh "$name" 2>&1 | tee "$dbroot"logs/"$name".log
 done
 
+proj=`echo $1 | sed "s/.*\.//"`
+
 # modify source table, these bits may need to be done by hand
 echo "may now want to execute some sql commands like this:"
 echo "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
-echo "UPDATE $1 LEFT JOIN xids ON name=xid SET $1.sdbid=xids.sdbid;"
-echo "ALTER TABLE $1 ADD FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);"
-echo "DELETE FROM projects WHERE project='shardds';"
-echo "INSERT INTO projects SELECT sdbid,'$1' FROM $1 WHERE sdbid IS NOT NULL;"
+echo "UPDATE $1 LEFT JOIN sed_db.xids ON name=xid SET $1.sdbid=xids.sdbid;"
+echo "ALTER TABLE $1 ADD PRIMARY KEY (`name`);"
+echo "ALTER TABLE $1 ADD CONSTRAINT `name` FOREIGN KEY (sdbid) REFERENCES sed_db.sdb_pm (sdbid);"
+echo "DELETE FROM sed_db.projects WHERE project='shardds';"
+echo "INSERT INTO sed_db.projects SELECT sdbid,'$proj' FROM $1 WHERE sdbid IS NOT NULL;"
