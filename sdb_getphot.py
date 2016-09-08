@@ -180,8 +180,8 @@ def sdb_getphot_one(id):
             fd = open(seddir+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
-            fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
-            fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
+            fd.write('AuthUserFile '+cfg.file['wwwroot']+'.htpasswd\n')
+            fd.write('AuthGroupFile '+cfg.file['wwwroot']+'.htgroup\n')
             fd.write('require group '+dir+'\n')
             fd.close()
 

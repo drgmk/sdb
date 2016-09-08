@@ -34,7 +34,7 @@ ft2=/tmp/tmp$RANDOM.xml
 
 # database details, user and pass are taken from /etc/my.cnf, and aren't needed for
 # direct calls, but are needed explicitly for stilts.
-db=sed_db
+db=sdb
 ssl=?useSSL=false
 sdb=$db$ssl
 tmp=`cat /etc/my.cnf | grep user | sed 's/ //g'`

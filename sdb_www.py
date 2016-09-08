@@ -43,7 +43,7 @@ def sdb_www_sample_tables():
     that are searchable and sortable.
     """
 
-    wwwroot = cfg.www['root']+'samples/'
+    wwwroot = cfg.file['wwwroot']+'samples/'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -64,8 +64,8 @@ def sdb_www_sample_tables():
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
-            fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
-            fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
+            fd.write('AuthUserFile '+cfg.file['wwwroot']+'.htpasswd\n')
+            fd.write('AuthGroupFile '+cfg.file['wwwroot']+'.htgroup\n')
             fd.write('require group '+sample+'\n')
             fd.close()
 
@@ -140,7 +140,7 @@ def sdb_www_sample_plots():
     Extract the necessary information from the database and plot using bokeh.
     """
 
-    wwwroot = cfg.www['root']+'samples/'
+    wwwroot = cfg.file['wwwroot']+'samples/'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
