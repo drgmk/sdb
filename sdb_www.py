@@ -10,7 +10,7 @@
 import numpy as np
 from bokeh.plotting import figure,output_file,save,ColumnDataSource
 import bokeh.palettes
-from bokeh.models import HoverTool
+from bokeh.models import HoverTool,Colorbar
 from os.path import isdir,isfile
 from os import mkdir,remove,write
 from astropy.table import Table,jsviewer
@@ -174,6 +174,7 @@ def sdb_www_sample_plots():
         col = np.empty(len(t),dtype='U7')
         col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
         col[col==''] = '#969696'
+        cmap = 
 
         hover = HoverTool(tooltips=[("name","@main_id")])
         
