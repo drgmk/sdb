@@ -7,7 +7,10 @@
 
    """
 
-from bokeh.plotting import figure,output_file,save
+import numpy as np
+from bokeh.plotting import figure,output_file,save,ColumnDataSource
+import bokeh.palettes
+from bokeh.models import HoverTool
 from os.path import isdir,isfile
 from os import mkdir,remove,write
 from astropy.table import Table,jsviewer
@@ -90,6 +93,7 @@ def sdb_www_sample_tables():
                "raj2000 as RA,"
                "dej2000 as `Dec`,"
                "sp_type as SpType,"
+               "teff as Teff,"
                "ROUND(log10(lstar),2) as LogLstar,"
                "1e3/plx_value as Dist,"
                "ROUND(log10(ldisklstar),1) as Log_f")
@@ -112,7 +116,7 @@ def sdb_www_sample_tables():
                 " ORDER by RA;")
         cursor.execute(sel)
         tsamp = Table(names=cursor.column_names,
-                      dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f'))
+                      dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f'))
         for row in cursor:
             tsamp.add_row(row)
 
@@ -148,16 +152,38 @@ def sdb_www_sample_plots():
     for sample in samples:
 
         # get data
-        cursor.execute("SELECT sdbid,teff,lstar,disksig,1e3/plx_value as dist FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN sed_stfit ON sdbid=sed_stfit.name LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
-        t = Table(names=cursor.column_names,dtype=('S25','f','f','f','f'))
+        cursor.execute("SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN sed_stfit ON sdbid=sed_stfit.name LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
+        t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
         for row in cursor:
             t.add_row(row)
+        data = ColumnDataSource.from_df(t.to_pandas())
+        for i in range(len(data['sdbid'])):
+            data['sdbid'][i] = data['sdbid'][i].decode()
+            data['main_id'][i] = data['main_id'][i].decode()
+        data = ColumnDataSource(data=data)
 
-        output_file(wwwroot+sample+"/hr.html",mode='cdn')
-        p = figure(title="HR",x_axis_label='T_{eff}',y_axis_label='L_{$\star}',
-                   y_axis_type="log",x_range=(max(t['teff']),min(t['teff'])) )
-        p.circle(t['teff'],t['lstar'],radius=t['dist'],fill_alpha=0.6,
-                 line_color=None)
+        plfile = wwwroot+sample+"/hr.html"
+        if isfile(plfile):
+            remove(plfile)
+        output_file(plfile,mode='cdn')
+
+        # set up colour scale, grey for nans
+        cr = np.array([np.nanmin(np.log(t['ldisklstar'])),np.nanmax(np.log(t['ldisklstar']))])
+        ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
+        ok = np.isfinite(ci)
+        col = np.empty(len(t),dtype='U7')
+        col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
+        col[col==''] = '#969696'
+
+        hover = HoverTool(tooltips=[("name","@main_id")])
+        
+        tools = ['wheel_zoom,box_zoom,resize,save,reset',hover]
+        p = figure(title="HR diagram for "+sample,tools=tools,active_scroll='wheel_zoom',
+                   x_axis_label='Effective temperature / K',y_axis_label='Stellar luminosity / Solar',
+                   y_axis_type="log",y_range=(0.5*min(t['lstar']),max(t['lstar'])*2),
+                   x_range=(300+max(t['teff']),min(t['teff'])-300) )
+        p.circle('teff','lstar',source=data,size=10,fill_color=col,
+                 fill_alpha=0.6,line_color=None)
         save(p)
 
     cnx.close()
