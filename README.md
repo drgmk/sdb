@@ -1,2 +1,2 @@
-# sed-db
+# sdb
 nothing to say yet
