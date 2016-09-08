@@ -38,12 +38,12 @@ Further instructions at each step are given in the relevant codes.
 
 ##TODOs
 
-There are a great many of these...
+There are a great many of these, way more than listed here.
 
-* www-queryable basic parameters for each system
-* Include as many tables of photometry as possible, particularly far-IR/mm ones
-* Complete list of IRs spectra, currently an auto download that misses things (e.g. ptg=1)
-* Way for user to see which SEDs are available to them
-* Better SED fitting software, current is very good, but disk models basic/crappy
-* Management of SED fitting configuration, so far global (i.e. essentially non-existent)
-* Pretty interface
+- [ ] www-queryable basic parameters for each system
+- [ ] Include as many tables of photometry as possible, particularly far-IR/mm ones
+- [ ] Complete list of IRs spectra, currently an auto download that misses things (e.g. ptg=1)
+- [ ] Way for user to see which SEDs are available to them
+- [ ] Better SED fitting software, current is very good, but disk models basic/crappy
+- [ ] Management of SED fitting configuration, so far global (i.e. essentially non-existent)
+- [ ] Pretty interface
