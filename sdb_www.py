@@ -3,8 +3,11 @@
 
 """Generate HTML pages to browse database
 
-   Uses non-standard version of astropy to ensure html anchors in jsviewer tables"""
+   Uses non-standard version of astropy to ensure html anchors in jsviewer tables
 
+   """
+
+from bokeh.plotting import figure,output_file,save
 from os.path import isdir,isfile
 from os import mkdir,remove,write
 from astropy.table import Table,jsviewer
@@ -12,8 +15,30 @@ import argparse
 import mysql.connector
 import config as cfg
 
-def sdb_www_samples():
-    """Generate sample HTML pages"""
+def sdb_www_get_samples():
+    """Get a list of samples
+    
+    Get a list of samples from the database. Add "all" and "public" samples,
+    "public" might not show everything in the list, but "all" will (but
+    may not be visible to anyone).
+    """
+    
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cursor = cnx.cursor(buffered=True)
+    cursor.execute("SELECT DISTINCT project FROM projects;")
+    samples = cursor.fetchall()[0]
+    cnx.close()
+    return( list(samples + ('public','all')) )
+
+def sdb_www_sample_tables():
+    """Generate HTML pages with sample tables
+
+    Extract the necessary information from the database and create HTML
+    pages with the desired tables, one for each sample. These are generated
+    using astropy's HTML table writer and the jsviewer,which makes tables
+    that are searchable and sortable.
+    """
 
     wwwroot = cfg.www['root']+'samples/'
 
@@ -22,13 +47,8 @@ def sdb_www_samples():
                                   host=cfg.mysql['host'],database=cfg.mysql['db'])
     cursor = cnx.cursor(buffered=True)
 
-    # get a list of projects, and add "all" and "public" lists ("public" might not show
-    # everything in the list, but "all" would but might be restricted)
-    cursor.execute("SELECT DISTINCT project FROM projects;")
-    samples = cursor.fetchall()[0]
-    samples = samples + ('public','all')
-
-    # generate the pages for these samples
+    # get a list of samples and generate their pages
+    samples = sdb_www_get_samples()
     for sample in samples:
 
         # make dir and .htaccess if dir doesn't exist
@@ -99,7 +119,7 @@ def sdb_www_samples():
         # write html page with interactive table, astropy 1.2.1 doesn't allow all of the
         # the htmldict contents to be passed to write_table_jsviewer so links are
         # bleached out. can use jsviewer with my modifications to that function...
-        fd = open(wwwroot+sample+'/index.html','w')
+        fd = open(wwwroot+sample+'/table.html','w')
 #        tsamp.write(fd,format='ascii.html',htmldict={'raw_html_cols':['sdbid','Simbad','Finder'],
 #                                                     'raw_html_clean_kwargs':{'attributes':{'a':['href','target']}} })
         jsviewer.write_table_jsviewer(tsamp,fd,max_lines=1000,table_id=sample,
@@ -110,15 +130,53 @@ def sdb_www_samples():
 
     cnx.close()
 
+def sdb_www_sample_plots():
+    """Generate HTML pages with sample plots
+
+    Extract the necessary information from the database and plot using bokeh.
+    """
+
+    wwwroot = cfg.www['root']+'samples/'
+
+    # set up connection
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cursor = cnx.cursor(buffered=True)
+
+    # get a list of samples and generate their pages
+    samples = sdb_www_get_samples()
+    for sample in samples:
+
+        # get data
+        cursor.execute("SELECT sdbid,teff,lstar,disksig,1e3/plx_value as dist FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN sed_stfit ON sdbid=sed_stfit.name LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
+        t = Table(names=cursor.column_names,dtype=('S25','f','f','f','f'))
+        for row in cursor:
+            t.add_row(row)
+
+        output_file(wwwroot+sample+"/hr.html",mode='cdn')
+        p = figure(title="HR",x_axis_label='T_{eff}',y_axis_label='L_{$\star}',
+                   y_axis_type="log",x_range=(max(t['teff']),min(t['teff'])) )
+        p.circle(t['teff'],t['lstar'],radius=t['dist'],fill_alpha=0.6,
+                 line_color=None)
+        save(p)
+
+    cnx.close()
+
+            
 # run from the command line
 if __name__ == "__main__":
 
     # inputs
-    parser1 = argparse.ArgumentParser(description='Update web pages')
-    parser = parser1.add_mutually_exclusive_group(required=True)
-    parser.add_argument('--samples','-s',action='store_true',help='Update sample pages')
-    args = parser1.parse_args()
+    parser = argparse.ArgumentParser(description='Update web pages')
+    parser.add_argument('--tables','-t',action='store_true',help='Update sample tables')
+    parser.add_argument('--plots','-p',action='store_true',help='Update sample plots')
+    args = parser.parse_args()
 
-    if args.samples:
-        print("Updating sample pages")
-        sdb_www_samples()
+    if args.tables:
+        print("Updating sample tables")
+        sdb_www_sample_tables()
+
+    if args.plots:
+        print("Updating sample plots")
+        sdb_www_sample_plots()
+
