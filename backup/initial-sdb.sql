@@ -6,8 +6,8 @@
 # https://github.com/sequelpro/sequelpro
 #
 # Host: localhost (MySQL 5.7.10)
-# Database: sed_db
-# Generation Time: 2016-09-05 16:35:08 +0000
+# Database: sdb
+# Generation Time: 2016-09-08 12:48:49 +0000
 # ************************************************************
 
 
@@ -631,22 +631,22 @@ VALUES
 	(0,'rebull08_bpmg','ID_USE','\'MIPS160\'','flux_mjy_160','0','flux_mjy_160*0.12','IF(limit_flag_160=\'<\',1,0)','\'2008ApJ...681.1484R\'','mJy','\'\'','\'\'','',0),
 	(0,'rebull08_bpmg','ID_USE','\'MIPS24\'','flux_mjy_24','0','flux_mjy_24*0.01','0','\'2008ApJ...681.1484R\'','mJy','\'\'','\'\'','',0),
 	(0,'rebull08_bpmg','ID_USE','\'MIPS70\'','flux_mjy_70','0','flux_mjy_70*0.04','IF(limit_flag_70=\'<\',1,0)','\'2008ApJ...681.1484R\'','mJy','\'\'','\'\'','',0),
-	(1,'sed_db.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,1,1)=1,\'2MR1J\',IF(SUBSTRING(Rflg,1,1)=2,\'2MR2J\',\'2MJ\'))','Jmag','e_Jmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,1,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,1,1))',' AND SUBSTR(Qflg,1,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,1,1)=\'0\'',0),
-	(1,'sed_db.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,2,1)=1,\'2MR1H\',IF(SUBSTRING(Rflg,2,1)=2,\'2MR2H\',\'2MH\'))','Hmag','e_Hmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,2,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,2,1))',' AND SUBSTR(Qflg,2,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,2,1)=\'0\'',0),
-	(1,'sed_db.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,3,1)=1,\'2MR1KS\',IF(SUBSTRING(Rflg,3,1)=2,\'2MR2KS\',\'2MKS\'))','Kmag','e_Kmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,3,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,3,1))',' AND SUBSTR(Qflg,3,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,3,1)=\'0\'',0),
-	(1,'sed_db.akari_irc','akari_irc.sdbid','\'AKARI18\'','S18','e_S18','S18*0.015','0','\'2010A&A...514A...1I\'','Jy','CONCAT(\'ext?:\',X18)','CONCAT(\'N-near:\',ROUND(Nd18,3))',' AND q_S18 = 3',0),
-	(1,'sed_db.akari_irc','akari_irc.sdbid','\'AKARI9\'','S09','e_S09','S09*0.015','0','\'2010A&A...514A...1I\'','Jy','CONCAT(\'ext?:\',X09)','CONCAT(\'N-near:\',ROUND(Nd09,3))',' AND q_S09 = 3',0),
-	(1,'sed_db.allwise','allwise.sdbid','\'WISE12\'','w3mag','e_w3mag','0.045','IF(SUBSTRING(qph,3,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,3,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,3,1))=\'0\'',0),
-	(1,'sed_db.allwise','allwise.sdbid','\'WISE22\'','w4mag','e_w4mag','0.057','IF(SUBSTRING(qph,4,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,4,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,4,1))=\'0\'',0),
-	(1,'sed_db.allwise','allwise.sdbid','\'WISE3P4\'','w1mag','e_w1mag','0.024','IF(SUBSTRING(qph,1,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,1,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,1,1))=\'0\' AND w1mag>4.5',0),
-	(1,'sed_db.allwise','allwise.sdbid','\'WISE4P6\'','w2mag','e_w2mag','0.028','IF(SUBSTRING(qph,2,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,2,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,2,1))=\'0\' AND w2mag>6.5',0),
-	(1,'sed_db.seip','seip.sdbid','\'IRAC3P6\'','i1_f_ap1','i1_df_ap1','0.01*i1_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i1_brtfrac)','CONCAT(\'Ext:\',i1_extfrac)','AND i1_fluxtype=1',0),
-	(1,'sed_db.seip','seip.sdbid','\'IRAC4P5\'','i2_f_ap1','i2_df_ap1','0.01*i2_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i2_brtfrac)','CONCAT(\'Ext:\',i2_extfrac)','AND i2_fluxtype=1',0),
-	(1,'sed_db.seip','seip.sdbid','\'IRAC5P8\'','i3_f_ap1','i3_df_ap1','0.01*i3_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i3_brtfrac)','CONCAT(\'Ext:\',i3_extfrac)','AND i3_fluxtype=1',0),
-	(1,'sed_db.seip','seip.sdbid','\'IRAC8\'','i4_f_ap1','i4_df_ap1','0.01*i4_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i4_brtfrac)','CONCAT(\'Ext:\',i4_extfrac)','AND i4_fluxtype=1',0),
-	(1,'sed_db.seip','seip.sdbid','\'MIPS24\'','m1_f_psf','m1_df_psf','0.01*m1_f_psf','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',m1_brtfrac)','CONCAT(\'Ext:\',m1_extfrac)','AND m1_fluxtype=1',0),
-	(1,'sed_db.tyc2','tyc2.sdbid','\'BT\'','BTmag','e_BTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',prox)','CONCAT(\'HIP:\',HIP)','',0),
-	(1,'sed_db.tyc2','tyc2.sdbid','\'VT\'','VTmag','e_VTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',prox)','CONCAT(\'HIP:\',HIP)','',0),
+	(1,'sdb.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,1,1)=1,\'2MR1J\',IF(SUBSTRING(Rflg,1,1)=2,\'2MR2J\',\'2MJ\'))','Jmag','e_Jmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,1,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,1,1))',' AND SUBSTR(Qflg,1,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,1,1)=\'0\'',0),
+	(1,'sdb.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,2,1)=1,\'2MR1H\',IF(SUBSTRING(Rflg,2,1)=2,\'2MR2H\',\'2MH\'))','Hmag','e_Hmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,2,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,2,1))',' AND SUBSTR(Qflg,2,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,2,1)=\'0\'',0),
+	(1,'sdb.2mass','2mass.sdbid','IF(SUBSTRING(Rflg,3,1)=1,\'2MR1KS\',IF(SUBSTRING(Rflg,3,1)=2,\'2MR2KS\',\'2MKS\'))','Kmag','e_Kmag','0','0','\'2003tmc..book.....C\'','mag','CONCAT(\'Qflg:\',SUBSTR(Qflg,3,1))','CONCAT(\'Cflg:\',SUBSTRING(Cflg,3,1))',' AND SUBSTR(Qflg,3,1) REGEXP(\'A|B|C|D\') AND SUBSTR(Cflg,3,1)=\'0\'',0),
+	(1,'sdb.akari_irc','akari_irc.sdbid','\'AKARI18\'','S18','e_S18','S18*0.015','0','\'2010A&A...514A...1I\'','Jy','CONCAT(\'ext?:\',X18)','CONCAT(\'N-near:\',ROUND(Nd18,3))',' AND q_S18 = 3',0),
+	(1,'sdb.akari_irc','akari_irc.sdbid','\'AKARI9\'','S09','e_S09','S09*0.015','0','\'2010A&A...514A...1I\'','Jy','CONCAT(\'ext?:\',X09)','CONCAT(\'N-near:\',ROUND(Nd09,3))',' AND q_S09 = 3',0),
+	(1,'sdb.allwise','allwise.sdbid','\'WISE12\'','w3mag','e_w3mag','0.045','IF(SUBSTRING(qph,3,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,3,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,3,1))=\'0\'',0),
+	(1,'sdb.allwise','allwise.sdbid','\'WISE22\'','w4mag','e_w4mag','0.057','IF(SUBSTRING(qph,4,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,4,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,4,1))=\'0\'',0),
+	(1,'sdb.allwise','allwise.sdbid','\'WISE3P4\'','w1mag','e_w1mag','0.024','IF(SUBSTRING(qph,1,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,1,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,1,1))=\'0\' AND w1mag>4.5',0),
+	(1,'sdb.allwise','allwise.sdbid','\'WISE4P6\'','w2mag','e_w2mag','0.028','IF(SUBSTRING(qph,2,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,2,1))','CONCAT(\'Var:\',var)',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,2,1))=\'0\' AND w2mag>6.5',0),
+	(1,'sdb.seip','seip.sdbid','\'IRAC3P6\'','i1_f_ap1','i1_df_ap1','0.01*i1_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i1_brtfrac)','CONCAT(\'Ext:\',i1_extfrac)','AND i1_fluxtype=1',0),
+	(1,'sdb.seip','seip.sdbid','\'IRAC4P5\'','i2_f_ap1','i2_df_ap1','0.01*i2_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i2_brtfrac)','CONCAT(\'Ext:\',i2_extfrac)','AND i2_fluxtype=1',0),
+	(1,'sdb.seip','seip.sdbid','\'IRAC5P8\'','i3_f_ap1','i3_df_ap1','0.01*i3_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i3_brtfrac)','CONCAT(\'Ext:\',i3_extfrac)','AND i3_fluxtype=1',0),
+	(1,'sdb.seip','seip.sdbid','\'IRAC8\'','i4_f_ap1','i4_df_ap1','0.01*i4_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',i4_brtfrac)','CONCAT(\'Ext:\',i4_extfrac)','AND i4_fluxtype=1',0),
+	(1,'sdb.seip','seip.sdbid','\'MIPS24\'','m1_f_psf','m1_df_psf','0.01*m1_f_psf','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',m1_brtfrac)','CONCAT(\'Ext:\',m1_extfrac)','AND m1_fluxtype=1',0),
+	(1,'sdb.tyc2','tyc2.sdbid','\'BT\'','BTmag','e_BTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',prox)','CONCAT(\'HIP:\',HIP)','',0),
+	(1,'sdb.tyc2','tyc2.sdbid','\'VT\'','VTmag','e_VTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',prox)','CONCAT(\'HIP:\',HIP)','',0),
 	(1,'sons.SONS_results','id','\'WAV450\'','IF(Peak_Flux_450_ IS NULL,3*Peak_Flux_error_450_,IF(Disk_450_=\'P\',Peak_Flux_450_,Int_Flux_450_))','IF(Disk_450_=\'P\',Peak_Flux_error_450_,Int_flux_error_450_)','0','IF(Upper_Limit_450_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',no_)','CONCAT(\'Notes:\',Notes)','AND Time_ IS NOT NULL',1),
 	(1,'sons.SONS_results','id','\'WAV850\'','IF(Peak_Flux_850_ IS NULL,3*Peak_Flux_error_850_,IF(Disk_850_=\'P\',Peak_Flux_850_,Int_Flux_850_))','IF(Disk_850_=\'P\',Peak_Flux_error_850_,Int_flux_error_850_)','0','IF(Upper_Limit_850_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',no_)','CONCAT(\'Notes:\',Notes)','AND Time_ IS NOT NULL',1),
 	(0,'su06','HD_ID','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2006ApJ...653..675S\'','mJy','CONCAT(\'Age:\',age)','\'\'','',0),

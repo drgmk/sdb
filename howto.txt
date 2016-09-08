@@ -1,0 +1,11 @@
+sdb
+
+Initial setup
+
+	Use 
+
+Standard workflow
+
+	 Add targets with db-insert-one.sh or db-insert-many.sh
+	 Grab spectra files, CASSIS for now with cassis_download.sh
+	 Extract photometry into *-rawphot files

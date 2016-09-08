@@ -219,7 +219,7 @@ if __name__ == "__main__":
                         dest='idlist',metavar='sdbid',help='Get photometry for one sdbid')
     parser.add_argument('--sample','-s',type=str,metavar='table',help='Get photometry for sample')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
-                         default=cfg.mysql['sampledb'],metavar='sed_db_samples')
+                         default=cfg.mysql['sampledb'],metavar=cfg.mysql['sampledb'])
     args = parser1.parse_args()
 
     if args.idlist != None:
@@ -230,7 +230,7 @@ if __name__ == "__main__":
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
                                       host=cfg.mysql['host'],database=args.dbname)
         cursor = cnx.cursor(buffered=True)
-        cursor.execute("SELECT sdbid FROM sed_db_samples."+args.sample+";")
+        cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+";")
         for id in cursor:
 #            print(id)
             sdb_getphot_one(id[0])

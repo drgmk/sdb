@@ -10,7 +10,7 @@
 import numpy as np
 from bokeh.plotting import figure,output_file,save,ColumnDataSource
 import bokeh.palettes
-from bokeh.models import HoverTool,Colorbar
+from bokeh.models import HoverTool
 from os.path import isdir,isfile
 from os import mkdir,remove,write
 from astropy.table import Table,jsviewer
@@ -53,6 +53,8 @@ def sdb_www_sample_tables():
     # get a list of samples and generate their pages
     samples = sdb_www_get_samples()
     for sample in samples:
+
+        print("    sample:",sample)
 
         # make dir and .htaccess if dir doesn't exist
         if not isdir(wwwroot+sample):
@@ -103,7 +105,7 @@ def sdb_www_sample_tables():
         if sample == 'all' or sample == 'public':
             sel += " FROM simbad"
         else:
-            sel += " FROM sed_db_samples."+sample+" LEFT JOIN simbad USING (sdbid)"
+            sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN simbad USING (sdbid)"
             
         sel += (" LEFT JOIN sdb_pm USING (sdbid)"
                 " LEFT JOIN sed_stfit on sdbid=sed_stfit.name"
@@ -119,6 +121,7 @@ def sdb_www_sample_tables():
                       dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f'))
         for row in cursor:
             tsamp.add_row(row)
+        print("    got ",len(tsamp)," rows")
 
         # write html page with interactive table, astropy 1.2.1 doesn't allow all of the
         # the htmldict contents to be passed to write_table_jsviewer so links are
@@ -151,17 +154,24 @@ def sdb_www_sample_plots():
     samples = sdb_www_get_samples()
     for sample in samples:
 
+        print("    sample:",sample)
+
         # get data
         cursor.execute("SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN sed_stfit ON sdbid=sed_stfit.name LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
         t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
         for row in cursor:
             t.add_row(row)
+        print("    got ",len(t)," rows")
+
+        # convert to dict via pandas dataframe, need to convert byte strings to plain(?)
+        # strings for bokeh to be happy
         data = ColumnDataSource.from_df(t.to_pandas())
         for i in range(len(data['sdbid'])):
             data['sdbid'][i] = data['sdbid'][i].decode()
             data['main_id'][i] = data['main_id'][i].decode()
         data = ColumnDataSource(data=data)
 
+        # remove the plot file to avoid overwrite warnings
         plfile = wwwroot+sample+"/hr.html"
         if isfile(plfile):
             remove(plfile)
@@ -174,7 +184,6 @@ def sdb_www_sample_plots():
         col = np.empty(len(t),dtype='U7')
         col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
         col[col==''] = '#969696'
-        cmap = 
 
         hover = HoverTool(tooltips=[("name","@main_id")])
         
