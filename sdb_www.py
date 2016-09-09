@@ -30,9 +30,10 @@ def sdb_www_get_samples():
                                   host=cfg.mysql['host'],database=cfg.mysql['db'])
     cursor = cnx.cursor(buffered=True)
     cursor.execute("SELECT DISTINCT project FROM projects;")
-    samples = cursor.fetchall()[0]
+    samples = cursor.fetchall() # a list of tuples
+    samples = [i[0] for i in samples]
     cnx.close()
-    return( list(samples + ('public','all')) )
+    return( samples + ['public','everything'] )
 
 def sdb_www_sample_tables():
     """Generate HTML pages with sample tables
@@ -43,7 +44,7 @@ def sdb_www_sample_tables():
     that are searchable and sortable.
     """
 
-    wwwroot = cfg.file['wwwroot']+'samples/'
+    wwwroot = cfg.www['root']+'samples/'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -66,8 +67,8 @@ def sdb_www_sample_tables():
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
-            fd.write('AuthUserFile '+cfg.file['wwwroot']+'.htpasswd\n')
-            fd.write('AuthGroupFile '+cfg.file['wwwroot']+'.htgroup\n')
+            fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
+            fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
             fd.write('require group '+sample+'\n')
             fd.close()
 
@@ -84,6 +85,10 @@ def sdb_www_sample_tables():
         cursor.execute("CREATE TEMPORARY TABLE gj SELECT sdbid,GROUP_CONCAT(xid) as xid"
                        " FROM sdb_pm LEFT JOIN xids USING (sdbid) WHERE xid REGEXP('^GJ')"
                        " GROUP BY sdbid;")
+        cursor.execute("DROP TABLE IF EXISTS phot;")
+        cursor.execute("CREATE TEMPORARY TABLE phot SELECT"
+                       " name as sdbid,ROUND(-2.5*log10(ANY_VALUE(flux)/3882.37),1) as Vmag"
+                       " FROM sed_photosphere WHERE band='VJ' GROUP BY sdbid;")
         sel = ("SELECT "
                "CONCAT('<a href=\"../../seds/masters/',sdbid,'/public/',sdbid,'.png\">',sdbid,'</a>') as sdbid,"
                "CONCAT('<a href=\"http://simbad.u-strasbg.fr/simbad/sim-basic?submit=SIMBAD+search&Ident=',main_id,'\" target=\"_blank\">',main_id,'</a>') as Simbad,"
@@ -91,7 +96,7 @@ def sdb_www_sample_tables():
                "hip.xid as HIP,"
                "gj.xid as GJ,"
                "concat('<a href=\"http://irsa.ipac.caltech.edu/applications/finderchart/#id=Hydra_finderchart_finder_chart&RequestClass=ServerRequest&DoSearch=true&subsize=0.08333333400000001&thumbnail_size=medium&sources=DSS,SDSS,twomass,WISE,IRIS&overlay_catalog=true&catalog_by_radius=true&iras_radius=240&sdss_radius=5&twomass_radius=5&wise_radius=5&one_to_one=_none_&dss_bands=poss1_blue,poss1_red,poss2ukstu_blue,poss2ukstu_red,poss2ukstu_ir&SDSS_bands=u,g,r,i,z&twomass_bands=j,h,k&wise_bands=1,2,3,4&UserTargetWorldPt=',raj2000,';',dej2000,';EQ_J2000&projectId=finderchart&searchName=finder_chart&shortDesc=Finder%20Chart&isBookmarkAble=true&isDrillDownRoot=true&isSearchResult=true\" target=\"_blank\">images</a>') as Finder,"
-               "ROUND(-2.5*log10(ANY_VALUE(flux)/3882.37),1) as Vmag,"
+               "Vmag,"
                "raj2000 as RA,"
                "dej2000 as `Dec`,"
                "sp_type as SpType,"
@@ -100,21 +105,21 @@ def sdb_www_sample_tables():
                "1e3/plx_value as Dist,"
                "ROUND(log10(ldisklstar),1) as Log_f")
             
-        # here we decide which samples get all targets, for now "all" and "public" get
-        # everything, but this could be changed so that "public" is some subset of "all"
+        # here we decide which samples get all targets, for now "everything" and "public"
+        # get everything, but this could be changed so that "public" is some subset of
+        # "everything"
         if sample == 'all' or sample == 'public':
-            sel += " FROM simbad"
+            sel += " FROM sdb_pm"
         else:
-            sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN simbad USING (sdbid)"
+            sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
             
-        sel += (" LEFT JOIN sdb_pm USING (sdbid)"
+        sel += (" LEFT JOIN simbad USING (sdbid)"
                 " LEFT JOIN sed_stfit on sdbid=sed_stfit.name"
                 " LEFT JOIN sed_bbfit on sdbid=sed_bbfit.name"
                 " LEFT JOIN hd USING (sdbid)"
                 " LEFT JOIN hip USING (sdbid)"
                 " LEFT JOIN gj USING (sdbid)"
-                " LEFT JOIN sed_photosphere on sdbid=sed_photosphere.name"
-                " WHERE band='VJ'"
+                " LEFT JOIN phot USING (sdbid)"
                 " ORDER by RA;")
         cursor.execute(sel)
         tsamp = Table(names=cursor.column_names,
@@ -129,7 +134,7 @@ def sdb_www_sample_tables():
         fd = open(wwwroot+sample+'/table.html','w')
 #        tsamp.write(fd,format='ascii.html',htmldict={'raw_html_cols':['sdbid','Simbad','Finder'],
 #                                                     'raw_html_clean_kwargs':{'attributes':{'a':['href','target']}} })
-        jsviewer.write_table_jsviewer(tsamp,fd,max_lines=1000,table_id=sample,
+        jsviewer.write_table_jsviewer(tsamp,fd,max_lines=cfg.www['tablemax'],table_id=sample,
                                       table_class="display compact",jskwargs={'display_length':100},
                                       raw_html_cols=['sdbid','Simbad','Finder'],
                                       raw_html_clean_kwargs={'attributes':{'a':['href','target']}} )
@@ -143,7 +148,7 @@ def sdb_www_sample_plots():
     Extract the necessary information from the database and plot using bokeh.
     """
 
-    wwwroot = cfg.file['wwwroot']+'samples/'
+    wwwroot = cfg.www['root']+'samples/'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -157,7 +162,15 @@ def sdb_www_sample_plots():
         print("    sample:",sample)
 
         # get data
-        cursor.execute("SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN sed_stfit ON sdbid=sed_stfit.name LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
+        sel = "SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist "
+        if sample == 'all' or sample == 'public':
+            sel += " FROM sdb_pm"
+        else:
+            sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
+        sel += (" LEFT JOIN simbad USING (sdbid)"
+                " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
+                " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
+        cursor.execute(sel)
         t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
         for row in cursor:
             t.add_row(row)

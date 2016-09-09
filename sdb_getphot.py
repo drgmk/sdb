@@ -58,9 +58,6 @@ def sdb_getphot_one(id):
     private directories also get an .htaccess file that requires a user
     to be in the group of the same name to view the contents.    
     """
-    
-    # tmp file
-    tmpfile = '/tmp/sdbtmpsed.txt'
 
     # set up connection
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -155,18 +152,20 @@ def sdb_getphot_one(id):
     if isdir(sedroot) == False:
         mkdir(sedroot)
     filename = sdbid+'-rawphot.txt'
-     # make list of new dirs needed
+    # make list of new dirs needed, 'public' will contain only public photometry, 'all'
+    # will contain everything and is only needed if there are multiple private sets of
+    # photometry
     newdirs = np.array(['public'])
-    if npriv != 0:
+    if npriv > 0:
         newdirs = np.append(newdirs,unique(tpriv[tpriv['private'] == True])['bibcode'])
+    if len(newdirs) > 2:
+        newdirs = np.append(newdirs,'all')
 
-    # go through these, updating only if different
-    # TODO: note private dirs with seds that aren't either updated or skipped due to no
-    # update needed - these should probably be removed after any necessary stuff is
-    # transferred
+    # go through samples, updating only if different
+    cur = glob.glob(sedroot+'*/')
     for dir in newdirs:
         seddir = sedroot+dir+'/'
-        
+
         # make dir if needed, if exists get or invent hash on old file
         oldhash = ''
         if isdir(seddir) == False:
@@ -180,17 +179,21 @@ def sdb_getphot_one(id):
             fd = open(seddir+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
-            fd.write('AuthUserFile '+cfg.file['wwwroot']+'.htpasswd\n')
-            fd.write('AuthGroupFile '+cfg.file['wwwroot']+'.htgroup\n')
+            fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
+            fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
             fd.write('require group '+dir+'\n')
             fd.close()
 
-        # figure which rows to keep here and write temporary file
+        # figure which rows to keep, and write temporary file
         okphot = np.logical_or(tphot['private'] == False,
                                tphot['bibcode'].astype(str) == dir.astype(str) )
         okspec = np.logical_or(tspec['private'] == False,
                                tspec['bibcode'].astype(str) == dir.astype(str) )
-        sdb_write_rawphot(tmpfile,tphot[okphot],tspec[okspec])
+        tmpfile = cfg.file['sedtmp']
+        if dir != 'all':
+            sdb_write_rawphot(tmpfile,tphot[okphot],tspec[okspec])
+        else:
+            sdb_write_rawphot(tmpfile,tphot,tspec)
 
         # see if update needed, if so move it, otherwise delete
         if filehash(tmpfile) != oldhash:
@@ -199,6 +202,14 @@ def sdb_getphot_one(id):
         else:
             print(sdbid,dir,": Same hash, leaving old file")
             remove(tmpfile)
+
+        # remove this dir listing if it's there
+        if seddir in cur:
+            cur.remove(seddir)
+
+    # check for orphaned SED directories
+    if len(cur) > 0:
+        print("\nWARNING: orphaned directories exist:",cur,"\n")
 
 
 def sdb_getphot(idlist):

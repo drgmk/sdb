@@ -23,7 +23,7 @@ ALTER TABLE 2mass ADD CONSTRAINT sdbid_2m FOREIGN KEY (sdbid) REFERENCES sdb_pm 
 
 ALTER TABLE akari_irc DROP FOREIGN KEY sdbid_ak;
 ALTER TABLE akari_irc DROP PRIMARY KEY;
-ALTER TABLE akari_irc ADD PRIMARY KEY akari_irc (sdbid);
+ALTER TABLE akari_irc ADD PRIMARY KEY sdbid_ak (sdbid);
 ALTER TABLE akari_irc ADD CONSTRAINT sdbid_ak FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
 
 ALTER TABLE allwise DROP FOREIGN KEY sdbid_aw;
@@ -65,6 +65,11 @@ CREATE TRIGGER simbad_remove_whitespace BEFORE INSERT ON `sed_db`.simbad FOR EAC
 
 
 /* CODE */
+
+/* sanity checking to see if an sdbid was entered but nothing else */
+select sdb_pm.sdbid,2mass,allwise,main_id,tyc1 from sdb_pm LEFT JOIN simbad USING (sdbid)
+LEFT JOIN 2mass USING (sdbid) LEFT JOIN allwise USING (sdbid) LEFT JOIN akari_irc USING
+(sdbid) LEFT JOIN tyc2 USING (sdbid) where coalesce(2mass,allwise,main_id,tyc1) is null
 
 /* cleanup to start from scratch */
 DROP TABLE IF EXISTS 2mass;

@@ -32,12 +32,17 @@ pro sdb_csv2xdr,file
      return
   endif
 
-    ;; figure save file name
+  ;; figure save file name and whether we need to update xdr file
   base = STR_REPLACE(file,'-rawphot.txt','')
   xdr = base+'.xdr'
   if FILE_TEST(xdr) then begin
-     print,"Not overwriting existing xdr file:"+xdr
-     return
+     print,"File exists, checking if update needed"
+     t_txt = FILE_INFO(file)
+     t_xdr = FILE_INFO(xdr)
+     if t_xdr.mtime gt t_txt.mtime then begin
+        print,"xdr newer than txt, not overwriting "+xdr
+        return
+     endif else print,"Rawphot file more recent, updating xdr"
   endif
   
   ;; get stuff in text file
