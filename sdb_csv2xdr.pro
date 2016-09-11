@@ -57,7 +57,7 @@ pro sdb_csv2xdr,file
   info = INTARR(nl)             ; 0 for photometry, 1 for stellar, 2 for nothing
   for i=0,nl-1 do begin
      if STREGEX(ls[i],'=',/BOOLEAN) then info[i] = 1
-     if STREGEX(ls[i],'^[ \t]*#|^[ \t]*$',/BOOL) then info[i] = 2 ; ignore these more strongly
+     if STREGEX(ls[i],'^[\|]*[ \t]*#|^[ \t]*$',/BOOL) then info[i] = 2 ; ignore these more strongly
   endfor
 
   ;; defaults
@@ -73,8 +73,6 @@ pro sdb_csv2xdr,file
 
   ;; loop and get stuff
   sys = 0
-  tmp = WHERE(info eq 0,nphot)
-  if STREGEX(ls[tmp[0]],',',/BOOLEAN) then csv = 1 else csv = 0
   for i=0,nl-1 do begin
 
      ;; decide whether systematic errors were given
@@ -103,7 +101,7 @@ pro sdb_csv2xdr,file
      endif
 
      if info[i] eq 0 then begin
-        if csv then tmp = STRSPLIT(ls[i],',',/EXTRACT,COUNT=n) else tmp = STRSPLIT(ls[i],' |	',/REGEX,/EXTRACT,COUNT=n)
+        tmp = STRSPLIT(ls[i],'[ |	]*\|[ |	]*',/REGEX,/EXTRACT,COUNT=n)
         push,band,tmp[0]
         push,meas,FLOAT(tmp[1])
         push,errs,FLOAT(tmp[2])
@@ -131,6 +129,7 @@ pro sdb_csv2xdr,file
   rawdata = ls
   flux = meas
   err = errs
+  nphot = N_ELEMENTS(band)
 
   rawphot = {nphot:nphot,band:band,meas:meas,err:err,syserr:syserr,unit:unit,lim:lim,ref:ref,note1:STRARR(nphot),note2:STRARR(nphot),id:STRARR(nphot),irs:{ok:0,other:''}}
 

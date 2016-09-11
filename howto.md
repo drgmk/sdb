@@ -31,7 +31,7 @@ Further instructions at each step are given in the relevant codes.
 1. Add targets with db-insert-one.sh or db-insert-many.sh
 --* add sdbid column to sample and sample to projects table if necessary
 2. Grab spectra files, CASSIS for now with cassis_download.sh
-3. Extract photometry into *-rawphot files
+3. Extract photometry into *-rawphot files with sdb_getphot.py
 4. Convert these to IDL save files with sdb_csv2xdr.pro
 5. Run sedfit_parallel.pl from the masters directory to ensure correct config
 6. Generate tables and plots with sdb_www.py

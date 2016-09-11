@@ -21,9 +21,9 @@ import config as cfg
 def sdb_www_get_samples():
     """Get a list of samples
     
-    Get a list of samples from the database. Add "all" and "public" samples,
-    "public" might not show everything in the list, but "all" will (but
-    may not be visible to anyone).
+    Get a list of samples from the database. Add "everything" and "public"
+    samples, "public" might not show everything in the list, but
+    "everything" will (but may not be visible to anyone).
     """
     
     cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -108,7 +108,7 @@ def sdb_www_sample_tables():
         # here we decide which samples get all targets, for now "everything" and "public"
         # get everything, but this could be changed so that "public" is some subset of
         # "everything"
-        if sample == 'all' or sample == 'public':
+        if sample == 'everything' or sample == 'public':
             sel += " FROM sdb_pm"
         else:
             sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
@@ -120,7 +120,11 @@ def sdb_www_sample_tables():
                 " LEFT JOIN hip USING (sdbid)"
                 " LEFT JOIN gj USING (sdbid)"
                 " LEFT JOIN phot USING (sdbid)"
-                " ORDER by RA;")
+                " ORDER by RA")
+        # limit table sizes
+        if sample != 'everything':
+            sel += " LIMIT "+str(cfg.www['tablemax'])+";"
+            
         cursor.execute(sel)
         tsamp = Table(names=cursor.column_names,
                       dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f'))
@@ -134,7 +138,7 @@ def sdb_www_sample_tables():
         fd = open(wwwroot+sample+'/table.html','w')
 #        tsamp.write(fd,format='ascii.html',htmldict={'raw_html_cols':['sdbid','Simbad','Finder'],
 #                                                     'raw_html_clean_kwargs':{'attributes':{'a':['href','target']}} })
-        jsviewer.write_table_jsviewer(tsamp,fd,max_lines=cfg.www['tablemax'],table_id=sample,
+        jsviewer.write_table_jsviewer(tsamp,fd,max_lines=10000,table_id=sample,
                                       table_class="display compact",jskwargs={'display_length':100},
                                       raw_html_cols=['sdbid','Simbad','Finder'],
                                       raw_html_clean_kwargs={'attributes':{'a':['href','target']}} )
@@ -161,29 +165,52 @@ def sdb_www_sample_plots():
 
         print("    sample:",sample)
 
-        # get data
-        sel = "SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist "
-        if sample == 'all' or sample == 'public':
-            sel += " FROM sdb_pm"
+        # get data, ensure primary axes are not nans
+        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist"
+        selnum = "SELECT COUNT(*)"
+        if sample == 'everything' or sample == 'public':
+            selall += " FROM sdb_pm"
+            selnum += " FROM sdb_pm"
         else:
-            sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
-        sel += (" LEFT JOIN simbad USING (sdbid)"
-                " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
-                " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name;")
-        cursor.execute(sel)
-        t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
-        for row in cursor:
-            t.add_row(row)
-        print("    got ",len(t)," rows")
+            selall += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
+            selnum += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
+        selall += (" LEFT JOIN simbad USING (sdbid)"
+                   " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
+                   " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name")
+        selnum += (" LEFT JOIN simbad USING (sdbid)"
+                   " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
+                   " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name")
+        selall += " WHERE teff IS NOT NULL AND lstar IS NOT NULL"
+        # limit table sizes
+        if sample != 'everything':
+            selall += " LIMIT "+str(cfg.www['tablemax'])+";"
+        cursor.execute(selnum)
+        ntot = cursor.fetchall()[0][0]
+        cursor.execute(selall)
+        t = {}
+        allsql = cursor.fetchall()
+        ngot = len(allsql)
+        print("    got ",ngot," rows")
+        l = list(zip(*allsql))
+        keys = cursor.column_names
+        ftypes = [None,None,float,float,float,float]
+        for i in range(len(keys)):
+            t[keys[i]]=np.array(l[i],dtype=ftypes[i])
+        data = ColumnDataSource(data=t)   
 
-        # convert to dict via pandas dataframe, need to convert byte strings to plain(?)
-        # strings for bokeh to be happy
-        data = ColumnDataSource.from_df(t.to_pandas())
-        for i in range(len(data['sdbid'])):
-            data['sdbid'][i] = data['sdbid'][i].decode()
-            data['main_id'][i] = data['main_id'][i].decode()
-        data = ColumnDataSource(data=data)
-
+        # this way is much slower
+        ## t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
+        ## for row in cursor:
+        ##     t.add_row(row)
+        ## ngot = len(t)
+        ## print("    got ",ngot," rows")
+        ## # need to convert byte strings to plain(?) strings for bokeh to be happy.
+        ## dat = ColumnDataSource.from_df(t.to_pandas())
+        ## for i in range(len(dat['sdbid'])):
+        ##     dat['sdbid'][i] = dat['sdbid'][i].decode()
+        ##     dat['main_id'][i] = dat['main_id'][i].decode()
+        ## data = ColumnDataSource(data=dat)
+        
         # remove the plot file to avoid overwrite warnings
         plfile = wwwroot+sample+"/hr.html"
         if isfile(plfile):
@@ -194,14 +221,15 @@ def sdb_www_sample_plots():
         cr = np.array([np.nanmin(np.log(t['ldisklstar'])),np.nanmax(np.log(t['ldisklstar']))])
         ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
         ok = np.isfinite(ci)
-        col = np.empty(len(t),dtype='U7')
+        col = np.empty(ngot,dtype='U7')
         col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
         col[col==''] = '#969696'
 
         hover = HoverTool(tooltips=[("name","@main_id")])
         
         tools = ['wheel_zoom,box_zoom,resize,save,reset',hover]
-        p = figure(title="HR diagram for "+sample,tools=tools,active_scroll='wheel_zoom',
+        p = figure(title="HR diagram for "+sample+" ("+str(ngot)+" of "+str(ntot)+")",
+                   tools=tools,active_scroll='wheel_zoom',
                    x_axis_label='Effective temperature / K',y_axis_label='Stellar luminosity / Solar',
                    y_axis_type="log",y_range=(0.5*min(t['lstar']),max(t['lstar'])*2),
                    x_range=(300+max(t['teff']),min(t['teff'])-300) )

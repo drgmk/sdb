@@ -36,7 +36,7 @@ def sdb_write_rawphot(file,tphot,tspec):
         print("{}={}".format(tspec.meta[key],key),file=fh)
     print('',file=fh)
     tphot.rename_column('Band','#Band')
-    tphot.write(fh,format='ascii.fixed_width',delimiter=' ')
+    tphot.write(fh,format='ascii.fixed_width',delimiter='|')
     tphot.rename_column('#Band','Band')
     fh.close()
 
@@ -107,7 +107,8 @@ def sdb_getphot_one(id):
     cursor.execute('SELECT main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode from simbad WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
     vals = cursor.fetchall()
     keys = cursor.column_names
-    tphot.meta = OrderedDict( zip(keys,tuple(vals[0])) )
+    if len(vals) > 0:
+        tphot.meta = OrderedDict( zip(keys,tuple(vals[0])) )
     tphot.meta['id'] = sdbid
 
     # get aors for any spectra and add file names
@@ -145,7 +146,7 @@ def sdb_getphot_one(id):
     # if there wasn't any photometry or spectra, then there's nothing to do
     if len(tpriv) == 0:
         print("No photometry or spectra for {}, exiting".format(sdbid))
-        exit()
+        return
         
     # write file(s), organising things if there is private data
     sedroot = cfg.file['sedroot']+sdbid+'/'
@@ -197,7 +198,10 @@ def sdb_getphot_one(id):
 
         # see if update needed, if so move it, otherwise delete
         if filehash(tmpfile) != oldhash:
-            print(sdbid,dir,": Different hash, updating file")
+            if oldhash != '':
+                print(sdbid,dir,": Different hash, updating file")
+            else:
+                print(sdbid,dir,": Creating file")
             rename(tmpfile,seddir+filename)
         else:
             print(sdbid,dir,": Same hash, leaving old file")
@@ -229,6 +233,7 @@ if __name__ == "__main__":
     parser.add_argument('--idlist','-i',nargs='+',action='append',
                         dest='idlist',metavar='sdbid',help='Get photometry for one sdbid')
     parser.add_argument('--sample','-s',type=str,metavar='table',help='Get photometry for sample')
+    parser.add_argument('--all','-a',action='store_true',help='Get all photometry')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
                          default=cfg.mysql['sampledb'],metavar=cfg.mysql['sampledb'])
     args = parser1.parse_args()
@@ -236,12 +241,19 @@ if __name__ == "__main__":
     if args.idlist != None:
         print("Running sdb_getphot for list:",args.idlist[0])
         sdb_getphot(args.idlist[0])
-    else:
+    elif args.sample != None:
         print("Running sdb_getphot for targets in sample:",args.sample)
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
                                       host=cfg.mysql['host'],database=args.dbname)
         cursor = cnx.cursor(buffered=True)
         cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+";")
         for id in cursor:
-#            print(id)
+            sdb_getphot_one(id[0])
+    elif args.all != None:
+        print("Running sdb_getphot for all targets")
+        cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
+                                      host=cfg.mysql['host'],database='sdb')
+        cursor = cnx.cursor(buffered=True)
+        cursor.execute("SELECT sdbid FROM sdb_pm;")
+        for id in cursor:
             sdb_getphot_one(id[0])
