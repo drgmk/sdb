@@ -6,15 +6,16 @@ ALTER TABLE sdb_pm ADD PRIMARY KEY (sdbid);
 
 ALTER TABLE projects DROP FOREIGN KEY sdbid_pr;
 ALTER TABLE projects DROP PRIMARY KEY;
-ALTER TABLE projects ADD PRIMARY KEY sdbid_pr (sdbid,project);
+ALTER TABLE projects ADD PRIMARY KEY (sdbid,project);
 ALTER TABLE projects ADD CONSTRAINT sdbid_pr FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
 
-ALTER TABLE xids DROP FOREIGN KEY sdb_pm;
+/* no foreign key for xids as xid is case sensitive (different character set) */
+ALTER TABLE xids DROP INDEX sdbid_sdbid;
+ALTER TABLE xids DROP INDEX sdbid_xid;
 ALTER TABLE xids DROP PRIMARY KEY;
 ALTER TABLE xids ADD PRIMARY KEY (sdbid,xid);
-ALTER TABLE xids ADD FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
-ALTER TABLE xids ADD UNIQUE (xid);
-ALTER TABLE xids MODIFY xid VARCHAR(100);
+ALTER TABLE xids ADD INDEX sdbid_sdbid (sdbid);
+ALTER TABLE xids ADD UNIQUE sdbid_xid (xid);
 
 ALTER TABLE 2mass DROP FOREIGN KEY sdbid_2m;
 ALTER TABLE 2mass DROP PRIMARY KEY;
