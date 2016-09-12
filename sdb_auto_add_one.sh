@@ -23,8 +23,8 @@ site=fr             # vizquery site
 # the basic stilts command to use, no -Xms1g -Xmx1g since presumably little memory needed
 stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
 
-# sanitize input, only alphanumeric and spaces should do it
-idin=${1//[^a-zA-Z0-9 ]/}
+# sanitize input, only alphanumeric, pluses, minuses, and spaces should do it
+idin=${1//[^a-zA-Z0-9-+ ]/}
 
 # Look up with sesame
 echo "Sesame using:$idin"
@@ -67,6 +67,5 @@ echo "sdb_csv2xdr,'$sdbid/public/$sdbid-rawphot.txt'" | idl
 echo "sedfitg,/AUTO,xdr='$sdbid/public/$sdbid.xdr',/COMPLETE" | idl
 popd
 
-# report success and remove the lock file
-echo $sdbid
+# remove the lock file
 rm $lock

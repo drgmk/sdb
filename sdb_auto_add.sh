@@ -21,7 +21,7 @@ then
 
     while read -r line
     do
-	id=${line//[^a-zA-Z0-9 ]/}
+	id=${line//[^a-zA-Z0-9-+ ]/}
 	echo "Got:""$id"
 	./sdb_auto_add_one.sh "$id"
 	
