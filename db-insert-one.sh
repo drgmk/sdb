@@ -129,7 +129,7 @@ sdbid=$sdbprefix`$stilts tpipe in=$ft ifmt=csv cmd='random' cmd='replacecol ra d
 echo "Source id is:$sdbid"
 
 # finally, see if we have this sbdid already
-res=$(mysql --user=$user --password=$password $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
+res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
@@ -137,7 +137,7 @@ then
 else
     echo "New target, going ahead"
 fi
-mysql --user=$user --password=$password $db -e "DELETE FROM xids WHERE sdbid='$sdbid';"
+mysql $db -e "DELETE FROM xids WHERE sdbid='$sdbid';"
 
 # create temp file with sdbid in it, will use multiple times below including being added
 # as a xid. using an ascii table here works better since the header isn't recognised when
@@ -169,7 +169,7 @@ then
 fi
 
 # sanity check, that no xid matches the given id for another sdbid
-res=$(mysql --user=$user --password=$password $db -N -e "SELECT sdbid,xid FROM xids WHERE xid='$id' and sdbid != '$sdbid';")
+res=$(mysql $db -N -e "SELECT sdbid,xid FROM xids WHERE xid='$id' and sdbid != '$sdbid';")
 if [ "$res" != "" ]
 then
     echo "\nERROR: Found xid for $id different to sdbid: $sdbid"
@@ -183,7 +183,7 @@ fi
 if [ "$id" != "" -a 1 == 1 ]
 then
     # check we don't have it as an xid already
-    res=$(mysql --user=$user --password=$password $db -N -e "SELECT xid FROM xids WHERE xid='$id';")
+    res=$(mysql $db -N -e "SELECT xid FROM xids WHERE xid='$id';")
     if [ "$res" == "" ]
     then
 	echo "\nAdding given id as an xid"
@@ -200,7 +200,7 @@ $stilts tpipe in=$ft ifmt=ascii cmd='random' omode=tosql protocol=mysql db=$sdb 
 
 # IRAS FSC, this catalogue has FK5 positions at epoch 1983.5. assume IRAS ellipse
 # uncertainty much larger than search position. grab subset of IRAS within 10deg first
-res=$(mysql --user=$user --password=$password $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS F');")
+res=$(mysql $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS F');")
 if [[ $res == "" ]]
 then
     echo "\nIRAS FSC ID not present, looking"
@@ -211,7 +211,7 @@ else
 fi
 
 # IRAS PSC, as above
-res=$(mysql --user=$user --password=$password $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS [0-9]');")
+res=$(mysql $db -N -e "SELECT xid FROM xids WHERE sdbid='$sdbid' and xid REGEXP('^IRAS [0-9]');")
 if [[ $res == "" ]]
 then
     echo "\nIRAS PSC ID not present, looking"
@@ -226,26 +226,26 @@ fi
 
 # Tycho-2, query against 1991.25 position
 echo "\nLooking for Tycho-2 entry"
-coty=$(mysql --user=$user --password=$password $db -N -e "SELECT CONCAT(ra_ep1991p25,',',de_ep1991p25) FROM sdb_pm WHERE sdbid='$sdbid';")
+coty=$(mysql $db -N -e "SELECT CONCAT(ra_ep1991p25,',',de_ep1991p25) FROM sdb_pm WHERE sdbid='$sdbid';")
 echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
-cotm=$(mysql --user=$user --password=$password $db -N -e "SELECT CONCAT(ra_ep1999p3,',',de_ep1999p3) FROM sdb_pm WHERE sdbid='$sdbid';")
+cotm=$(mysql $db -N -e "SELECT CONCAT(ra_ep1999p3,',',de_ep1999p3) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=2mass -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$cotm" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=2mass write=$mode
 
 # ALLWISE, assume 2010.3, midway through cryo lifetime
 echo "\nLooking for ALLWISE entry"
-cowise=$(mysql --user=$user --password=$password $db -N -e "SELECT CONCAT(ra_ep2010p3,',',de_ep2010p3) FROM sdb_pm WHERE sdbid='$sdbid';")
+cowise=$(mysql $db -N -e "SELECT CONCAT(ra_ep2010p3,',',de_ep2010p3) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=II/328/allwise -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$cowise" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=allwise write=$mode
 
 # AKARI IRC, assume 2007.0, midway through survey
 echo "\nLooking for AKARI IRC entry"
-coirc=$(mysql --user=$user --password=$password $db -N -e "SELECT CONCAT(ra_ep2007p0,',',de_ep2007p0) FROM sdb_pm WHERE sdbid='$sdbid';")
+coirc=$(mysql $db -N -e "SELECT CONCAT(ra_ep2007p0,',',de_ep2007p0) FROM sdb_pm WHERE sdbid='$sdbid';")
 vizquery -site=$site -mime=votable -source=II/297 -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$coirc" | grep -v "^#" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=akari_irc write=$mode
 

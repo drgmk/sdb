@@ -61,9 +61,9 @@ def sdb_www_sample_tables():
         if not isdir(wwwroot+sample):
             mkdir(wwwroot+sample)
 
-        # make .htaccess if needed, don't put one in "public" so stuff in that directory
-        # remains to those not logged in
-        if not isfile(wwwroot+sample+'/.htaccess') and sample != 'public':
+        # make .htaccess if needed, don't put one in "public" or those starting with "_"
+        # so stuff in those directories remains visible to those not logged in
+        if not isfile(wwwroot+sample+'/.htaccess') and sample[0] != '_' and sample != 'public':
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
@@ -103,7 +103,8 @@ def sdb_www_sample_tables():
                "teff as Teff,"
                "ROUND(log10(lstar),2) as LogLstar,"
                "1e3/plx_value as Dist,"
-               "ROUND(log10(ldisklstar),1) as Log_f")
+               "ROUND(log10(ldisklstar),1) as Log_f,"
+               "tdisk_cold as T_disk")
             
         # here we decide which samples get all targets, for now "everything" and "public"
         # get everything, but this could be changed so that "public" is some subset of
@@ -127,7 +128,7 @@ def sdb_www_sample_tables():
             
         cursor.execute(sel)
         tsamp = Table(names=cursor.column_names,
-                      dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f'))
+                      dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f','f'))
         for row in cursor:
             tsamp.add_row(row)
         print("    got ",len(tsamp)," rows")
