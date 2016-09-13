@@ -61,9 +61,9 @@ def sdb_www_sample_tables():
         if not isdir(wwwroot+sample):
             mkdir(wwwroot+sample)
 
-        # make .htaccess if needed, don't put one in "public" or those starting with "_"
+        # make .htaccess if needed, don't put one in "public" or those ending with "_"
         # so stuff in those directories remains visible to those not logged in
-        if not isfile(wwwroot+sample+'/.htaccess') and sample[0] != '_' and sample != 'public':
+        if not isfile(wwwroot+sample+'/.htaccess') and sample[-1] != '_' and sample != 'public':
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
