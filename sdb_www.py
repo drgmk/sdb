@@ -32,6 +32,7 @@ def sdb_www_get_samples():
     cursor.execute("SELECT DISTINCT project FROM projects;")
     samples = cursor.fetchall() # a list of tuples
     samples = [i[0] for i in samples]
+    cursor.close()
     cnx.close()
     return( samples + ['public','everything'] )
 
@@ -145,6 +146,7 @@ def sdb_www_sample_tables():
                                       raw_html_clean_kwargs={'attributes':{'a':['href','target']}} )
         fd.close()
 
+    cursor.close()
     cnx.close()
 
 def sdb_www_sample_plots():
@@ -238,6 +240,7 @@ def sdb_www_sample_plots():
                  fill_alpha=0.6,line_color=None)
         save(p)
 
+    cursor.close()
     cnx.close()
 
             

@@ -116,6 +116,9 @@ def sdb_getphot_one(id):
     for row in cursor:
         tspec.add_row(row)
 
+    cursor.close()
+    cnx.close()
+
     # add empty column for file names
     add = np.chararray(len(tspec),itemsize=200)
     add[:] = ''
@@ -248,6 +251,8 @@ if __name__ == "__main__":
         cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+";")
         for id in cursor:
             sdb_getphot_one(id[0])
+        cursor.close()
+        cnx.close()
     elif args.all != None:
         print("Running sdb_getphot for all targets")
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
@@ -256,3 +261,5 @@ if __name__ == "__main__":
         cursor.execute("SELECT sdbid FROM sdb_pm;")
         for id in cursor:
             sdb_getphot_one(id[0])
+        cursor.close()
+        cnx.close()
