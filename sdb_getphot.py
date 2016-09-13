@@ -35,9 +35,10 @@ def sdb_write_rawphot(file,tphot,tspec):
     for key in tspec.meta:
         print("{}={}".format(tspec.meta[key],key),file=fh)
     print('',file=fh)
-    tphot.rename_column('Band','#Band')
-    tphot.write(fh,format='ascii.fixed_width',delimiter='|')
-    tphot.rename_column('#Band','Band')
+    if len(tphot) > 0:
+        tphot.rename_column('Band','#Band')
+        tphot.write(fh,format='ascii.fixed_width',delimiter='|')
+        tphot.rename_column('#Band','Band')
     fh.close()
 
 def filehash(file):
@@ -73,8 +74,6 @@ def sdb_getphot_one(id):
        print("Found multiple sdbids for given ID {}, exiting".format(id))
        exit()
     sdbid = cursor.fetchall()[0][0].decode()
-    cursor.execute('SELECT DISTINCT xid FROM xids WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
-    xids = cursor.fetchall()
 
     # make cross id table to match on
     cursor.execute('DROP TABLE IF EXISTS TheIDs;')

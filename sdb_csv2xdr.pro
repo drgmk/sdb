@@ -92,7 +92,7 @@ pro sdb_csv2xdr,file
         endif
         if STREGEX(ls[i],'plx_value',/FOLD_CASE,/BOOLEAN) then begin
            tmp = STRSPLIT(ls[i],'=',/EXTRACT)
-           dist = 1e3/FLOAT(tmp[1])
+           if tmp[1] eq 'None' then dist = !VALUES.F_NAN else dist = 1e3/FLOAT(tmp[1])
         endif
         if STREGEX(ls[i],'irsstare',/FOLD_CASE,/BOOLEAN) then begin
            tmp = STRSPLIT(ls[i],'=',/EXTRACT)
@@ -125,11 +125,16 @@ pro sdb_csv2xdr,file
      endif
   endfor
 
+  nphot = N_ELEMENTS(band)
+  if nphot eq 0 then begin
+     print,"No photometry in "+file+", so no xdr (may be spectra)'
+     return
+  endif
+  
   ;; rawdata
   rawdata = ls
   flux = meas
   err = errs
-  nphot = N_ELEMENTS(band)
 
   rawphot = {nphot:nphot,band:band,meas:meas,err:err,syserr:syserr,unit:unit,lim:lim,ref:ref,note1:STRARR(nphot),note2:STRARR(nphot),id:STRARR(nphot),irs:{ok:0,other:''}}
 
