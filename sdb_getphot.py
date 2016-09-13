@@ -73,7 +73,7 @@ def sdb_getphot_one(id):
     if cursor.rowcount > 1:
        print("Found multiple sdbids for given ID {}, exiting".format(id))
        exit()
-    sdbid = cursor.fetchall()[0][0].decode()
+    sdbid = cursor.fetchall()[0][0]
 
     # make cross id table to match on
     cursor.execute('DROP TABLE IF EXISTS TheIDs;')

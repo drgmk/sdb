@@ -1,3 +1,5 @@
+/* all tables are case-INsensitive, so that means cross-matching */
+
 /* KEYS - run this after recreating all tables with dropcreate, make sure this is done
    with something found for all tables to get field lengths correct (hd181327). then change
    to append and run once without exiting for duplicates, then uncomment and go ahead... */
@@ -9,13 +11,12 @@ ALTER TABLE projects DROP PRIMARY KEY;
 ALTER TABLE projects ADD PRIMARY KEY (sdbid,project);
 ALTER TABLE projects ADD CONSTRAINT sdbid_pr FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
 
-/* no foreign key for xids as xid is case sensitive (different character set) */
+ALTER TABLE xids DROP FOREIGN KEY sdbid_sdbid;
 ALTER TABLE xids DROP INDEX sdbid_sdbid;
-ALTER TABLE xids DROP INDEX sdbid_xid;
 ALTER TABLE xids DROP PRIMARY KEY;
 ALTER TABLE xids ADD PRIMARY KEY (sdbid,xid);
 ALTER TABLE xids ADD INDEX sdbid_sdbid (sdbid);
-ALTER TABLE xids ADD UNIQUE sdbid_xid (xid);
+ALTER TABLE xids ADD CONSTRAINT sdbid_sdbid FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
 
 ALTER TABLE 2mass DROP FOREIGN KEY sdbid_2m;
 ALTER TABLE 2mass DROP PRIMARY KEY;

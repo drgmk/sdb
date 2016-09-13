@@ -133,7 +133,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-    exit
+#    exit
 else
     echo "New target, going ahead"
 fi
@@ -157,10 +157,10 @@ $stilts sqlclient db='jdbc:mysql://localhost/'$sdb user=$user password=$password
 if [ "$id" != "" ]
 then
     echo "\nUsing id $id to find xids"
-    # xids
+    # xids, remove duplicates that just have different case, sql setup is case-insensitive
     cid=`echo "$id" | sed 's/ /%20/g' | sed 's/+/%2B/g' | sed 's/\*/%2A/g' | sed 's/\[/%5B/g' | sed 's/\]/%5D/g'`
     csdbid=`echo "$sdbid" | sed 's/+/%2B/g'`
-    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20%27$csdbid%27%20as%20sdbid,id2.id%20as%20xid%20FROM%20ident%20AS%20id1%20JOIN%20ident%20AS%20id2%20USING(oidref)%20WHERE%20id1.id=%27$cid%27;" | $stilts tpipe in=- ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=xids write=$mode
+    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20%27$csdbid%27%20as%20sdbid,id2.id%20as%20xid%20FROM%20ident%20AS%20id1%20JOIN%20ident%20AS%20id2%20USING(oidref)%20WHERE%20id1.id=%27$cid%27;" | $stilts tpipe in=- ifmt=votable cmd='random' cmd='addcol xiduc toUpperCase(xid)' cmd='sort xiduc' cmd='uniq xiduc' cmd='delcols xiduc' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=xids write=$mode
 
     # simbad
     echo "\nUsing id $id to find simbad info"
