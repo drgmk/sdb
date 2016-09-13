@@ -14,7 +14,8 @@
 
 root=/Users/grant/astro/projects/sdb/sdb/
 pushd $root
-add=$root../auto_add/add.txt
+logroot=/Users/grant/a-extra/sdb/log/
+add=$logroot../auto_add/add.txt
 
 if [ -e $add ]
 then
@@ -23,7 +24,8 @@ then
     do
 	id=${line//[^a-zA-Z0-9-+ ]/}
 	echo "Got:""$id"
-	./sdb_auto_add_one.sh "$id"
+	logname=${id//[^a-zA-Z0-9-+]/}_$(date +"%Y%m%d-%H%M%S")
+	./sdb_auto_add_one.sh "$id" &> "$logroot""$logname".log
 	
     done < $add
     

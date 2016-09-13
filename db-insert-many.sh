@@ -5,6 +5,7 @@
 
 db=sdb
 dbroot=/Users/grant/astro/projects/sdb/
+logroot=/Users/grant/a-extra/sdb/log/
 
 if [ "$#" -gt 1 ]
 then
@@ -17,7 +18,7 @@ fi
 mysql $db -N -e "SELECT $name FROM $1" | while read name
 do
     echo getting:"$name"
-    "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$dbroot"logs/"$name".log
+    "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$logroot""$name".log
 done
 
 proj=`echo $1 | sed "s/.*\.//"`
