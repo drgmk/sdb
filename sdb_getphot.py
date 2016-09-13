@@ -72,7 +72,7 @@ def sdb_getphot_one(id):
     if cursor.rowcount > 1:
        print("Found multiple sdbids for given ID {}, exiting".format(id))
        exit()
-    sdbid = cursor.fetchall()[0][0]
+    sdbid = cursor.fetchall()[0][0].decode()
     cursor.execute('SELECT DISTINCT xid FROM xids WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
     xids = cursor.fetchall()
 
