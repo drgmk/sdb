@@ -11,6 +11,7 @@ import numpy as np
 from bokeh.plotting import figure,output_file,save,ColumnDataSource
 import bokeh.palettes
 from bokeh.models import HoverTool
+from bokeh.layouts import gridplot,layout
 from os.path import isdir,isfile
 from os import mkdir,remove,write
 from astropy.table import Table,jsviewer
@@ -169,7 +170,7 @@ def sdb_www_sample_plots():
         print("    sample:",sample)
 
         # get data, ensure primary axes are not nans
-        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,1e3/plx_value as dist"
+        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,tdisk_cold,1e3/plx_value as dist"
         selnum = "SELECT COUNT(*)"
         if sample == 'everything' or sample == 'public':
             selall += " FROM sdb_pm"
@@ -196,24 +197,11 @@ def sdb_www_sample_plots():
         print("    got ",ngot," rows")
         l = list(zip(*allsql))
         keys = cursor.column_names
-        ftypes = [None,None,float,float,float,float]
+        ftypes = [None,None,float,float,float,float,float]
         for i in range(len(keys)):
             t[keys[i]]=np.array(l[i],dtype=ftypes[i])
         data = ColumnDataSource(data=t)   
-
-        # this way is much slower
-        ## t = Table(names=cursor.column_names,dtype=('S25','S100','f','f','f','f'))
-        ## for row in cursor:
-        ##     t.add_row(row)
-        ## ngot = len(t)
-        ## print("    got ",ngot," rows")
-        ## # need to convert byte strings to plain(?) strings for bokeh to be happy.
-        ## dat = ColumnDataSource.from_df(t.to_pandas())
-        ## for i in range(len(dat['sdbid'])):
-        ##     dat['sdbid'][i] = dat['sdbid'][i].decode()
-        ##     dat['main_id'][i] = dat['main_id'][i].decode()
-        ## data = ColumnDataSource(data=dat)
-        
+       
         # remove the plot file to avoid overwrite warnings
         plfile = wwwroot+sample+"/hr.html"
         if isfile(plfile):
@@ -228,16 +216,31 @@ def sdb_www_sample_plots():
         col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
         col[col==''] = '#969696'
 
-        hover = HoverTool(tooltips=[("name","@main_id")])
-        
-        tools = ['wheel_zoom,box_zoom,resize,save,reset',hover]
-        p = figure(title="HR diagram for "+sample+" ("+str(ngot)+" of "+str(ntot)+")",
-                   tools=tools,active_scroll='wheel_zoom',
-                   x_axis_label='Effective temperature / K',y_axis_label='Stellar luminosity / Solar',
-                   y_axis_type="log",y_range=(0.5*min(t['lstar']),max(t['lstar'])*2),
-                   x_range=(300+max(t['teff']),min(t['teff'])-300) )
-        p.circle('teff','lstar',source=data,size=10,fill_color=col,
-                 fill_alpha=0.6,line_color=None)
+        # TODO: hover in one highlights in the other
+        hover1 = HoverTool(tooltips=[("name","@main_id")])
+        hover2 = HoverTool(tooltips=[("name","@main_id")])
+        tools1 = ['wheel_zoom,box_zoom,box_select,tap,save,reset',hover1]
+        tools2 = ['wheel_zoom,box_zoom,box_select,tap,save,reset',hover2]
+
+        # hr diagram
+        hr = figure(title="diagrams for "+sample+" ("+str(ngot)+" of "+str(ntot)+")",
+                    tools=tools1,active_scroll='wheel_zoom',
+                    x_axis_label='Effective temperature / K',y_axis_label='Stellar luminosity / Solar',
+                    y_axis_type="log",y_range=(0.5*min(t['lstar']),max(t['lstar'])*2),
+                    x_range=(300+max(t['teff']),min(t['teff'])-300) )
+        hr.circle('teff','lstar',source=data,size=10,fill_color=col,
+                  fill_alpha=0.6,line_color=None)
+
+        # f vs temp
+        ft = figure(tools=tools2,active_scroll='wheel_zoom',
+                    x_axis_label='Disk temperature / K',y_axis_label='Disk fractional luminosity',
+                    y_axis_type="log",y_range=(0.5*min(t['ldisklstar']),max(t['ldisklstar'])*2),
+                    x_axis_type="log",x_range=(0.5*min(t['tdisk_cold']),max(t['tdisk_cold'])*2) )
+        ft.circle('tdisk_cold','ldisklstar',source=data,size=10,fill_color=col,
+                  fill_alpha=0.6,line_color=None)
+
+        p = gridplot([[hr,ft]],sizing_mode='stretch_both',
+                     toolbar_location='above')
         save(p)
 
     cursor.close()
