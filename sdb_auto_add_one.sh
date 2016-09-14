@@ -19,6 +19,7 @@ eval $tmp
 # other knobs as required
 rad=2               # rad is the default match radius in arcsec
 site=fr             # vizquery site
+echo "------- sdb_auto_add_one.sh --------"
 
 # the basic stilts command to use, no -Xms1g -Xmx1g since presumably little memory needed
 stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
@@ -30,6 +31,21 @@ idin=${1//[^a-zA-Z0-9-+ ]/}
 echo "Sesame using:$idin"
 id="`sesame $idin | egrep -w 'oname' | sed s/\<oname\>// | sed s/\<\\\/oname\>//`"
 id=`echo "$id" | sed "s/^ *//g"`
+
+# or try coord based query instead
+if [ "$id" == "" ]
+then
+    echo "Fail, attempting to interpret as coords"
+    co=`sesame "$idin" | egrep -w 'jradeg|jdedeg'`
+    cojoin=${co//[$'\n']/,}
+    cojoin=${cojoin//[^0-9+,\.]/}
+    if [ "$cojoin" != "" ]
+    then
+	echo "Success, looks like a coordinate"
+	id="$idin"
+    fi
+fi
+
 if [ "$id" == "" ]
 then
     echo "Sesame found nothing for:""$1"

@@ -81,8 +81,9 @@ fi
 if [ "$id" != "" ]
 then
     echo "\nSesame using name:$id"
-    co=`sesame "$id" | egrep -w 'jradeg|jdedeg' | sed s/\<jradeg\>// | sed s/\<\\\\/jradeg\>// | sed s/\<jdedeg\>// | sed s/\<\\\\/jdedeg\>//`
-    cojoin=`echo $co | sed "s/ /,/"`
+    co=`sesame "$id" | egrep -w 'jradeg|jdedeg'`
+    cojoin=${co//[$'\n']/,}
+    cojoin=${cojoin//[^0-9+\-,\.]/}
     ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
     if [ "$cojoin" == "" ]
@@ -100,10 +101,11 @@ echo "Final set of coords:$cojoin"
 
 # now try to find something at these coords in a table with proper motions, this will
 # allow use of epoch-corrected coords when searching for matches in other tables
-# below. put in a file to use again below. dates we want are: 2000.0 (sdbid), 2010.3
-# (WISE), 2007.0 (AKARI,Spitzer), 1999.3 (2MASS), 1991.25 (HIP/Tyc), 1983.5 (IRAS in J2000)
+# below. put in a file to use again below. dates we want are: 2000.0 (sdbid), 2015.0
+# (TGAS), 2010.3 (WISE), 2007.0 (AKARI,Spitzer), 1999.3 (2MASS), 1991.25 (HIP/Tyc),
+# 1983.5 (IRAS in J2000)
 echo "\nLooking in proper motion catalogues"
-vizquery -site=$site -mime=votable -source=I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" > $fp
+vizquery -site=$site -mime=votable -source=I/377/tgas,I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" -out="_RA(J2000,2015.0)" -out="_DE(J2000,2015.0)" > $fp
 
 # update coordinates if sucessful, otherwise propogate the previous coords to all epochs
 cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
@@ -115,7 +117,7 @@ then
 else
     # contingency for no pm matches needed here! (give everything input coord)
     echo "No pm source found, keeping:$cojoin and assuming this for all epochs"
-    echo "_r,_raj2000,_dej2000,_raj2000_1,_dej2000_1,_raj2000_2,_dej2000_2,_raj2000_3,_dej2000_3,_raj2000_4,_dej2000_4,_raj2000_5,_dej2000_5" > $ft
+    echo "_r,_raj2000,_dej2000,_raj2000_1,_dej2000_1,_raj2000_2,_dej2000_2,_raj2000_3,_dej2000_3,_raj2000_4,_dej2000_4,_raj2000_5,_dej2000_5,_raj2000_6,_dej2000_6" > $ft
     echo "-1.0,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin" >> $ft
     $stilts tpipe in=$ft ifmt=csv cmd='random' omode=out out=- ofmt=votable > $fp
 fi
@@ -133,7 +135,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-#    exit
+    exit
 else
     echo "New target, going ahead"
 fi
@@ -149,7 +151,7 @@ echo $sdbid $sdbid >> $ft
 # keep closest row with proper motions for later, add sdbid and rename columns to be
 # clearer, grab this back out and update the $fp file
 echo "\nWriting proper motion info to db"
-$stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1="keepcols sdbid" in2=$fp ifmt2=votable icmd2="sort _r" icmd2="rowrange 1 1" icmd2="colmeta -name raj2000 _raj2000" icmd2="colmeta -name dej2000 _dej2000" icmd2="colmeta -name ra_ep2010p3 _raj2000_1" icmd2="colmeta -name de_ep2010p3 _dej2000_1" icmd2="colmeta -name ra_ep2007p0 _raj2000_2" icmd2="colmeta -name de_ep2007p0 _dej2000_2" icmd2="colmeta -name ra_ep1999p3 _raj2000_3" icmd2="colmeta -name de_ep1999p3 _dej2000_3" icmd2="colmeta -name ra_ep1991p25 _raj2000_4" icmd2="colmeta -name de_ep1991p25 _dej2000_4" icmd2="colmeta -name ra_ep1983p5 _raj2000_5" icmd2="colmeta -name de_ep1983p5 _dej2000_5" ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=sdb_pm write=$mode
+$stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1="keepcols sdbid" in2=$fp ifmt2=votable icmd2="sort _r" icmd2="rowrange 1 1" icmd2="colmeta -name raj2000 _raj2000" icmd2="colmeta -name dej2000 _dej2000" icmd2="colmeta -name ra_ep2010p3 _raj2000_1" icmd2="colmeta -name de_ep2010p3 _dej2000_1" icmd2="colmeta -name ra_ep2007p0 _raj2000_2" icmd2="colmeta -name de_ep2007p0 _dej2000_2" icmd2="colmeta -name ra_ep1999p3 _raj2000_3" icmd2="colmeta -name de_ep1999p3 _dej2000_3" icmd2="colmeta -name ra_ep1991p25 _raj2000_4" icmd2="colmeta -name de_ep1991p25 _dej2000_4" icmd2="colmeta -name ra_ep1983p5 _raj2000_5" icmd2="colmeta -name de_ep1983p5 _dej2000_5" icmd2="colmeta -name ra_ep2015p0 _raj2000_6" icmd2="colmeta -name de_ep2015p0 _dej2000_6" ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=sdb_pm write=$mode
 $stilts sqlclient db='jdbc:mysql://localhost/'$sdb user=$user password=$password sql="SELECT * from sdb_pm where sdbid = '$sdbid'" ofmt=votable > $fp
 
 # if we had success with sesame above, use this name to get a list of crossids from
