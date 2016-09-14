@@ -104,7 +104,7 @@ def sdb_www_sample_tables():
                "sp_type as SpType,"
                "teff as Teff,"
                "ROUND(log10(lstar),2) as LogLstar,"
-               "1e3/plx_value as Dist,"
+               "1e3/COALESCE(tgas.plx,simbad.plx_value) AS Dist,"
                "ROUND(log10(ldisklstar),1) as Log_f,"
                "tdisk_cold as T_disk")
             
@@ -117,6 +117,8 @@ def sdb_www_sample_tables():
             sel += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
             
         sel += (" LEFT JOIN simbad USING (sdbid)"
+                " LEFT JOIN tyc2 USING (sdbid)"
+                " LEFT JOIN photometry.tgas ON COALESCE(-tyc2.hip,tyc2.tyc2id)=tgas.tyc2hip"
                 " LEFT JOIN sed_stfit on sdbid=sed_stfit.name"
                 " LEFT JOIN sed_bbfit on sdbid=sed_bbfit.name"
                 " LEFT JOIN hd USING (sdbid)"
@@ -127,7 +129,8 @@ def sdb_www_sample_tables():
         # limit table sizes
         if sample != 'everything':
             sel += " LIMIT "+str(cfg.www['tablemax'])+";"
-            
+
+#        print(sel)
         cursor.execute(sel)
         tsamp = Table(names=cursor.column_names,
                       dtype=('S200','S200','S50','S50','S50','S1000','f','f','f','S10','f','f','f','f','f'))
@@ -170,7 +173,7 @@ def sdb_www_sample_plots():
         print("    sample:",sample)
 
         # get data, ensure primary axes are not nans
-        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,tdisk_cold,1e3/plx_value as dist"
+        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,tdisk_cold"
         selnum = "SELECT COUNT(*)"
         if sample == 'everything' or sample == 'public':
             selall += " FROM sdb_pm"
@@ -197,7 +200,7 @@ def sdb_www_sample_plots():
         print("    got ",ngot," rows")
         l = list(zip(*allsql))
         keys = cursor.column_names
-        ftypes = [None,None,float,float,float,float,float]
+        ftypes = [None,None,float,float,float,float]
         for i in range(len(keys)):
             t[keys[i]]=np.array(l[i],dtype=ftypes[i])
         data = ColumnDataSource(data=t)   

@@ -61,9 +61,9 @@ ALTER TABLE xmatch DROP PRIMARY KEY;
 ALTER TABLE xmatch ADD PRIMARY KEY (`table`,band);
 
 /* remove extra whitespace on names put in xids */
-CREATE TRIGGER xid_remove_whitespace BEFORE INSERT ON `sed_db`.xids FOR EACH ROW SET NEW.xid=trim(replace(replace(replace(replace(replace(NEW.xid,'  ',' '),'  ',' '),'  ',' '),'  ',' '),'  ',' '));
+CREATE TRIGGER xid_remove_whitespace BEFORE INSERT ON `sdb`.xids FOR EACH ROW SET NEW.xid=trim(replace(replace(replace(replace(replace(NEW.xid,'  ',' '),'  ',' '),'  ',' '),'  ',' '),'  ',' '));
 /* same for names in simbad table */
-CREATE TRIGGER simbad_remove_whitespace BEFORE INSERT ON `sed_db`.simbad FOR EACH ROW SET NEW.main_id=trim(replace(replace(replace(replace(replace(NEW.main_id,'  ',' '),'  ',' '),'  ',' '),'  ',' '),'  ',' '));
+CREATE TRIGGER simbad_remove_whitespace BEFORE INSERT ON `sdb`.simbad FOR EACH ROW SET NEW.main_id=trim(replace(replace(replace(replace(replace(NEW.main_id,'  ',' '),'  ',' '),'  ',' '),'  ',' '),'  ',' '));
 
 
 /* CODE */

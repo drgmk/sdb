@@ -7,7 +7,7 @@
 #
 # Host: localhost (MySQL 5.7.10)
 # Database: sdb
-# Generation Time: 2016-09-12 17:10:51 +0000
+# Generation Time: 2016-09-14 17:31:29 +0000
 # ************************************************************
 
 
@@ -152,6 +152,8 @@ CREATE TABLE `sdb_pm` (
   `de_ep1991p25` double DEFAULT NULL,
   `ra_ep1983p5` double DEFAULT NULL,
   `de_ep1983p5` double DEFAULT NULL,
+  `ra_ep2015p0` double DEFAULT NULL,
+  `de_ep2015p0` double DEFAULT NULL,
   PRIMARY KEY (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -492,6 +494,7 @@ DROP TABLE IF EXISTS `tyc2`;
 
 CREATE TABLE `tyc2` (
   `sdbid` varchar(25) NOT NULL,
+  `tyc2id` varchar(11) DEFAULT NULL,
   `_r` double DEFAULT NULL,
   `e_btmag` float DEFAULT NULL,
   `e_vtmag` float DEFAULT NULL,
@@ -508,6 +511,8 @@ CREATE TABLE `tyc2` (
   `ra_icrs_` double DEFAULT NULL,
   `de_icrs_` double DEFAULT NULL,
   PRIMARY KEY (`sdbid`),
+  UNIQUE KEY `tyc2id` (`tyc2id`),
+  KEY `hip` (`hip`),
   CONSTRAINT `sdbid_ty` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -519,11 +524,11 @@ CREATE TABLE `tyc2` (
 DROP TABLE IF EXISTS `xids`;
 
 CREATE TABLE `xids` (
-  `sdbid` varchar(25) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL DEFAULT '',
-  `xid` varchar(100) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,
+  `sdbid` varchar(25) NOT NULL DEFAULT '',
+  `xid` varchar(100) NOT NULL DEFAULT '',
   PRIMARY KEY (`sdbid`,`xid`),
-  UNIQUE KEY `sdbid_xid` (`xid`),
-  KEY `sdbid_sdbid` (`sdbid`)
+  KEY `sdbid_sdbid` (`sdbid`),
+  CONSTRAINT `sdbid_sdbid` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 

@@ -135,7 +135,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-    exit
+#    exit
 else
     echo "New target, going ahead"
 fi
@@ -226,12 +226,14 @@ fi
 #### now do catalogues we're not going to store in their entirety but download as we
 #### need. these are sorted roughly in wavelength order
 
-# Tycho-2, query against 1991.25 position
+# Tycho-2, query against 1991.25 position. add integer version of tyc2 id for matching
 echo "\nLooking for Tycho-2 entry"
 coty=$(mysql $db -N -e "SELECT CONCAT(ra_ep1991p25,',',de_ep1991p25) FROM sdb_pm WHERE sdbid='$sdbid';")
 echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
+
+exit
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
