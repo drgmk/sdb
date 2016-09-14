@@ -29,8 +29,7 @@ idin=${1//[^a-zA-Z0-9-+ ]/}
 
 # Look up with sesame
 echo "Sesame using:$idin"
-id="`sesame $idin | egrep -w 'oname' | sed s/\<oname\>// | sed s/\<\\\/oname\>//`"
-id=`echo "$id" | sed "s/^ *//g"`
+id="`sesame $idin | egrep -w 'oname' | sed s/\<oname\>// | sed s/\<\\\/oname\>// | sed 's/^ *//g' | sed 's/  */ /g'`"
 
 # or try coord based query instead
 if [ "$id" == "" ]
