@@ -7,7 +7,7 @@
 #
 # Host: localhost (MySQL 5.7.10)
 # Database: sdb
-# Generation Time: 2016-09-14 17:31:29 +0000
+# Generation Time: 2016-09-19 10:46:26 +0000
 # ************************************************************
 
 
@@ -114,6 +114,38 @@ CREATE TABLE `allwise` (
   `2m` varchar(2) DEFAULT NULL,
   PRIMARY KEY (`sdbid`),
   CONSTRAINT `sdbid_aw` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+
+
+# Dump of table gaia
+# ------------------------------------------------------------
+
+DROP TABLE IF EXISTS `gaia`;
+
+CREATE TABLE `gaia` (
+  `sdbid` varchar(25) NOT NULL,
+  `_r` double DEFAULT NULL,
+  `e_pmra` float DEFAULT NULL,
+  `e_pmde` float DEFAULT NULL,
+  `epsi` float DEFAULT NULL,
+  `sepsi` float DEFAULT NULL,
+  `ra_icrs` double DEFAULT NULL,
+  `e_ra_icrs` float DEFAULT NULL,
+  `de_icrs` double DEFAULT NULL,
+  `e_de_icrs` float DEFAULT NULL,
+  `source` bigint(20) DEFAULT NULL,
+  `plx` float DEFAULT NULL,
+  `pmra` double DEFAULT NULL,
+  `pmde` double DEFAULT NULL,
+  `radecor` float DEFAULT NULL,
+  `dup` smallint(6) DEFAULT NULL,
+  `_fg_` float DEFAULT NULL,
+  `e__fg_` float DEFAULT NULL,
+  `_gmag_` float DEFAULT NULL,
+  `var` varchar(13) DEFAULT NULL,
+  PRIMARY KEY (`sdbid`),
+  CONSTRAINT `sdbid_ga` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 
@@ -629,6 +661,9 @@ VALUES
 	(1,'photometry.moor10','SourceID','\'MIPS70\'','F70','e_F70','F70*0.04','0','\'2011ApJS..193....4M\'','mJy','CONCAT(\'AOR:\',IFNULL(AOR,\'\'))','CONCAT(\'Notes:\',IFNULL(Notes,\'\'))','',0),
 	(1,'photometry.morales09_tab3a','HD_ID','\'MIPS70\'','F70mJy','e_F70','F70mJy*0.04','0','\'2009ApJ...699.1067M\'','mJy','CONCAT(\'Tdust:\',IFNULL(T_dust,\'\'))','CONCAT(\'T-PR:\',IFNULL(T_PR_T_COLL,\'\'))','',0),
 	(1,'photometry.morales09_tab3b','HD_ID','\'MIPS70\'','F70','e_F70','F70*0.04','0','\'2009ApJ...699.1067M\'','mJy','CONCAT(\'Dbl:\',IFNULL(Dbl,\'\'))','CONCAT(\'a:\',IFNULL(alpha,\'\'))','',0),
+	(1,'photometry.paunzen15','tyc','\'BS_YS\'','b_y','IFNULL(e_b_y,0.008)','0.0','0','\'2015A&A...580A..23P\'','mag','CONCAT(\'Vmag:\',IFNULL(vmag,\'\'))','CONCAT(\'beta:\',IFNULL(beta,\'\'))','',0),
+	(1,'photometry.paunzen15','tyc','\'STROMC1\'','c1','IFNULL(e_c1,0.01)','0.0','0','\'2015A&A...580A..23P\'','mag','CONCAT(\'Vmag:\',IFNULL(vmag,\'\'))','CONCAT(\'beta:\',IFNULL(beta,\'\'))','',0),
+	(1,'photometry.paunzen15','tyc','\'STROMM1\'','m1','IFNULL(e_m1,0.012)','0.0','0','\'2015A&A...580A..23P\'','mag','CONCAT(\'Vmag:\',IFNULL(vmag,\'\'))','CONCAT(\'beta:\',IFNULL(beta,\'\'))','',0),
 	(1,'photometry.plav09_tab2','plav09_tab2.ID','\'MIPS70\'','flux_mjy_70','flux_mJy_70_error','flux_mjy_70*0.01','IF(flux_70_limit=\'<\',1,0)','\'2009ApJ...698.1068P\'','mJy','CONCAT(\'Name:\',IFNULL(simbad_name,\'\'))','CONCAT(\'new_xs:\',IFNULL(new_xs,\'\'))','',0),
 	(1,'photometry.rebull08_bpmg','ID_USE','\'MIPS70\'','flux_mjy_70','0','flux_mjy_70*0.04','IF(limit_flag_70=\'<\',1,0)','\'2008ApJ...681.1484R\'','mJy','CONCAT(\'ID:\',IFNULL(ID_OTHER,\'\'))','CONCAT(\'Vmag:\',IFNULL(MAG_V,\'\'))','',0),
 	(1,'photometry.su06','HD_ID','\'MIPS70\'','F70','e_F70','F70*0.04','IF(l_F70=\'<\',1,0)','\'2006ApJ...653..675S\'','mJy','CONCAT(\'Age:\',IFNULL(age,\'\'))','CONCAT(\'xs70:\',IFNULL(IRE70,\'\'))','',0),
@@ -636,9 +671,9 @@ VALUES
 	(1,'photometry.TDSC_main_suppl','TDSC_ID','\'VT\'','VTmag','e_VTmag','0.006','0','\'2002A&A...384..180F\'','mag','CONCAT(\'Comp:\',IFNULL(m_TDSC,\'\'))','CONCAT(\'MagFlg:\',IFNULL(magflg,\'\'))','AND magflg NOT REGEXP(\'T|B|V|H\')',0),
 	(1,'photometry.trilling07','trilling07.name','\'MIPS70\'','F70','e_F70','F70*0.04','0','\'2007ApJ...658.1289T\'','mJy','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','CONCAT(\'Kmag:\',IFNULL(Kmag,\'\'))','',0),
 	(1,'photometry.trilling08','trilling08.ID','\'MIPS70\'','F70','e_F70','F70*0.04','0','\'2008ApJ...674.1086T\'','mJy','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','CONCAT(\'Kmag:\',IFNULL(Kmag,\'\'))','',0),
-	(1,'photometry.ubvy_mean','ID_fromlid','\'BS_YS\'','b_y','IFNULL(e_b_y,0.01)','0.013','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
-	(1,'photometry.ubvy_mean','ID_fromlid','\'STROMC1\'','c1','IFNULL(e_c1,0.01)','0.018','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
-	(1,'photometry.ubvy_mean','ID_fromlid','\'STROMM1\'','m1','IFNULL(e_m1,0.01)','0.014','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
+	(-1,'photometry.ubvy_mean','ID_fromlid','\'BS_YS\'','b_y','IFNULL(e_b_y,0.01)','0.013','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
+	(-1,'photometry.ubvy_mean','ID_fromlid','\'STROMC1\'','c1','IFNULL(e_c1,0.01)','0.018','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
+	(-1,'photometry.ubvy_mean','ID_fromlid','\'STROMM1\'','m1','IFNULL(e_m1,0.01)','0.014','0','\'1998A&AS..129..431H\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'Vmag:\',IFNULL(Vmag,\'\'))','',0),
 	(1,'photometry.UBV_mean','ID_fromlid','\'BJ_VJ\'','B_V','e_B_V','0.02','0','\'2006yCat.2168....0M\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'n_B_V:\',IFNULL(n_B_V,\'\'))','',0),
 	(1,'photometry.UBV_mean','ID_fromlid','\'UJ_BJ\'','U_B','e_U_B','0.028','0','\'2006yCat.2168....0M\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'n_U_B:\',IFNULL(n_U_B,\'\'))','',0),
 	(1,'photometry.UBV_mean','ID_fromlid','\'VJ\'','Vmag','e_Vmag','0.02','0','\'2006yCat.2168....0M\'','mag','CONCAT(\'Comp:\',IFNULL(m_LID,\'\'))','CONCAT(\'n_Vmag:\',IFNULL(n_Vmag,\'\'))','',0),
