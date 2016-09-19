@@ -233,6 +233,13 @@ echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
+# Gaia, query against 2015 position
+echo "\nLooking for Gaia entry"
+coga=$(mysql $db -N -e "SELECT CONCAT(ra_ep2015p0,',',de_ep2015p0) FROM sdb_pm WHERE sdbid='$sdbid';")
+echo $coty
+vizquery -site=$site -mime=votable -source=I/337/gaia -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -c="$coga" > $ft
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
+
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
 cotm=$(mysql $db -N -e "SELECT CONCAT(ra_ep1999p3,',',de_ep1999p3) FROM sdb_pm WHERE sdbid='$sdbid';")
