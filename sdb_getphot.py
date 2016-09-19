@@ -26,19 +26,22 @@ def sdb_write_rawphot(file,tphot,tspec):
     as key=value. As the spectra are printed as instrument=file these
     are stored in reverse in the meta dictionary (i.e. instrument
     non-unique)
+
+    TODO: Table.write can do the meta, they need to be "comments" and
+    "keywords" entries in the meta dict.
     """
     
     fh = open(file,'w')
-    print('# photometry etc for '+tphot.meta['id']+'\n',file=fh)
+    print('\ photometry etc for '+tphot.meta['id']+'\n\\',file=fh)
     for key in tphot.meta:
-        print("{}={}".format(key,tphot.meta[key]),file=fh)
+        print("\\{}={}".format(key,tphot.meta[key]),file=fh)
     for key in tspec.meta:
-        print("{}={}".format(tspec.meta[key],key),file=fh)
-    print('',file=fh)
+        print("\\{}={}".format(tspec.meta[key],key),file=fh)
+    print('\\',file=fh)
     if len(tphot) > 0:
-        tphot.rename_column('Band','#Band')
-        tphot.write(fh,format='ascii.fixed_width',delimiter='|')
-        tphot.rename_column('#Band','Band')
+    #    tphot.rename_column('Band','#Band')
+        tphot.write(fh,format='ascii.ipac')
+    #    tphot.rename_column('#Band','Band')
     fh.close()
 
 def filehash(file):

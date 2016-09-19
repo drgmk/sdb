@@ -36,7 +36,9 @@ pro sdb_csv2xdr,file
   base = STR_REPLACE(file,'-rawphot.txt','')
   xdr = base+'.xdr'
   if FILE_TEST(xdr) then begin
-     print,"File exists, checking if update needed"
+     print,"File exists,"
+     print,xdr
+     print,"Checking if update needed"
      t_txt = FILE_INFO(file)
      t_xdr = FILE_INFO(xdr)
      if t_xdr.mtime gt t_txt.mtime then begin
@@ -53,11 +55,13 @@ pro sdb_csv2xdr,file
   CLOSE,lun
   FREE_LUN,lun
 
-  ;; mark lines we want
+  ;; mark lines we want, format is IPAC so "\ bla" is comment, "\x=y" is keyword
   info = INTARR(nl)             ; 0 for photometry, 1 for stellar, 2 for nothing
   for i=0,nl-1 do begin
-     if STREGEX(ls[i],'=',/BOOLEAN) then info[i] = 1
-     if STREGEX(ls[i],'^[\|]*[ \t]*#|^[ \t]*$',/BOOL) then info[i] = 2 ; ignore these more strongly
+     if STREGEX(ls[i],'^\\[0-9a-zA-Z]',/BOOLEAN) then info[i] = 1 ; keywords
+     if STREGEX(ls[i],'^\\ |^\\$',/BOOL) then info[i] = -1        ; comments
+     if STREGEX(ls[i],'^\|',/BOOL) then info[i] = 2               ; header lines
+;     if STREGEX(ls[i],'^[\|]*[ \t]*#|^[ \t]*$',/BOOL) then info[i] = 2 ; comments and header lines
   endfor
 
   ;; defaults
@@ -72,16 +76,17 @@ pro sdb_csv2xdr,file
   delvarx,irsfile
 
   ;; loop and get stuff
-  sys = 0
+  sys = -1
   for i=0,nl-1 do begin
 
-     ;; decide whether systematic errors were given
-     if info[i] eq 2 then begin
-        if STREGEX(ls[i],'sys',/FOLD_CASE,/BOOLEAN) then sys = 1
+     ;; decide whether systematic errors were given (first header line only)
+     if info[i] eq 2 and sys lt 0 then begin
+        if STREGEX(ls[i],'sys',/FOLD_CASE,/BOOLEAN) then sys = 1 else sys = 0
         CONTINUE                ; comment lines
      endif
 
      if info[i] eq 1 then begin
+        ls[i] = STR_REPLACE(ls[i],'^\\','') ; remove leading \
         if STREGEX(ls[i],'^id',/FOLD_CASE,/BOOLEAN) then begin
            tmp = STRSPLIT(ls[i],'=',/EXTRACT)
            name = tmp[1]
@@ -101,7 +106,8 @@ pro sdb_csv2xdr,file
      endif
 
      if info[i] eq 0 then begin
-        tmp = STRSPLIT(ls[i],'[ |	]*\|[ |	]*',/REGEX,/EXTRACT,COUNT=n)
+;        tmp = STRSPLIT(ls[i],'[ |	]*\|[ |	]*',/REGEX,/EXTRACT,COUNT=n)
+        tmp = STRSPLIT(ls[i],' ',/EXTRACT,COUNT=n)
         push,band,tmp[0]
         push,meas,FLOAT(tmp[1])
         push,errs,FLOAT(tmp[2])
@@ -127,7 +133,7 @@ pro sdb_csv2xdr,file
 
   nphot = N_ELEMENTS(band)
   if nphot eq 0 then begin
-     print,"No photometry in "+file+", so no xdr (may be spectra)'
+     print,"No photometry in "+file+", so no xdr (may be spectra)"
      return
   endif
   
