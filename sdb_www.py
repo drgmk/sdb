@@ -65,13 +65,13 @@ def sdb_www_sample_tables():
 
         # make .htaccess if needed, don't put one in "public" or those ending with "_"
         # so stuff in those directories remains visible to those not logged in
-        if not isfile(wwwroot+sample+'/.htaccess') and sample[-1] != '_' and sample != 'public':
+        if  sample[-1] != '_' and sample != 'public':
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
             fd.write('AuthType Basic\n')
             fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
             fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
-            fd.write('require group '+sample+'\n')
+            fd.write('require group admin '+sample+'\n')
             fd.close()
 
         # grab table we want to display
@@ -200,9 +200,14 @@ def sdb_www_sample_plots():
         print("    got ",ngot," rows")
         l = list(zip(*allsql))
         keys = cursor.column_names
-        ftypes = [None,None,float,float,float,float]
+        dtypes = [None,None,float,float,float,float]
         for i in range(len(keys)):
-            t[keys[i]]=np.array(l[i],dtype=ftypes[i])
+            col = np.array(l[i],dtype=dtypes[i])
+            # check if all of a numeric col (i.e. one we will plot) are nan
+            if dtypes[i] == float or dtypes[i] == int:
+                if np.any(np.isfinite(col)) == False:
+                    continue
+            t[keys[i]] = col
         data = ColumnDataSource(data=t)   
        
         # remove the plot file to avoid overwrite warnings
@@ -212,12 +217,15 @@ def sdb_www_sample_plots():
         output_file(plfile,mode='cdn')
 
         # set up colour scale, grey for nans
-        cr = np.array([np.nanmin(np.log(t['ldisklstar'])),np.nanmax(np.log(t['ldisklstar']))])
-        ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
-        ok = np.isfinite(ci)
-        col = np.empty(ngot,dtype='U7')
-        col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
-        col[col==''] = '#969696'
+        if 'ldisklstar' in t:
+            cr = np.array([np.nanmin(np.log(t['ldisklstar'])),np.nanmax(np.log(t['ldisklstar']))])
+            ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
+            ok = np.isfinite(ci)
+            col = np.empty(ngot,dtype='U7')
+            col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
+            col[col==''] = '#969696'
+        else:
+            col = '#969696'
 
         # TODO: hover in one highlights in the other
         hover1 = HoverTool(tooltips=[("name","@main_id")])
@@ -234,14 +242,17 @@ def sdb_www_sample_plots():
         hr.circle('teff','lstar',source=data,size=10,fill_color=col,
                   fill_alpha=0.6,line_color=None)
 
-        # f vs temp
-        ft = figure(tools=tools2,active_scroll='wheel_zoom',
-                    x_axis_label='Disk temperature / K',y_axis_label='Disk fractional luminosity',
-                    y_axis_type="log",y_range=(0.5*min(t['ldisklstar']),max(t['ldisklstar'])*2),
-                    x_axis_type="log",x_range=(0.5*min(t['tdisk_cold']),max(t['tdisk_cold'])*2) )
-        ft.circle('tdisk_cold','ldisklstar',source=data,size=10,fill_color=col,
-                  fill_alpha=0.6,line_color=None)
-
+        # f vs temp (if we have any)
+        if 'tdisk_cold' in t and 'ldisklstar' in t:
+            ft = figure(tools=tools2,active_scroll='wheel_zoom',
+                        x_axis_label='Disk temperature / K',y_axis_label='Disk fractional luminosity',
+                        y_axis_type="log",y_range=(0.5*min(t['ldisklstar']),max(t['ldisklstar'])*2),
+                        x_axis_type="log",x_range=(0.5*min(t['tdisk_cold']),max(t['tdisk_cold'])*2) )
+            ft.circle('tdisk_cold','ldisklstar',source=data,size=10,fill_color=col,
+                      fill_alpha=0.6,line_color=None)
+        else:
+            ft = figure(title='no IR excesses')
+                
         p = gridplot([[hr,ft]],sizing_mode='stretch_both',
                      toolbar_location='above')
         save(p)
