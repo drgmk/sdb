@@ -45,7 +45,7 @@ pro sdb_csv2xdr,file
         print,"xdr newer than txt, not overwriting "+xdr
         return
      endif else print,"Rawphot file more recent, updating xdr"
-  endif
+  endif else print,"Creating ",xdr
   
   ;; get stuff in text file
   nl = FILE_LINES(file[0])
