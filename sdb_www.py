@@ -173,7 +173,7 @@ def sdb_www_sample_plots():
         print("    sample:",sample)
 
         # get data, ensure primary axes are not nans
-        selall = "SELECT sdbid,main_id,teff,lstar,ldisklstar,tdisk_cold"
+        selall = "SELECT sdbid,main_id,teff,lstar,IFNULL(ldisklstar,-1) as ldisklstar,IFNULL(tdisk_cold,-1) as tdisk_cold"
         selnum = "SELECT COUNT(*)"
         if sample == 'everything' or sample == 'public':
             selall += " FROM sdb_pm"
@@ -205,9 +205,10 @@ def sdb_www_sample_plots():
             col = np.array(l[i],dtype=dtypes[i])
             # check if all of a numeric col (i.e. one we will plot) are nan
             if dtypes[i] == float or dtypes[i] == int:
-                if np.any(np.isfinite(col)) == False:
+                if np.any(np.isfinite(col)) and np.any(col>0) == False:
                     continue
             t[keys[i]] = col
+#        print(t)
         data = ColumnDataSource(data=t)   
        
         # remove the plot file to avoid overwrite warnings
@@ -217,15 +218,16 @@ def sdb_www_sample_plots():
         output_file(plfile,mode='cdn')
 
         # set up colour scale, grey for nans
+        col = '#969696'
         if 'ldisklstar' in t:
-            cr = np.array([np.nanmin(np.log(t['ldisklstar'])),np.nanmax(np.log(t['ldisklstar']))])
-            ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
-            ok = np.isfinite(ci)
-            col = np.empty(ngot,dtype='U7')
-            col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(100*ci[ok]).astype(int)]
-            col[col==''] = '#969696'
-        else:
-            col = '#969696'
+            ok = t['ldisklstar'] > 0
+            if np.sum(ok) > 0:
+                cr = np.array([np.nanmin(np.log(t['ldisklstar'][ok])),np.nanmax(np.log(t['ldisklstar'][ok]))])
+                ci = 0.999*(np.log(t['ldisklstar'])-cr[0])/(cr[1]-cr[0]) # ensure top in below 1 for indexing
+                ok = np.isfinite(ci)
+                col = np.empty(ngot,dtype='U7')
+                col[ok] = np.array(bokeh.palettes.plasma(100))[np.floor(90*ci[ok]).astype(int)]
+                col[col==''] = '#969696'
 
         # TODO: hover in one highlights in the other
         hover1 = HoverTool(tooltips=[("name","@main_id")])
@@ -246,7 +248,7 @@ def sdb_www_sample_plots():
         if 'tdisk_cold' in t and 'ldisklstar' in t:
             ft = figure(tools=tools2,active_scroll='wheel_zoom',
                         x_axis_label='Disk temperature / K',y_axis_label='Disk fractional luminosity',
-                        y_axis_type="log",y_range=(0.5*min(t['ldisklstar']),max(t['ldisklstar'])*2),
+                        y_axis_type="log",y_range=(0.5*np.exp(cr[0]),2*np.exp(cr[1])),
                         x_axis_type="log",x_range=(0.5*min(t['tdisk_cold']),max(t['tdisk_cold'])*2) )
             ft.circle('tdisk_cold','ldisklstar',source=data,size=10,fill_color=col,
                       fill_alpha=0.6,line_color=None)
