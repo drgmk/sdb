@@ -135,7 +135,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-#    exit
+    exit
 else
     echo "New target, going ahead"
 fi

@@ -3,7 +3,7 @@
 # give a table name in the database to get IDs from, optional second arg is the column
 # name to give to SQL
 
-db=sdb
+db=sdb_samples
 dbroot=/Users/grant/astro/projects/sdb/
 logroot=/Users/grant/a-extra/sdb/log/
 

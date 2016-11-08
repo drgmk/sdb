@@ -10,7 +10,7 @@
 import numpy as np
 from bokeh.plotting import figure,output_file,save,ColumnDataSource
 import bokeh.palettes
-from bokeh.models import HoverTool
+from bokeh.models import HoverTool,OpenURL,TapTool
 from bokeh.layouts import gridplot,layout
 from os.path import isdir,isfile
 from os import mkdir,remove,write
@@ -257,6 +257,13 @@ def sdb_www_sample_plots():
                 
         p = gridplot([[hr,ft]],sizing_mode='stretch_both',
                      toolbar_location='above')
+                     
+        url = "/~grant/sdb/seds/masters/@sdbid/public/@sdbid"+".png"
+        taptool = hr.select(type=TapTool)
+        taptool.callback = OpenURL(url=url)
+        taptool = ft.select(type=TapTool)
+        taptool.callback = OpenURL(url=url)
+
         save(p)
 
     cursor.close()

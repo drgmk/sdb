@@ -9,17 +9,18 @@ sed_db_samples.
 
 import argparse
 from collections import OrderedDict
-import numpy as np
 from os import mkdir,rename,remove
 from os.path import isdir,isfile
 import glob
 import hashlib
+import numpy as np
 from astropy.table import Table,vstack,unique,Column
 import mysql.connector
 import config as cfg
 
+
 def sdb_write_rawphot(file,tphot,tspec):
-    """Write raw photometry to a file
+    """Write raw photometry to a file.
     
     Takes filename to write to, and astropy Tables with photometry and
     information on spectra. Each contains metadata that is printed out
@@ -32,28 +33,29 @@ def sdb_write_rawphot(file,tphot,tspec):
     """
     
     fh = open(file,'w')
-    print('\ photometry etc for '+tphot.meta['id']+'\n\\',file=fh)
-    for key in tphot.meta:
-        print("\\{}={}".format(key,tphot.meta[key]),file=fh)
-    for key in tspec.meta:
-        print("\\{}={}".format(tspec.meta[key],key),file=fh)
+    print('\ photometry etc for '+tphot.meta['keywords']['id']+'\n\\',file=fh)
+    
+    for key in tphot.meta['keywords']:
+        print("\\{}={}".format(key,tphot.meta['keywords'][key]),file=fh)
     print('\\',file=fh)
+
     if len(tphot) > 0:
-    #    tphot.rename_column('Band','#Band')
         tphot.write(fh,format='ascii.ipac')
-    #    tphot.rename_column('#Band','Band')
+
     fh.close()
 
+
 def filehash(file):
-    """Return an md5 hash for a given file"""
+    """Return an md5 hash for a given file."""
     hasher = hashlib.md5()
     f = open(file, 'rb')
     buf = f.read()
     hasher.update(buf)
     return hasher.hexdigest()
 
+
 def sdb_getphot_one(id):
-    """Extract photometry and other info from a database
+    """Extract photometry and other info from a database.
     
     Results are put in text files within sub-directories for the given
     id. Assuming some photometry exists, a 'public' directory is always
@@ -69,7 +71,7 @@ def sdb_getphot_one(id):
     cursor = cnx.cursor(buffered=True)
 
     # set up temporary table with what we'll want in the photometry output
-    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT NULL, Sys double DEFAULT NULL, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
+    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
 
     # get sdbid and xids
     cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
@@ -96,7 +98,8 @@ def sdb_getphot_one(id):
         
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
-    tphot = Table(names=cursor.column_names,dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool'))
+    tphot = Table(names=cursor.column_names,
+                  dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool'))
     for row in cursor:
         try:
             tphot.add_row(row)
@@ -105,14 +108,18 @@ def sdb_getphot_one(id):
             print("Probably wierd (+meaningless) characters in row\n",row)
             return()
 
+    # fix any NULL values that went to nan
+    tphot['Err'][np.invert(np.isfinite(tphot['Err']))] = 0.0
+    tphot['Sys'][np.invert(np.isfinite(tphot['Sys']))] = 0.0
+
     # get some addtional metadata like stellar params
 #    cursor.execute('SELECT main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode from simbad WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
     cursor.execute("SELECT main_id,sp_type,sp_bibcode,COALESCE(tgas.plx,simbad.plx_value) AS plx_value,COALESCE(tgas.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(tgas.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN tyc2 USING (sdbid) LEFT JOIN photometry.tgas ON COALESCE(-tyc2.hip,tyc2.tyc2id)=tgas.tyc2hip where sdbid=%(tmp)s;",{'tmp':sdbid})
     vals = cursor.fetchall()
     keys = cursor.column_names
     if len(vals) > 0:
-        tphot.meta = OrderedDict( zip(keys,tuple(vals[0])) )
-    tphot.meta['id'] = sdbid
+        tphot.meta['keywords'] = OrderedDict( zip(keys,tuple(vals[0])) )
+    tphot.meta['keywords']['id'] = sdbid
 
     # get aors for any spectra and add file names
     cursor.execute('SELECT instrument,aor_key,bibcode,private FROM spectra WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
@@ -136,10 +143,11 @@ def sdb_getphot_one(id):
             elif len(specfile) == 1:
                 tspec['file'][(tspec['aor_key']==aor)] = specfile[0]
 
-    # now add these as table metadata
+    # now add these as table metadata, adding a number to the instrument
+    # name so that the keys are unique
     for i in range(len(tspec)):
         if tspec['file'][i] != b'':
-            tspec.meta[tspec['file'][i].decode()] = tspec['instrument'][i].decode()
+            tphot.meta['keywords'][tspec['instrument'][i].decode()+str(i)] = tspec['file'][i].decode()
 
     # find any private data by making table from phot and spec,
     # bibcode and private are the common columns
@@ -223,12 +231,14 @@ def sdb_getphot_one(id):
 
 
 def sdb_getphot(idlist):
-    """Call sdb_getphot for a list of ids"""
+    """Call sdb_getphot for a list of ids."""
+    
     if not isinstance(idlist, list):
         print("sdb_getphot expects a list")
         raise TypeError
     for id in idlist:
         sdb_getphot_one(id)
+
 
 # run from the command line
 if __name__ == "__main__":
