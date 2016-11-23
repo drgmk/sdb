@@ -149,6 +149,33 @@ CREATE TABLE `gaia` (
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 
+DROP TABLE IF EXISTS `galex`;
+
+CREATE TABLE `galex` (
+  `sdbid` varchar(25) NOT NULL,
+  `_r` double DEFAULT NULL,
+  `objid` varchar(19) DEFAULT NULL,
+  `fflux` float DEFAULT NULL,
+  `e_fflux` float DEFAULT NULL,
+  `nflux` float DEFAULT NULL,
+  `e_nflux` float DEFAULT NULL,
+  `raj2000` double DEFAULT NULL,
+  `dej2000` double DEFAULT NULL,
+  `fuv` float DEFAULT NULL,
+  `e_fuv` float DEFAULT NULL,
+  `nuv` float DEFAULT NULL,
+  `e_nuv` float DEFAULT NULL,
+  `r_fov` double DEFAULT NULL,
+  `b` smallint(6) DEFAULT NULL,
+  `fafl` smallint(6) DEFAULT NULL,
+  `nafl` smallint(6) DEFAULT NULL,
+  `fexf` smallint(6) DEFAULT NULL,
+  `nexf` smallint(6) DEFAULT NULL,
+  `fr` double DEFAULT NULL,
+  `nr` double DEFAULT NULL,
+  PRIMARY KEY (`sdbid`),
+  CONSTRAINT `sdbid_gal` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 # Dump of table projects
 # ------------------------------------------------------------

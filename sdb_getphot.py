@@ -39,8 +39,8 @@ def sdb_write_rawphot(file,tphot,tspec):
         print("\\{}={}".format(key,tphot.meta['keywords'][key]),file=fh)
     print('\\',file=fh)
 
-    if len(tphot) > 0:
-        tphot.write(fh,format='ascii.ipac')
+    # if len(tphot) > 0:
+    tphot.write(fh,format='ascii.ipac')
 
     fh.close()
 
@@ -66,11 +66,13 @@ def sdb_getphot_one(id):
     """
 
     # set up connection
-    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],
+                                  password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],
+                                  database=cfg.mysql['db'])
     cursor = cnx.cursor(buffered=True)
 
-    # set up temporary table with what we'll want in the photometry output
+    # set up temporary table with what we'll want in the output
     cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
 
     # get sdbid and xids
@@ -167,9 +169,9 @@ def sdb_getphot_one(id):
     if isdir(sedroot) == False:
         mkdir(sedroot)
     filename = sdbid+'-rawphot.txt'
-    # make list of new dirs needed, 'public' will contain only public photometry, 'all'
-    # will contain everything and is only needed if there are multiple private sets of
-    # photometry
+    # make list of new dirs needed, 'public' will contain only public 
+    # photometry, 'all' will contain everything and is only needed if 
+    # there are multiple private sets of photometry
     newdirs = np.array(['public'])
     if npriv > 0:
         newdirs = np.append(newdirs,unique(tpriv[tpriv['private'] == True])['bibcode'])
