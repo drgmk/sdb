@@ -14,7 +14,7 @@
 |                   char|   char|                   char|long|      char|  double| double|   long|               char|
 |                       |       |                       |    |          |        |       |       |                   |
 |                   null|   null|                   null|null|      null|    null|   null|   null|               null|
-               HD 181327  181327               HD 181327 1300       ALMA   0.0079   0.002    null 2016MNRAS.460.2933M 
+               HD 181327  181327               HD 181327 1300       ALMA      7.9     2.0    null 2016MNRAS.460.2933M 
                HD 181327  181327               HD 181327 6800       ATCA    0.145  0.0192    null 2015ApJ...813..138R 
                 HD 10647   10647                  q1 Eri 6800       ATCA   0.0926  0.0166    null 2015ApJ...813..138R 
                HD 107146  107146               HD 107146 6800       ATCA    0.166  0.0252    null 2015ApJ...813..138R 
