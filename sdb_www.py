@@ -92,7 +92,7 @@ def sdb_www_sample_tables():
                        " name as sdbid,ROUND(-2.5*log10(ANY_VALUE(flux)/3882.37),1) as Vmag"
                        " FROM sed_photosphere WHERE band='VJ' GROUP BY sdbid;")
         sel = ("SELECT "
-               "CONCAT('<a href=\"../../seds/masters/',sdbid,'/public/',sdbid,'.png\">',sdbid,'</a>') as sdbid,"
+               "CONCAT('<a href=\"../../seds/masters/',sdbid,'/public/',sdbid,'-sed.html\">',sdbid,'</a>') as sdbid,"
                "CONCAT('<a href=\"http://simbad.u-strasbg.fr/simbad/sim-basic?submit=SIMBAD+search&Ident=',main_id,'\" target=\"_blank\">',main_id,'</a>') as Simbad,"
                "hd.xid as HD,"
                "hip.xid as HIP,"
