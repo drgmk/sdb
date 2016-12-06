@@ -44,7 +44,7 @@ eval $tmp
 mode=append  # set this to dropcreate to start afresh
 
 # other knobs as required
-rad=2               # rad is the default match radius in arcsec
+rad=2               # rad is the default match radius in arcsec, greater for GALEX
 sdbprefix=sdb-v1-   # prefix for ids
 site=fr             # vizquery site
 echo "------- db-insert-one.sh --------"
@@ -104,6 +104,7 @@ echo "Final set of coords:$cojoin"
 # below. put in a file to use again below. dates we want are: 2000.0 (sdbid), 2015.0
 # (TGAS), 2010.3 (WISE), 2007.0 (AKARI,Spitzer), 1999.3 (2MASS), 1991.25 (HIP/Tyc),
 # 1983.5 (IRAS in J2000)
+# TODO: just record proper motions and compute positions for arbitrary dates
 echo "\nLooking in proper motion catalogues"
 vizquery -site=$site -mime=votable -source=I/377/tgas,I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" -out="_RA(J2000,2015.0)" -out="_DE(J2000,2015.0)" > $fp
 
@@ -118,7 +119,7 @@ else
     # contingency for no pm matches needed here! (give everything input coord)
     echo "No pm source found, keeping:$cojoin and assuming this for all epochs"
     echo "_r,_raj2000,_dej2000,_raj2000_1,_dej2000_1,_raj2000_2,_dej2000_2,_raj2000_3,_dej2000_3,_raj2000_4,_dej2000_4,_raj2000_5,_dej2000_5,_raj2000_6,_dej2000_6" > $ft
-    echo "-1.0,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin" >> $ft
+    echo "-1.0,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin,$cojoin" >> $ft
     $stilts tpipe in=$ft ifmt=csv cmd='random' omode=out out=- ofmt=votable > $fp
 fi
 
@@ -135,7 +136,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "Stopping here, have sdbid $sdbid in xids table"
-    exit
+#    exit
 else
     echo "New target, going ahead"
 fi
@@ -226,11 +227,12 @@ fi
 #### now do catalogues we're not going to store in their entirety but download as we
 #### need. these are sorted roughly in wavelength order
 
-# GALEX All-sky, surveys between early 2003 and late 2007, assume 2007.0 as for AKARI
+# GALEX All-sky, surveys between early 2003 and late 2007, assume 2007.0 as for AKARI, positional
+# crossmatches look to require a large radius, try 5"
 echo "\nLooking for GALEX DR5 entry"
 cogl=$(mysql $db -N -e "SELECT CONCAT(ra_ep2007p0,',',de_ep2007p0) FROM sdb_pm WHERE sdbid='$sdbid';")
 echo $cogl
-vizquery -site=$site -mime=votable -source=II/312/ais -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=objid -out.add=Fflux -out.add=e_Fflux -out.add=Nflux -out.add=e_Nflux -c="$cogl" > $ft
+vizquery -site=$site -mime=votable -source=II/312/ais -c.rs=5 -sort=_r -out.max=1 -out.add=_r -out.add=objid -out.add=Fflux -out.add=e_Fflux -out.add=Nflux -out.add=e_Nflux -c="$cogl" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
 
 # Tycho-2, query against 1991.25 position. add integer version of tyc2 id for matching
