@@ -264,7 +264,8 @@ if __name__ == "__main__":
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
                                       host=cfg.mysql['host'],database=args.dbname)
         cursor = cnx.cursor(buffered=True)
-        cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+";")
+        cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+" "
+                       "WHERE sdbid IS NOT NULL;")
         for id in cursor:
             sdb_getphot_one(id[0])
         cursor.close()
