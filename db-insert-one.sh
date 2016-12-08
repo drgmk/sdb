@@ -106,7 +106,7 @@ echo "Final set of coords:$cojoin"
 # 1983.5 (IRAS in J2000)
 # TODO: just record proper motions and compute positions for arbitrary dates
 echo "\nLooking in proper motion catalogues"
-vizquery -site=$site -mime=votable -source=I/377/tgas,I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" -out="_RA(J2000,2015.0)" -out="_DE(J2000,2015.0)" > $fp
+vizquery -site=$site -mime=votable -source=I/337/tgas,I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" -out="_RA(J2000,2015.0)" -out="_DE(J2000,2015.0)" > $fp
 
 # update coordinates if sucessful, otherwise propogate the previous coords to all epochs
 cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
