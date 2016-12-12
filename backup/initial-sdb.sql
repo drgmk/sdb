@@ -7,7 +7,7 @@
 #
 # Host: localhost (MySQL 5.7.10)
 # Database: sdb
-# Generation Time: 2016-11-23 18:17:00 +0000
+# Generation Time: 2016-12-12 18:31:51 +0000
 # ************************************************************
 
 
@@ -207,142 +207,10 @@ CREATE TABLE `sdb_pm` (
   `_r` double DEFAULT NULL,
   `raj2000` double DEFAULT NULL,
   `dej2000` double DEFAULT NULL,
-  `ra_ep2010p3` double DEFAULT NULL,
-  `de_ep2010p3` double DEFAULT NULL,
-  `ra_ep2007p0` double DEFAULT NULL,
-  `de_ep2007p0` double DEFAULT NULL,
-  `ra_ep1999p3` double DEFAULT NULL,
-  `de_ep1999p3` double DEFAULT NULL,
-  `ra_ep1991p25` double DEFAULT NULL,
-  `de_ep1991p25` double DEFAULT NULL,
-  `ra_ep1983p5` double DEFAULT NULL,
-  `de_ep1983p5` double DEFAULT NULL,
-  `ra_ep2015p0` double DEFAULT NULL,
-  `de_ep2015p0` double DEFAULT NULL,
+  `pmra` float DEFAULT NULL,
+  `pmde` float DEFAULT NULL,
   PRIMARY KEY (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-
-
-
-# Dump of table sed_bbfit
-# ------------------------------------------------------------
-
-DROP TABLE IF EXISTS `sed_bbfit`;
-
-CREATE TABLE `sed_bbfit` (
-  `bbfit_lastupdate` double DEFAULT NULL,
-  `name` varchar(25) NOT NULL DEFAULT '',
-  `disksig` float DEFAULT NULL,
-  `tdisk_hot` float DEFAULT NULL,
-  `e_tdisk_hot` float DEFAULT NULL,
-  `bbnmlz_hot` float DEFAULT NULL,
-  `e_bbnmlz_hot` float DEFAULT NULL,
-  `tdisk_cold` float DEFAULT NULL,
-  `e_tdisk_cold` float DEFAULT NULL,
-  `tdisk_cold_constr_lo` int(11) DEFAULT NULL,
-  `tdisk_cold_constr_hi` int(11) DEFAULT NULL,
-  `bbnmlz_cold` float DEFAULT NULL,
-  `e_bbnmlz_cold` float DEFAULT NULL,
-  `lambda0` float DEFAULT NULL,
-  `e_lambda0` float DEFAULT NULL,
-  `lambda0_constr_lo` int(11) DEFAULT NULL,
-  `lambda0_constr_hi` int(11) DEFAULT NULL,
-  `beta` float DEFAULT NULL,
-  `e_beta` float DEFAULT NULL,
-  `beta_constr_lo` int(11) DEFAULT NULL,
-  `beta_constr_hi` int(11) DEFAULT NULL,
-  `bb_chisqdof` float DEFAULT NULL,
-  `rdisk_cold` float DEFAULT NULL,
-  `e_rdisk_cold` float DEFAULT NULL,
-  `diamdisk_cold_arcs` float DEFAULT NULL,
-  `e_diamdisk_cold` float DEFAULT NULL,
-  `ldisklstar_hot` float DEFAULT NULL,
-  `ldisklstar_cold` float DEFAULT NULL,
-  `ldisk` float DEFAULT NULL,
-  `e_ldisk` float DEFAULT NULL,
-  `ldisklstar` float DEFAULT NULL,
-  `e_ldisklstar` float DEFAULT NULL,
-  `sigtot_AU2` float DEFAULT NULL,
-  `e_sigtot` float DEFAULT NULL,
-  `mdisk_ME` float DEFAULT NULL,
-  `e_mdisk` float DEFAULT NULL,
-  PRIMARY KEY (`name`)
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
-
-
-# Dump of table sed_photosphere
-# ------------------------------------------------------------
-
-DROP TABLE IF EXISTS `sed_photosphere`;
-
-CREATE TABLE `sed_photosphere` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(25) DEFAULT NULL,
-  `band` varchar(10) DEFAULT NULL,
-  `flux` float DEFAULT NULL,
-  `cc_atoq` float DEFAULT NULL,
-  `error` float DEFAULT NULL,
-  `obs` float DEFAULT NULL,
-  `e_obs` float DEFAULT NULL,
-  `obs_uplim` int(11) DEFAULT NULL,
-  `obs_ref` varchar(20) DEFAULT NULL,
-  `R` float DEFAULT NULL,
-  `chi` float DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
-
-
-# Dump of table sed_stfit
-# ------------------------------------------------------------
-
-DROP TABLE IF EXISTS `sed_stfit`;
-
-CREATE TABLE `sed_stfit` (
-  `stfit_lastupdate` double DEFAULT NULL,
-  `name` varchar(25) NOT NULL DEFAULT '',
-  `teff` float DEFAULT NULL,
-  `e_teff` float DEFAULT NULL,
-  `nmlz` float DEFAULT NULL,
-  `e_nmlz` float DEFAULT NULL,
-  `rstar` float DEFAULT NULL,
-  `e_rstar` float DEFAULT NULL,
-  `lstar` float DEFAULT NULL,
-  `e_lstar` float DEFAULT NULL,
-  `logg` float DEFAULT NULL,
-  `e_logg` float DEFAULT NULL,
-  `mh` float DEFAULT NULL,
-  `e_mh` float DEFAULT NULL,
-  `av` float DEFAULT NULL,
-  `e_av` float DEFAULT NULL,
-  `dist` float DEFAULT NULL,
-  `sed_chisqdof` float DEFAULT NULL,
-  PRIMARY KEY (`name`)
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
-
-
-# Dump of table sed_totflux
-# ------------------------------------------------------------
-
-DROP TABLE IF EXISTS `sed_totflux`;
-
-CREATE TABLE `sed_totflux` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(25) DEFAULT NULL,
-  `band` varchar(10) DEFAULT NULL,
-  `flux` float DEFAULT NULL,
-  `cc_atoq` float DEFAULT NULL,
-  `error` float DEFAULT NULL,
-  `obs` float DEFAULT NULL,
-  `e_obs` float DEFAULT NULL,
-  `obs_uplim` int(11) DEFAULT NULL,
-  `obs_ref` varchar(20) DEFAULT NULL,
-  `R` float DEFAULT NULL,
-  `chi` float DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 
 
 
@@ -653,9 +521,9 @@ VALUES
 	(-1,'feps','feps.Name','\'MIPS24\'','MIPS24','MIPS24_sigint','MIPS24*0.01','0','\'2008ApJS..179..423C\'','mJy','\'\'','\'\'','',0),
 	(-1,'gaspar13','concat(substring(gaspar13.name,1,locate(\' \',gaspar13.name)),substring(gaspar13.name,locate(\' \',gaspar13.name)+1,10)*1)','\'MIPS24\'','f24','e24','f24*0.01','0','\'2013ApJ...768...25G\'','mJy','CONCAT(\'Xs:\',IFNULL(xs,\'\'))','CONCAT(\'AgeFlg:\',IFNULL(age_flag,\'\'))','',0),
 	(-1,'gautier07','GJ_ID','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2007ApJ...667..527G\'','mJy','CONCAT(\'SpTy:\',IFNULL(spec_type,\'\'))','CONCAT(\'Name:\',IFNULL(commonName,\'\'))','',0),
-	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS100\'','IF(aprad>5,apflux_corrected,1.19*flux_uncorrected)','IF(aprad>5,rand_e_aper,1.19*e_flux)','0.03*IF(aprad>5,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>5,\'Ap\',\'PSF\'))',' AND wav=100 AND flux_uncorrected IS NOT NULL',1),
-	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS160\'','IF(aprad>8,apflux_corrected,1.21*flux_uncorrected)','IF(aprad>8,rand_e_aper,1.21*e_flux)','0.05*IF(aprad>8,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>8,\'Ap\',\'PSF\'))',' AND wav=160 AND flux_uncorrected IS NOT NULL',1),
-	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS70\'','IF(aprad>4,apflux_corrected,1.16*flux_uncorrected)','IF(aprad>4,rand_e_aper,1.16*e_flux)','0.03*IF(aprad>4,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>4,\'Ap\',\'PSF\'))',' AND wav=70 AND flux_uncorrected IS NOT NULL',1),
+	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS100\'','IF(aprad>5,apflux_corrected,1.19*flux_uncorrected)','IF(aprad>5,rand_e_aper,1.19*e_flux)','0.03*IF(aprad>5,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>5,\'Ap\',\'PSF\'))',' AND wav=100 AND flux_uncorrected IS NOT NULL',0),
+	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS160\'','IF(aprad>8,apflux_corrected,1.21*flux_uncorrected)','IF(aprad>8,rand_e_aper,1.21*e_flux)','0.05*IF(aprad>8,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>8,\'Ap\',\'PSF\'))',' AND wav=160 AND flux_uncorrected IS NOT NULL',0),
+	(1,'herscheldb.name2simbad','herscheldb.name2simbad.simbad LEFT JOIN herscheldb.psffitting on psffitting.name=name2simbad.name','\'PACS70\'','IF(aprad>4,apflux_corrected,1.16*flux_uncorrected)','IF(aprad>4,rand_e_aper,1.16*e_flux)','0.03*IF(aprad>4,apflux_corrected,flux_uncorrected)','0','\'HSA_GMK\'','Jy','psffitting.ObsId','CONCAT(\'Phot:\',IF(aprad>4,\'Ap\',\'PSF\'))',' AND wav=70 AND flux_uncorrected IS NOT NULL',0),
 	(-1,'koerner10_tab1','HIP_ID','\'MIPS24\'','F_MIPS24','e_F_MIPS24','F_MIPS24*0.01','0','\'2010ApJ...710L..26K\'','Jy','\'\'','\'\'','',0),
 	(-1,'low05','low05.star','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2005ApJ...631.1170L\'','mJy','\'\'','\'\'','',0),
 	(-1,'moor10','SourceID','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2011ApJS..193....4M\'','mJy','\'\'','\'\'','',0),
@@ -725,6 +593,8 @@ VALUES
 	(1,'sdb.allwise','allwise.sdbid','\'WISE22\'','w4mag','e_w4mag','0.057','IF(SUBSTRING(qph,4,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,4,1))','CONCAT(\'Var:\',IFNULL(var,\'\'))',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,4,1))=\'0\'',0),
 	(1,'sdb.allwise','allwise.sdbid','\'WISE3P4\'','w1mag','e_w1mag','0.024','IF(SUBSTRING(qph,1,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,1,1))','CONCAT(\'Var:\',IFNULL(var,\'\'))',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,1,1))=\'0\' AND w1mag>4.5',0),
 	(1,'sdb.allwise','allwise.sdbid','\'WISE4P6\'','w2mag','e_w2mag','0.028','IF(SUBSTRING(qph,2,1)=\'U\',1,0)','\'2010AJ....140.1868W\'','mag','CONCAT(\'qual:\',SUBSTRING(qph,2,1))','CONCAT(\'Var:\',IFNULL(var,\'\'))',' AND IF(ccf=\'0\',0,SUBSTRING(ccf,2,1))=\'0\' AND w2mag>6.5',0),
+	(1,'sdb.galex','galex.sdbid','\'GALFUV\'','fuv','e_fuv','0','0','\'2011Ap&SS.335..161B\'','mag','CONCAT(\'Fafl:\',IFNULL(Fafl,\'\'))','CONCAT(\'Fexf:\',IFNULL(Fexf,\'\'))','',0),
+	(1,'sdb.galex','galex.sdbid','\'GALNUV\'','nuv','e_nuv','0','0','\'2011Ap&SS.335..161B\'','mag','CONCAT(\'Nafl:\',IFNULL(Nafl,\'\'))','CONCAT(\'Nexf:\',IFNULL(Nexf,\'\'))','',0),
 	(1,'sdb.seip','seip.sdbid','\'IRAC3P6\'','i1_f_ap1','i1_df_ap1','0.01*i1_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',IFNULL(i1_brtfrac,\'\'))','CONCAT(\'Ext:\',IFNULL(i1_extfrac,\'\'))','AND i1_fluxtype=1',0),
 	(1,'sdb.seip','seip.sdbid','\'IRAC4P5\'','i2_f_ap1','i2_df_ap1','0.01*i2_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',IFNULL(i2_brtfrac,\'\'))','CONCAT(\'Ext:\',IFNULL(i2_extfrac,\'\'))','AND i2_fluxtype=1',0),
 	(1,'sdb.seip','seip.sdbid','\'IRAC5P8\'','i3_f_ap1','i3_df_ap1','0.01*i3_f_ap1','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',IFNULL(i3_brtfrac,\'\'))','CONCAT(\'Ext:\',IFNULL(i3_extfrac,\'\'))','AND i3_fluxtype=1',0),
