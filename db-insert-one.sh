@@ -254,7 +254,7 @@ epoch=2005.0
 cogl=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $cogl
 vizquery -site=$site -mime=votable -source=II/312/ais -c.rs=5 -sort=_r -out.max=1 -out.add=_r -out.add=objid -out.add=Fflux -out.add=e_Fflux -out.add=Nflux -out.add=e_Nflux -c="$cogl" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name r.fov r_fov' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name r_fov r.fov' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
 
 # Tycho-2, query against 1991.25 position. add integer version of tyc2 id for matching
 echo "\nLooking for Tycho-2 entry"
@@ -262,7 +262,7 @@ epoch=1991.25
 coty=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name RA(ICRS) RA_ICRS_' icmd2='colmeta -name DE(ICRS) DE_ICRS_' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name RA_ICRS_ RA(ICRS)' icmd2='colmeta -name DE_ICRS_ DE(ICRS)' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
 # Gaia, query against 2015 position
 echo "\nLooking for Gaia entry"
@@ -270,7 +270,7 @@ epoch=2015.0
 coga=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $coga
 vizquery -site=$site -mime=votable -source=I/337/gaia -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -c="$coga" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name <FG> _FG_' icmd2='colmeta -name e_<FG> e__FG_' icmd2='colmeta -name <Gmag> _Gmag_' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name _FG_ <FG>' icmd2='colmeta -name e__FG_ e_<FG>' icmd2='colmeta -name _Gmag_ <Gmag>' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
@@ -302,7 +302,7 @@ epoch=2006.9
 cosp=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $cosp
 curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$cosp" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name dec dec_' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name dec_ dec' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
 
 # look for IRS spectra in the observing log
 echo "\nLooking for IRS staring observation in Spitzer log"
