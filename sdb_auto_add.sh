@@ -25,6 +25,6 @@ then
     rm $add
 fi
 
-# osascript -e "tell Application \"System Events\" to display alert \"$id added to sdb\""
+#osascript -e "tell Application \"System Events\" to display alert \"$id added to sdb\""
 
 popd

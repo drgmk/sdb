@@ -17,15 +17,18 @@
 # motion of a target change (i.e. going from PPMXL->Gaia). Anything derived from this ID,
 # such as entries in other tables and file names, will then also need to change. Partial
 # resolutions are to limit the precision of the ID (e.g. 0.1arcsec) and to use
-# bright-star catalogues (HIP,TYC,UCAC4,PPMXL) before Gaia. The first Gaia astrometry is
-# not far away (TGAS,HTPM) so it may be that the whole database can be rebuilt at this
-# time. Some version control could be incorporated into the ID (e.g. sdb-v1-XXXXXX) to
-# help avoid later confusion if duplicate info makes it into the wild.
+# bright-star catalogues (HIP,TYC,UCAC4,PPMXL) in preference to Gaia. A more probable
+# solution is to rebuild everything for each Gaia release, if that looks necessary. Some
+# version control could be incorporated into the ID (e.g. sdb-v1-XXXXXX) to help avoid
+# later confusion if duplicate info makes it into the wild.
 
-# script takes name as first arg, which will be looked for with sesame. if two args are
-# given these are assumed to coordinates in degrees at epoch 2000.0. these will first be
-# used to look for an object name and a more refined set of coordinates, failure meaning
-# that there won't be a list of cross-ids and the given coords will be used instead
+# script takes name as first arg, which will be looked for with sesame. this can be a set
+# of coordinates in 2MASS-style. if two args are given these are assumed to coordinates
+# in degrees at epoch 2000.0. these will first be used to look for an object name and a
+# more refined set of coordinates, failure meaning that there won't be a list of
+# cross-ids and the given coords will be used as given
+
+# TODO: hone shell ninja skills to remove all echo/sed rubbish
 
 # some filenames, include randomness in case we want to run this script in parallel
 fp=/tmp/pos$RANDOM.xml
@@ -47,6 +50,7 @@ mode=append  # set this to dropcreate to start afresh
 rad=2               # rad is the default match radius in arcsec, greater for GALEX
 sdbprefix=sdb-v1-   # prefix for ids
 site=fr             # vizquery site
+
 echo "------- db-insert-one.sh --------"
 echo "Using default match radius of $rad arcsec"
 echo "and prefix for sdb ids as $sdbprefix"
@@ -69,7 +73,8 @@ then
 	echo "No object found at $1 $2"
     fi
 fi
-# if given id is a coordinate, set this as the id for later matching
+
+# if given id looks like a coordinate, set this as the id for later matching
 if [[ $1 =~ ^J[0-9]{6,}[+-][0-9]{6,} ]]
 then
     id=$1
@@ -80,7 +85,7 @@ fi
 # corrected to epoch 2000.0 (where possible)
 if [ "$id" != "" ]
 then
-    echo "\nSesame using name:$id"
+    echo "\nsesame using name:$id"
     co=`sesame "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
@@ -88,41 +93,35 @@ then
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
     if [ "$cojoin" == "" ]
     then
-	echo "Sesame found nothing for:$1"
-	echo "only id given so nothing to do, exiting"
+	echo "  sesame found nothing for:$1"
+	echo "  only id given so nothing to do, exiting"
 	exit
     fi
-    echo "Sesame got coords:$cojoin"
+    echo "  sesame got coords:$cojoin"
 else
-    echo "No name found, using given coords"
+    echo "  no name found, using given coords"
     cojoin=$1,$2
 fi
-echo "Final set of coords:$cojoin"
+echo "\nFinal set of coords:$cojoin"
 
 # now try to find something at these coords in a table with proper motions, this will
 # allow use of epoch-corrected coords when searching for matches in other tables
 # below. put in a file to use again below.
-echo "\nLooking in proper motion catalogues (stilts error below means nothing found)"
+echo "\nLooking in proper motion catalogues"
 
-# get multiple tables with the same column format, give tables in order of precision so don't sort
+# get multiple tables with the same column format, give tables in order of precision so
+# don't sort. tycho2 has pm as floats but others are double which causes problems for
+# stilts. assume instead that tyc2 is subsumed into ppmxl and likely to be in tgas
 vizquery -site=$site -mime=votable -source=I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
 $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
-
-
-# For getting all the dates first, the dates we want are: 2000.0 (sdbid), 2015.0
-# (TGAS), 2010.3 (WISE), 2007.0 (AKARI,Spitzer), 1999.3 (2MASS), 1991.25 (HIP/Tyc),
-# 1983.5 (IRAS in J2000)
-#vizquery -site=$site -mime=votable -source=I/337/tgas,I/311/hip2,I/259/tyc2,ucac4,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -sort=_r -c=$cojoin -out="_RA" -out="_DE" -out="_RA(J2000,2010.3)" -out="_DE(J2000,2010.3)" -out="_RA(J2000,2007.0)" -out="_DE(J2000,2007.0)" -out="_RA(J2000,1999.3)" -out="_DE(J2000,1999.3)" -out="_RA(J2000,1991.25)" -out="_DE(J2000,1991.25)" -out="_RA(J2000,1983.5)" -out="_DE(J2000,1983.5)" -out="_RA(J2000,2015.0)" -out="_DE(J2000,2015.0)" > $fp
 
 # update coordinates if a pm was found, otherwise try harder with sesame
 cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
 if [ "$cotmp" != "" ]
 then
     cojoin=$cotmp
-    echo "Success, updated epoch 2000.0 coord from pm:$cojoin"
+    echo "  success, updated epoch 2000.0 coord from pm:$cojoin"
 else
-    # contingency for no pm matches needed here! (give everything input coord)
-
     echo "Trying sesame"
     co=`sesame "$id"`
     ok=`echo $co | grep 'pmRA'`
@@ -130,9 +129,9 @@ else
     then
 	pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
 	pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
-	echo "found pm $pmra,$pmde with sesame, keeping original coord:$cojoin"
+	echo "  found pm $pmra,$pmde with sesame, keeping original coord:$cojoin"
     else
-	echo "No pm source found, keeping:$cojoin and assuming pm is zero"
+	echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
 	pmra=0.0
 	pmde=0.0
     fi
@@ -148,16 +147,16 @@ echo "\nCreating sdb id"
 echo ra,dec > $ft
 echo $cojoin >> $ft
 sdbid=$sdbprefix`$stilts tpipe in=$ft ifmt=csv cmd='random' cmd='replacecol ra degreesToHms(ra,2)' cmd='replacecol dec degreesToDms(dec,1)' omode=out out=- ofmt=csv-noheader | sed "s/://g" | sed "s/,//"`
-echo "Source id is:$sdbid"
+echo "  source id is:$sdbid"
 
 # finally, see if we have this sbdid already
 res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
-    echo "Stopping here, have sdbid $sdbid in xids table"
-#    exit
+    echo "\nStopping here, have sdbid $sdbid in xids table"
+    exit
 else
-    echo "New target, going ahead"
+    echo "\nNew target, going ahead"
 fi
 mysql $db -e "DELETE FROM xids WHERE sdbid='$sdbid';"
 
@@ -255,7 +254,7 @@ epoch=2005.0
 cogl=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $cogl
 vizquery -site=$site -mime=votable -source=II/312/ais -c.rs=5 -sort=_r -out.max=1 -out.add=_r -out.add=objid -out.add=Fflux -out.add=e_Fflux -out.add=Nflux -out.add=e_Nflux -c="$cogl" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name r.fov r_fov' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
 
 # Tycho-2, query against 1991.25 position. add integer version of tyc2 id for matching
 echo "\nLooking for Tycho-2 entry"
@@ -263,7 +262,7 @@ epoch=1991.25
 coty=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name RA(ICRS) RA_ICRS_' icmd2='colmeta -name DE(ICRS) DE_ICRS_' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
 # Gaia, query against 2015 position
 echo "\nLooking for Gaia entry"
@@ -271,7 +270,7 @@ epoch=2015.0
 coga=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $coga
 vizquery -site=$site -mime=votable -source=I/337/gaia -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -c="$coga" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name <FG> _FG_' icmd2='colmeta -name e_<FG> e__FG_' icmd2='colmeta -name <Gmag> _Gmag_' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
@@ -303,7 +302,7 @@ epoch=2006.9
 cosp=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 echo $cosp
 curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$cosp" > $ft
-$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name dec dec_' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
 
 # look for IRS spectra in the observing log
 echo "\nLooking for IRS staring observation in Spitzer log"
@@ -319,3 +318,6 @@ $stilts tmatch2 in1=$fp ifmt1=votable in2=$ft ifmt2=votable ocmd='keepcols "sdbi
 rm $fp
 rm $ft
 rm $ft2
+
+echo "\nDone"
+echo "------- db-insert-one.sh --------"

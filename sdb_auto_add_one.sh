@@ -70,17 +70,20 @@ fi
 #./cassis_download.sh
 
 # extract the photometry, need to know sdbid for that
+echo "\n"
 sdbid=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$id';")
 ./sdb_getphot.py -i "$sdbid"
 popd
 
-# turn this into an IDL save file
+# run fitting, can't set DYLD_LIBRARY_PATH within launchctl
+echo "\nRunning sdf"
 pushd $sedroot
-echo "sdb_csv2xdr,'$sdbid/public/$sdbid-rawphot.txt'" | idl
-
-# run the SED fitting
-echo "sedfitg,/AUTO,xdr='$sdbid/public/$sdbid.xdr',/COMPLETE" | idl
+export DYLD_LIBRARY_PATH=/Users/grant/astro/code/github/MultiNest/lib
+python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt -p -w
 popd
 
 # remove the lock file
 rm $lock
+
+echo "\nDone"
+echo "------- sdb_auto_add_one.sh --------"
