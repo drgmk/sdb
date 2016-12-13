@@ -3,7 +3,8 @@
 
 """Generate HTML pages to browse database
 
-   Uses non-standard version of astropy to ensure html anchors in jsviewer tables
+   Uses non-standard version of astropy to ensure html anchors in
+   jsviewer tables
 
    """
 
@@ -20,15 +21,17 @@ import mysql.connector
 import config as cfg
 
 def sdb_www_get_samples():
-    """Get a list of samples
+    """Get a list of samples.
     
-    Get a list of samples from the database. Add "everything" and "public"
-    samples, "public" might not show everything in the list, but
-    "everything" will (but may not be visible to anyone).
+    Get a list of samples from the database. Add "everything" and
+    "public" samples, "public" might not show everything in the list,
+    but "everything" will (but may not be visible to anyone).
     """
     
-    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],
+                                  password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],
+                                  database=cfg.mysql['db'])
     cursor = cnx.cursor(buffered=True)
     cursor.execute("SELECT DISTINCT project FROM projects;")
     samples = cursor.fetchall() # a list of tuples
@@ -38,19 +41,21 @@ def sdb_www_get_samples():
     return( samples + ['public','everything'] )
 
 def sdb_www_sample_tables():
-    """Generate HTML pages with sample tables
+    """Generate HTML pages with sample tables.
 
     Extract the necessary information from the database and create HTML
-    pages with the desired tables, one for each sample. These are generated
-    using astropy's HTML table writer and the jsviewer,which makes tables
-    that are searchable and sortable.
+    pages with the desired tables, one for each sample. These are 
+    generated using astropy's HTML table writer and the jsviewer,which
+    makes tables that are searchable and sortable.
     """
 
     wwwroot = cfg.www['root']+'samples/'
 
     # set up connection
-    cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                  host=cfg.mysql['host'],database=cfg.mysql['db'])
+    cnx = mysql.connector.connect(user=cfg.mysql['user'],
+                                  password=cfg.mysql['passwd'],
+                                  host=cfg.mysql['host'],
+                                  database=cfg.mysql['db'])
     cursor = cnx.cursor(buffered=True)
 
     # get a list of samples and generate their pages
@@ -63,8 +68,9 @@ def sdb_www_sample_tables():
         if not isdir(wwwroot+sample):
             mkdir(wwwroot+sample)
 
-        # make .htaccess if needed, don't put one in "public" or those ending with "_"
-        # so stuff in those directories remains visible to those not logged in
+        # make .htaccess if needed, don't put one in "public" or those
+        # ending with "_" so stuff in those directories remains visible
+        # to those not logged in
         if  sample[-1] != '_' and sample != 'public':
             fd = open(wwwroot+sample+'/.htaccess','w')
             fd.write('AuthName "Must login"\n')
@@ -89,10 +95,10 @@ def sdb_www_sample_tables():
                        " GROUP BY sdbid;")
         cursor.execute("DROP TABLE IF EXISTS phot;")
         cursor.execute("CREATE TEMPORARY TABLE phot SELECT"
-                       " name as sdbid,ROUND(-2.5*log10(ANY_VALUE(flux)/3882.37),1) as Vmag"
-                       " FROM sed_photosphere WHERE band='VJ' GROUP BY sdbid;")
+                       " id as sdbid,ROUND(-2.5*log10(ANY_VALUE(model_jy)/3882.37),1) as Vmag"
+                       " FROM sdb_results.phot WHERE filter='VJ' GROUP BY id;")
         sel = ("SELECT "
-               "CONCAT('<a href=\"../../seds/masters/',sdbid,'/public/',sdbid,'-sed.html\">',sdbid,'</a>') as sdbid,"
+               "CONCAT('<a target=\"_blank\" href=\"../../seds/masters/',sdbid,'/public/',sdbid,'-sed.html\">',sdbid,'</a>') as sdbid,"
                "CONCAT('<a href=\"http://simbad.u-strasbg.fr/simbad/sim-basic?submit=SIMBAD+search&Ident=',main_id,'\" target=\"_blank\">',main_id,'</a>') as Simbad,"
                "hd.xid as HD,"
                "hip.xid as HIP,"
@@ -105,8 +111,8 @@ def sdb_www_sample_tables():
                "teff as Teff,"
                "ROUND(log10(lstar),2) as LogLstar,"
                "1e3/COALESCE(tgas.plx,simbad.plx_value) AS Dist,"
-               "ROUND(log10(ldisklstar),1) as Log_f,"
-               "tdisk_cold as T_disk")
+               "ROUND(log10(ldisk_lstar),1) as Log_f,"
+               "tdisk as T_disk")
             
         # here we decide which samples get all targets, for now "everything" and "public"
         # get everything, but this could be changed so that "public" is some subset of
@@ -119,8 +125,8 @@ def sdb_www_sample_tables():
         sel += (" LEFT JOIN simbad USING (sdbid)"
                 " LEFT JOIN tyc2 USING (sdbid)"
                 " LEFT JOIN photometry.tgas ON COALESCE(-tyc2.hip,tyc2.tyc2id)=tgas.tyc2hip"
-                " LEFT JOIN sed_stfit on sdbid=sed_stfit.name"
-                " LEFT JOIN sed_bbfit on sdbid=sed_bbfit.name"
+                " LEFT JOIN sdb_results.star on sdbid=star.id"
+                " LEFT JOIN sdb_results.disk_r on sdbid=disk_r.id"
                 " LEFT JOIN hd USING (sdbid)"
                 " LEFT JOIN hip USING (sdbid)"
                 " LEFT JOIN gj USING (sdbid)"
@@ -145,7 +151,7 @@ def sdb_www_sample_tables():
 #        tsamp.write(fd,format='ascii.html',htmldict={'raw_html_cols':['sdbid','Simbad','Finder'],
 #                                                     'raw_html_clean_kwargs':{'attributes':{'a':['href','target']}} })
         jsviewer.write_table_jsviewer(tsamp,fd,max_lines=10000,table_id=sample,
-                                      table_class="display compact",jskwargs={'display_length':100},
+                                      table_class="display compact",jskwargs={'display_length':25},
                                       raw_html_cols=['sdbid','Simbad','Finder'],
                                       raw_html_clean_kwargs={'attributes':{'a':['href','target']}} )
         fd.close()
@@ -154,9 +160,10 @@ def sdb_www_sample_tables():
     cnx.close()
 
 def sdb_www_sample_plots():
-    """Generate HTML pages with sample plots
+    """Generate HTML pages with sample plots.
 
-    Extract the necessary information from the database and plot using bokeh.
+    Extract the necessary information from the database and plot
+    using bokeh.
     """
 
     wwwroot = cfg.www['root']+'samples/'
@@ -173,7 +180,7 @@ def sdb_www_sample_plots():
         print("    sample:",sample)
 
         # get data, ensure primary axes are not nans
-        selall = "SELECT sdbid,main_id,teff,lstar,IFNULL(ldisklstar,-1) as ldisklstar,IFNULL(tdisk_cold,-1) as tdisk_cold"
+        selall = "SELECT sdbid,main_id,teff,lstar,IFNULL(ldisk_lstar,-1) as ldisklstar,IFNULL(tdisk,-1) as tdisk"
         selnum = "SELECT COUNT(*)"
         if sample == 'everything' or sample == 'public':
             selall += " FROM sdb_pm"
@@ -182,11 +189,11 @@ def sdb_www_sample_plots():
             selall += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
             selnum += " FROM "+cfg.mysql['sampledb']+"."+sample+" LEFT JOIN sdb_pm USING (sdbid)"
         selall += (" LEFT JOIN simbad USING (sdbid)"
-                   " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
-                   " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name")
+                   " LEFT JOIN sdb_results.star ON sdbid=star.id"
+                   " LEFT JOIN sdb_results.disk_r ON sdbid=star.id")
         selnum += (" LEFT JOIN simbad USING (sdbid)"
-                   " LEFT JOIN sed_stfit ON sdbid=sed_stfit.name"
-                   " LEFT JOIN sed_bbfit ON sdbid=sed_bbfit.name")
+                   " LEFT JOIN sdb_results.star ON sdbid=star.id"
+                   " LEFT JOIN sdb_results.disk_r ON sdbid=star.id")
         selall += " WHERE teff IS NOT NULL AND lstar IS NOT NULL"
         # limit table sizes
         if sample != 'everything':
@@ -258,7 +265,7 @@ def sdb_www_sample_plots():
         p = gridplot([[hr,ft]],sizing_mode='stretch_both',
                      toolbar_location='above')
                      
-        url = "/~grant/sdb/seds/masters/@sdbid/public/@sdbid"+".png"
+        url = "/~grant/sdb/seds/masters/@sdbid/public/@sdbid"+"-sed.html"
         taptool = hr.select(type=TapTool)
         taptool.callback = OpenURL(url=url)
         taptool = ft.select(type=TapTool)
