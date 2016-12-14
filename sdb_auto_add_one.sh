@@ -19,7 +19,7 @@ eval $tmp
 # other knobs as required
 rad=2               # rad is the default match radius in arcsec
 site=fr             # vizquery site
-echo "------- sdb_auto_add_one.sh --------"
+echo "/~~~~~~ sdb_auto_add_one.sh ~~~~~~/"
 
 # the basic stilts command to use, no -Xms1g -Xmx1g since presumably little memory needed
 stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
@@ -86,4 +86,4 @@ popd
 rm $lock
 
 echo "\nDone"
-echo "------- sdb_auto_add_one.sh --------"
+echo "------- sdb_auto_add_one.sh -------"
