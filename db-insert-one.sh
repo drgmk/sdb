@@ -51,7 +51,7 @@ rad=2               # rad is the default match radius in arcsec, greater for GAL
 sdbprefix=sdb-v1-   # prefix for ids
 site=fr             # vizquery site
 
-echo "------- db-insert-one.sh --------"
+echo "/~~~~~ db-insert-one.sh ~~~~~~/"
 echo "Using default match radius of $rad arcsec"
 echo "and prefix for sdb ids as $sdbprefix"
 echo "and $site mirror for vizquery calls"
@@ -86,7 +86,7 @@ fi
 if [ "$id" != "" ]
 then
     echo "\nsesame using name:$id"
-    co=`sesame "$id" | egrep -w 'jradeg|jdedeg'`
+    co=`sesame -rS "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
     ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
@@ -319,5 +319,8 @@ rm $fp
 rm $ft
 rm $ft2
 
+# note success (or at least completion)
+mysql $db -N -e "INSERT INTO sdb_import_finished (sdb) VALUES ('$sdbid');"
+
 echo "\nDone"
-echo "------- db-insert-one.sh --------"
+echo "------- db-insert-one.sh -------"
