@@ -24,6 +24,7 @@ done
 proj=`echo $1 | sed "s/.*\.//"`
 
 # modify source table, these bits may need to be done by hand
+# TODO: put this in a separate script
 echo "if this is a real sample you may want to execute some sql:"
 echo "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
 echo "UPDATE $1 LEFT JOIN sdb.xids ON name=xid SET $1.sdbid=xids.sdbid;"
