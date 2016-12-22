@@ -320,7 +320,7 @@ rm $ft
 rm $ft2
 
 # note success (or at least completion)
-mysql $db -N -e "INSERT INTO sdb_import_finished (sdb) VALUES ('$sdbid');"
+mysql $db -N -e "INSERT INTO import_finished (sdb) VALUES ('$sdbid');"
 
 echo "\nDone"
 echo "------- db-insert-one.sh -------"

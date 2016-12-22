@@ -1,9 +1,9 @@
 #sdb
 
-A database of stars, primarily focussed on SEDs and IR excesses, but probably useful for
-other things too. Structure is based around samples, which might be for example surveys,
-publications, or physical associations. Aggregate information for samples is available in
-plots.
+A database of stars, primarily focussed on SEDs and IR excesses, but 
+probably useful for other things too. Structure is based around samples,
+which might be for example surveys, publications, or physical 
+associations. Aggregate information for samples is available in plots.
 
 ##Initial setup
 
@@ -32,9 +32,8 @@ Further instructions at each step are given in the relevant codes.
 --* add sdbid column to sample and sample to projects table if necessary
 2. Grab spectra files, CASSIS for now with cassis_download.sh
 3. Extract photometry into *-rawphot files with sdb_getphot.py
-4. Convert these to IDL save files with sdb_csv2xdr.pro
-5. Run sedfit_parallel.pl from the masters directory to ensure correct config
-6. Generate tables and plots with sdb_www.py
+4. Do fitting with sdf's fit.py
+5. Generate tables and plots with sdb_www.py
 
 ##TODOs
 
@@ -46,7 +45,7 @@ There are a great many of these, way more than listed here.
 - [ ] www-queryable basic parameters for each system
 - [ ] Daily list of results for targets that appeared in astro-ph
 - [ ] Include as many tables of photometry as possible, particularly far-IR/mm ones
-- [ ] Complete list of IRs spectra, currently an auto download that misses things (e.g. ptg=1)
+- [ ] Complete list of IRS spectra, currently an auto download that misses things (e.g. ptg=1)
 - [ ] Way for user to see which SEDs are available to them
 - [ ] Better SED fitting software, current is very good, but disk models basic/crappy
 - [ ] Management of SED fitting configuration, so far global (i.e. non-existent)
