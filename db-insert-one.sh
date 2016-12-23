@@ -158,6 +158,11 @@ then
 else
     echo "\nNew target, going ahead"
 fi
+
+# place an entry that we'll remove on completion 
+mysql $db -N -e "INSERT INTO import_failed (sdbid) VALUES ('$sdbid');"
+
+# clear any previous xids
 mysql $db -e "DELETE FROM xids WHERE sdbid='$sdbid';"
 
 # create temp file with sdbid in it, will use multiple times below including being added
@@ -320,7 +325,7 @@ rm $ft
 rm $ft2
 
 # note success (or at least completion)
-mysql $db -N -e "INSERT INTO import_finished (sdb) VALUES ('$sdbid');"
+mysql $db -N -e "DELETE FROM import_failed WHERE sdbid = '$sdbid';"
 
 echo "\nDone"
 echo "------- db-insert-one.sh -------"
