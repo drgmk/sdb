@@ -75,11 +75,13 @@ sdbid=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$id';")
 ./sdb_getphot.py -i "$sdbid"
 popd
 
-# run fitting, can't set DYLD_LIBRARY_PATH within launchctl
+# run fitting, do once without spectra for speed, and then redo with
+# can't set DYLD_LIBRARY_PATH within launchctl
 echo "\nRunning sdf"
 pushd $sedroot
 export DYLD_LIBRARY_PATH=/Users/grant/astro/code/github/MultiNest/lib
-python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt -p -w
+python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt --no-spectra -p -w
+python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt -u -p -w
 popd
 
 # remove the lock file
