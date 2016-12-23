@@ -159,7 +159,7 @@ else
     echo "\nNew target, going ahead"
 fi
 
-# place an entry that we'll remove on completion 
+# place an entry that we'll remove on completion
 mysql $db -N -e "INSERT INTO import_failed (sdbid) VALUES ('$sdbid');"
 
 # clear any previous xids

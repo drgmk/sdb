@@ -7,7 +7,7 @@
 #
 # Host: localhost (MySQL 5.7.10)
 # Database: sdb
-# Generation Time: 2016-12-12 18:31:51 +0000
+# Generation Time: 2016-12-23 16:24:01 +0000
 # ************************************************************
 
 
@@ -179,6 +179,18 @@ CREATE TABLE `galex` (
   `nr` double DEFAULT NULL,
   PRIMARY KEY (`sdbid`),
   CONSTRAINT `sdbid_gal` FOREIGN KEY (`sdbid`) REFERENCES `sdb_pm` (`sdbid`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+
+
+# Dump of table import_failed
+# ------------------------------------------------------------
+
+DROP TABLE IF EXISTS `import_failed`;
+
+CREATE TABLE `import_failed` (
+  `sdbid` varchar(25) NOT NULL,
+  PRIMARY KEY (`sdbid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 
@@ -602,8 +614,8 @@ VALUES
 	(1,'sdb.seip','seip.sdbid','\'MIPS24\'','m1_f_psf','m1_df_psf','0.01*m1_f_psf','0','\'SEIP\'','uJy','CONCAT(\'Brt:\',IFNULL(m1_brtfrac,\'\'))','CONCAT(\'Ext:\',IFNULL(m1_extfrac,\'\'))','AND m1_fluxtype=1',0),
 	(1,'sdb.tyc2','tyc2.sdbid','\'BT\'','BTmag','e_BTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',IFNULL(prox,\'\'))','CONCAT(\'HIP:\',IFNULL(HIP,\'\'))','',0),
 	(1,'sdb.tyc2','tyc2.sdbid','\'VT\'','VTmag','e_VTmag','0.006','0','\'2000A&A...355L..27H\'','mag','CONCAT(\'Prox:\',IFNULL(prox,\'\'))','CONCAT(\'HIP:\',IFNULL(HIP,\'\'))','',0),
-	(1,'sons.SONS_results','id','\'WAV450\'','IF(Peak_Flux_450_ IS NULL,3*Peak_Flux_error_450_,IF(Disk_450_=\'P\',Peak_Flux_450_,Int_Flux_450_))','IF(Disk_450_=\'P\',Peak_Flux_error_450_,Int_flux_error_450_)','0','IF(Upper_Limit_450_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',IFNULL(no_,\'\'))','CONCAT(\'Notes:\',IFNULL(Notes,\'\'))','AND Time_ IS NOT NULL',1),
-	(1,'sons.SONS_results','id','\'WAV850\'','IF(Peak_Flux_850_ IS NULL,3*Peak_Flux_error_850_,IF(Disk_850_=\'P\',Peak_Flux_850_,Int_Flux_850_))','IF(Disk_850_=\'P\',Peak_Flux_error_850_,Int_flux_error_850_)','0','IF(Upper_Limit_850_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',IFNULL(no_,\'\'))','CONCAT(\'Notes:\',IFNULL(Notes,\'\'))','AND Time_ IS NOT NULL',1),
+	(1,'sons.SONS_results','id','\'WAV450\'','IF(Peak_Flux_450_ IS NULL,3*Peak_Flux_error_450_,IF(Disk_450_=\'P\',Peak_Flux_450_,Int_Flux_450_))','IF(Disk_450_=\'P\',Peak_Flux_error_450_,Int_flux_error_450_)','0','IF(Upper_Limit_450_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',IFNULL(no_,\'\'))','CONCAT(\'Notes:\',IFNULL(Notes,\'\'))','AND Time_ IS NOT NULL',0),
+	(1,'sons.SONS_results','id','\'WAV850\'','IF(Peak_Flux_850_ IS NULL,3*Peak_Flux_error_850_,IF(Disk_850_=\'P\',Peak_Flux_850_,Int_Flux_850_))','IF(Disk_850_=\'P\',Peak_Flux_error_850_,Int_flux_error_850_)','0','IF(Upper_Limit_850_=\'Y\',1,0)','\'SONS\'','mJy','CONCAT(\'No:\',IFNULL(no_,\'\'))','CONCAT(\'Notes:\',IFNULL(Notes,\'\'))','AND Time_ IS NOT NULL',0),
 	(-1,'su06','HD_ID','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2006ApJ...653..675S\'','mJy','CONCAT(\'Age:\',IFNULL(age,\'\'))','\'\'','',0),
 	(-1,'trilling07','trilling07.name','\'MIPS24\'','F24','e_F24','F24*0.01','0','\'2007ApJ...658.1289T\'','mJy','\'\'','\'\'','',0),
 	(-1,'trilling08','trilling08.ID','\'MIPS24\'','F24','0','F24*0.01','0','\'2008ApJ...674.1086T\'','mJy','\'\'','\'\'','',0),
