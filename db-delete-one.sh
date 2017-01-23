@@ -1,6 +1,7 @@
 #!/bin/sh
 
-# delete an sdbid from sdb
+# delete an sdbid from sdb, use this when an import fails for some
+# reason (i.e. is left in the "import_failed" table in sdb)
 
 # check we were given an sdbid
 if [[ $1 =~ ^sdb-v[0-9]-[0-9]{6}\.[0-9]{2}[+-][0-9]{6}\.[0-9] ]]
@@ -24,7 +25,7 @@ do
 done
 
 # sbd tables
-for t in 2mass akari_irc allwise gaia galex projects sdb_import_finished seip simbad spectra tyc2 xids sdb_pm;
+for t in 2mass akari_irc allwise gaia galex projects seip simbad spectra tyc2 xids sdb_pm;
 do
     st="DELETE FROM $t WHERE sdbid = '$1';"
     echo $st
@@ -34,7 +35,7 @@ done
 # results
 mysql $db_res -N -e "SHOW TABLES;" | while read t
 do
-    st="UPDATE $t SET sdbid = NULL WHERE id = '$1';"
+    st="UPDATE $t SET id = NULL WHERE id = '$1';"
     echo $st
-    mysql $db_samp -N -e "$st"
+    mysql $db_res -N -e "$st"
 done
