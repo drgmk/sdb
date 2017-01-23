@@ -78,8 +78,12 @@ def sdb_getphot_one(id):
     # get sdbid and xids
     cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
     if cursor.rowcount > 1:
-       print("Found multiple sdbids for given ID {}, exiting".format(id))
-       exit()
+        print("Found multiple sdbids for given ID in xids {}, exiting".format(id))
+        exit()
+    elif cursor.rowcount == 0:
+        print("No sdbid for ID in xids {}, exiting".format(id))
+        exit()
+
     sdbid = cursor.fetchall()[0][0]
 
     # make cross id table to match on
