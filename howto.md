@@ -24,6 +24,16 @@ associations. Aggregate information for samples is available in plots.
    directories are also protected where they have proprietary photometry. Navigation is
    (currently) via apache's directory listing.
 
+##Catalogues
+
+For now this is only the sub-mm compilation. Is extracted from the database with:
+
+/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver sqlclient db='jdbc:mysql://localhost/debris' user=X password=X sql="SELECT * FROM submm_obs ORDER BY ref DESC" ofmt=ipac
+
+and put back with:
+
+tosql.pl -d X -f submm_obs.txt -i ipac
+
 ##Standard workflow
 
 Further instructions at each step are given in the relevant codes.
