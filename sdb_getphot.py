@@ -120,9 +120,8 @@ def sdb_getphot_one(id):
     tphot['Err'][np.invert(np.isfinite(tphot['Err']))] = 0.0
     tphot['Sys'][np.invert(np.isfinite(tphot['Sys']))] = 0.0
 
-    # get some addtional metadata like stellar params
-#    cursor.execute('SELECT main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode from simbad WHERE sdbid=%(tmp)s;',{'tmp':sdbid})
-    cursor.execute("SELECT main_id,sp_type,sp_bibcode,COALESCE(tgas.plx,simbad.plx_value) AS plx_value,COALESCE(tgas.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(tgas.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN tyc2 USING (sdbid) LEFT JOIN photometry.tgas ON COALESCE(-tyc2.hip,tyc2.tyc2id)=tgas.tyc2hip where sdbid=%(tmp)s;",{'tmp':sdbid})
+    # get some addtional stellar data
+    cursor.execute("SELECT main_id,sp_type,sp_bibcode,COALESCE(gaia.plx,simbad.plx_value) AS plx_value,COALESCE(gaia.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(gaia.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
     vals = cursor.fetchall()
     keys = cursor.column_names
     if len(vals) > 0:
