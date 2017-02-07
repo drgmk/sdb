@@ -9,8 +9,8 @@ sed_db_samples.
 
 import argparse
 from collections import OrderedDict
-from os import mkdir,rename,remove
-from os.path import isdir,isfile
+from os import mkdir,rename,remove,utime
+from os.path import isdir,isfile,getmtime,getctime
 import glob
 import hashlib
 import numpy as np
@@ -33,23 +33,25 @@ def sdb_write_rawphot(file,tphot,tspec):
     """
     
     fh = open(file,'w')
-    print('\ photometry etc for '+tphot.meta['keywords']['id']+'\n\\',file=fh)
-    
-    for key in tphot.meta['keywords']:
-        print("\\{}={}".format(key,tphot.meta['keywords'][key]),file=fh)
-    print('\\',file=fh)
-
-    # if len(tphot) > 0:
+    print('\ photometry/spectra for '+tphot.meta['keywords']['id']['value']+'\n\\',file=fh)
     tphot.write(fh,format='ascii.ipac')
-
     fh.close()
 
 
 def filehash(file):
-    """Return an md5 hash for a given file."""
+    """Return an md5 hash for a given file, ignoring IPAC comments."""
     hasher = hashlib.md5()
-    f = open(file, 'rb')
-    buf = f.read()
+    buf = b''
+    with open(file,'r') as f:
+        for text in f:
+            if len(text) <= 2: # "\" and newline at a minimum
+                pass
+            elif text[0:2] == '\ ':
+                pass
+            else:
+#                print(len(text),"|"+text+"|")
+                buf += text.encode()
+
     hasher.update(buf)
     return hasher.hexdigest()
 
@@ -154,6 +156,11 @@ def sdb_getphot_one(id):
     for i in range(len(tspec)):
         if tspec['file'][i] != b'':
             tphot.meta['keywords'][tspec['instrument'][i].decode()+str(i)] = tspec['file'][i].decode()
+
+    # ensure keyword structure is correct for IPAC ascii format, which
+    # is {'keywords':{'keyword': {'value': value} }
+    for key in tphot.meta['keywords'].keys():
+        tphot.meta['keywords'][key] = {'value':tphot.meta['keywords'][key]}
 
     # find any private data by making table from phot and spec,
     # bibcode and private are the common columns
