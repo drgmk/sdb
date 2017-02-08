@@ -10,7 +10,7 @@ sed_db_samples.
 import argparse
 from collections import OrderedDict
 from os import mkdir,rename,remove,utime
-from os.path import isdir,isfile,getmtime,getctime
+from os.path import isdir,isfile,getmtime
 import glob
 import hashlib
 import numpy as np
@@ -120,6 +120,10 @@ def sdb_getphot_one(id):
     tphot['Err'][np.invert(np.isfinite(tphot['Err']))] = 0.0
     tphot['Sys'][np.invert(np.isfinite(tphot['Sys']))] = 0.0
 
+    # ready these to receive meta
+    tphot.meta['keywords'] = {}
+    tphot.meta['comments'] = []
+
     # get some addtional stellar data
     cursor.execute("SELECT main_id,sp_type,sp_bibcode,COALESCE(gaia.plx,simbad.plx_value) AS plx_value,COALESCE(gaia.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(gaia.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
     vals = cursor.fetchall()
@@ -129,8 +133,8 @@ def sdb_getphot_one(id):
     tphot.meta['keywords']['id'] = sdbid
 
     # get aors for any spectra and add file names
-    cursor.execute('SELECT instrument,aor_key,bibcode,private FROM spectra WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
-    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','bool'))
+    cursor.execute('SELECT instrument,aor_key,bibcode,private,IFNULL(exclude,0) as exclude FROM spectra LEFT JOIN spectra_exclude USING (aor_key,instrument) WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
+    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','bool','bool'))
     for row in cursor:
         tspec.add_row(row)
 
@@ -154,10 +158,13 @@ def sdb_getphot_one(id):
     # name so that the keys are unique
     for i in range(len(tspec)):
         if tspec['file'][i] != b'':
-            tphot.meta['keywords'][tspec['instrument'][i].decode()+str(i)] = tspec['file'][i].decode()
+            if tspec['exclude'][i]:
+                tphot.meta['comments'].append(tspec['instrument'][i].decode()+str(i)+'='+tspec['file'][i].decode())
+            else:
+                tphot.meta['keywords'][tspec['instrument'][i].decode()+str(i)] = tspec['file'][i].decode()
 
-    # ensure keyword structure is correct for IPAC ascii format, which
-    # is {'keywords':{'keyword': {'value': value} }
+    # rearrange to ensure keyword structure is correct for IPAC ascii
+    # format, which is {'keywords':{'keyword': {'value': value} }
     for key in tphot.meta['keywords'].keys():
         tphot.meta['keywords'][key] = {'value':tphot.meta['keywords'][key]}
 
@@ -197,9 +204,11 @@ def sdb_getphot_one(id):
         oldhash = ''
         if isdir(seddir) == False:
             mkdir(seddir)
+            mtime = getmtime(seddir)
         else:
             if isfile(seddir+filename):
                 oldhash = filehash(seddir+filename)
+                mtime = getmtime(seddir+filename)
 
         # create the .htaccess file if necessary
         if not isfile(seddir+'/.htaccess') and dir != 'public':
@@ -229,6 +238,9 @@ def sdb_getphot_one(id):
             else:
                 print(sdbid,dir,": Creating file")
             rename(tmpfile,seddir+filename)
+
+            # hack to retain mod time of old file
+#            utime(seddir+filename,times=(mtime,mtime))
         else:
             print(sdbid,dir,": Same hash, leaving old file")
             remove(tmpfile)
