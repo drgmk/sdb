@@ -122,7 +122,7 @@ def sdb_getphot_one(id):
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
     tphot = Table(names=cursor.column_names,
-                  dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool','bool'))
+                  dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','i1','i1'))
     for row in cursor:
         try:
             tphot.add_row(row)
@@ -140,7 +140,7 @@ def sdb_getphot_one(id):
     tphot.meta['comments'] = []
 
     # get some addtional stellar data
-    cursor.execute("SELECT main_id,sp_type,sp_bibcode,COALESCE(gaia.plx,simbad.plx_value) AS plx_value,COALESCE(gaia.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(gaia.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
+    cursor.execute("SELECT main_id,raj2000,dej2000,sp_type,sp_bibcode,COALESCE(gaia.plx,simbad.plx_value) AS plx_value,COALESCE(gaia.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(gaia.plx IS NULL,NULL,'2016yCat.1337....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
     vals = cursor.fetchall()
     keys = cursor.column_names
     if len(vals) > 0:
@@ -149,7 +149,7 @@ def sdb_getphot_one(id):
 
     # get aors for any spectra and add file names
     cursor.execute('SELECT instrument,aor_key,bibcode,private,IFNULL(exclude,0) as exclude FROM spectra LEFT JOIN spectra_exclude USING (aor_key,instrument) WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
-    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','bool','bool'))
+    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','i1','i1'))
     for row in cursor:
         tspec.add_row(row)
 
@@ -186,10 +186,10 @@ def sdb_getphot_one(id):
     # find any private data by making table from phot and spec,
     # bibcode and private are the common columns
     tpriv = vstack([tphot,tspec],join_type='inner')
-    if len(tpriv[tpriv['private'] == True]) == 0:
+    if len(tpriv[tpriv['private'] == 1]) == 0:
         npriv = 0
     else:
-        npriv = len(unique(tpriv[tpriv['private'] == True]))
+        npriv = len(unique(tpriv[tpriv['private'] == 1]))
 
     # if there wasn't any photometry or spectra, then there's nothing to do
     if len(tpriv) == 0:
@@ -206,7 +206,7 @@ def sdb_getphot_one(id):
     # there are multiple private sets of photometry
     newdirs = np.array(['public'])
     if npriv > 0:
-        newdirs = np.append(newdirs,unique(tpriv[tpriv['private'] == True])['bibcode'])
+        newdirs = np.append(newdirs,unique(tpriv[tpriv['private'] == 1])['bibcode'])
     if len(newdirs) > 2:
         newdirs = np.append(newdirs,'all')
 
@@ -236,9 +236,9 @@ def sdb_getphot_one(id):
             fd.close()
 
         # figure which rows to keep, and write temporary file
-        okphot = np.logical_or(tphot['private'] == False,
+        okphot = np.logical_or(tphot['private'] == 0,
                                tphot['bibcode'].astype(str) == dir.astype(str) )
-        okspec = np.logical_or(tspec['private'] == False,
+        okspec = np.logical_or(tspec['private'] == 0,
                                tspec['bibcode'].astype(str) == dir.astype(str) )
         tmpfile = cfg.file['sedtmp']
         if dir != 'all':
