@@ -75,7 +75,7 @@ def sdb_getphot_one(id):
     cursor = cnx.cursor(buffered=True)
 
     # set up temporary table with what we'll want in the output
-    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0');")
+    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0', exclude int(1) NOT NULL DEFAULT '0');")
 
     # get sdbid and xids
     cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
@@ -96,18 +96,33 @@ def sdb_getphot_one(id):
     # now add photometry to that table, use extra cursor
     cursor1 = cnx.cursor(buffered=True)
     cursor1.execute('SELECT * FROM xmatch;')
-    for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,ex,priv) in cursor1:
+    for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,
+         excl_col,excl_tab,excl_join,extra,priv) in cursor1:
         if incl != 1:
             continue
-        stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid+' WHERE '+col+' IS NOT NULL'
-        if ex != '':
-           stmt += ' '+ex
+        # columns to select
+        stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s'
+        # include excludes if they exist
+        if excl_col != None:
+            stmt += ', '+excl_col
+        else:
+            stmt += ', 0'
+        # main join
+        stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
+        # join exlude table if exists
+        if excl_col != None:
+            stmt += ' LEFT JOIN '+excl_tab+' USING ('+excl_join+')'
+        # require flux column not null
+        stmt += ' WHERE '+col+' IS NOT NULL'
+        # any extra conditions for WHERE
+        if extra != '':
+           stmt += ' '+extra
         cursor.execute(stmt,{'band':band,'bib':bib,'unit':unit,'priv':priv} )
         
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
     tphot = Table(names=cursor.column_names,
-                  dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool'))
+                  dtype=('S10','f','f','f','i1','S10','S25','S200','S200','S100','bool','bool'))
     for row in cursor:
         try:
             tphot.add_row(row)
