@@ -154,6 +154,7 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "\nStopping here, have sdbid $sdbid in xids table"
+    echo "------- db-insert-one.sh -------"
     exit
 else
     echo "\nNew target, going ahead"
