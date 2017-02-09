@@ -31,6 +31,12 @@ idin=${1//[^a-zA-Z0-9-+ ]/}
 echo "Sesame using:$idin"
 id="`sesame $idin | egrep -w 'oname' | sed s/\<oname\>// | sed s/\<\\\/oname\>// | sed 's/^ *//g' | sed 's/  */ /g'`"
 
+# try again if the id contains a quote
+if [[ "$id" =~ "'" ]]
+then
+    id="`sesame -oxI1 $idin | egrep -w 'alias' | egrep -v "'" | head -1 | sed s/\<alias\>// | sed s/\<\\\/alias\>// | sed 's/^ *//g' | sed 's/ *$//g' | sed 's/  */ /g'`"
+fi
+
 # or try coord based query instead
 if [ "$id" == "" ]
 then
