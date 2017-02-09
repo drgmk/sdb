@@ -35,7 +35,7 @@ done
 # results
 mysql $db_res -N -e "SHOW TABLES;" | while read t
 do
-    st="UPDATE $t SET id = NULL WHERE id = '$1';"
+    st="DELETE FROM $t WHERE id = '$1';"
     echo $st
     mysql $db_res -N -e "$st"
 done
