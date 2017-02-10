@@ -86,8 +86,8 @@ popd
 echo "\nRunning sdf"
 pushd $sedroot
 export DYLD_LIBRARY_PATH=/Users/grant/astro/code/github/MultiNest/lib
-python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt --no-spectra -p -w
-python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt -u -p -w
+python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt --no-spectra
+python3 /Users/grant/astro/projects/sdf/sdf/fit.py -f $sdbid/public/$sdbid-rawphot.txt -u
 popd
 
 # remove the lock file
