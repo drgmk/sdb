@@ -232,7 +232,7 @@ def sdb_getphot_one(id):
             fd.write('AuthType Basic\n')
             fd.write('AuthUserFile '+cfg.www['root']+'.htpasswd\n')
             fd.write('AuthGroupFile '+cfg.www['root']+'.htgroup\n')
-            fd.write('require group '+dir+'\n')
+            fd.write('require group admin '+dir+'\n')
             fd.close()
 
         # figure which rows to keep, and write temporary file
