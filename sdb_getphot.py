@@ -10,7 +10,7 @@ sed_db_samples.
 import argparse
 from collections import OrderedDict
 from os import mkdir,rename,remove,utime
-from os.path import isdir,isfile,getmtime
+from os.path import isdir,isfile,getmtime,basename
 import glob
 import hashlib
 import numpy as np
@@ -163,11 +163,12 @@ def sdb_getphot_one(id):
     for aor in tspec['aor_key']:
         for inst in cfg.spectra.keys():
             loc,g1,g2 = cfg.spectra[inst]
-            specfile = glob.glob(loc+g1+str(aor)+g2)
+            specfile = glob.glob(cfg.file['spectra']+loc+g1+str(aor)+g2)
             if len(specfile) > 1:
                 print("WARNING: More than one file for aor:",aor)
             elif len(specfile) == 1:
-                tspec['file'][(tspec['aor_key']==aor)] = specfile[0]
+                file_path = loc+basename(specfile[0])
+                tspec['file'][(tspec['aor_key']==aor)] = file_path
 
     # now add these as table metadata, adding a number to the instrument
     # name so that the keys are unique
@@ -193,7 +194,7 @@ def sdb_getphot_one(id):
 
     # if there wasn't any photometry or spectra, then there's nothing to do
     if len(tpriv) == 0:
-        print("No photometry or spectra for {}, exiting".format(sdbid))
+        print("No photometry or spectra for {}, skipping".format(sdbid))
         return
         
     # write file(s), organising things if there is private data
