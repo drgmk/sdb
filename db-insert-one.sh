@@ -68,16 +68,16 @@ then
     id=`curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20top%201%20main_id%20FROM%20basic%20JOIN%20ident%20ON%20oid%20=%20oidref%20WHERE%20CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',$1,$2,$rad/3600.))=1%20AND%20ra%20IS%20NOT%20NULL%20AND%20dec%20IS%20NOT%20NULL;"  | $stilts tpipe in=- ifmt=votable cmd='random' cmd='keepcols main_id' omode=out out=- ofmt=csv-noheader`
     if [ "$id" != "" ]
     then
-	echo "Found id:$id at given coords $1 $2"
+        echo "Found id:$id at given coords $1 $2"
     else
-	echo "No object found at $1 $2"
+        echo "No object found at $1 $2"
     fi
 fi
 
-# if given id looks like a coordinate, set this as the id for later matching
-if [[ $1 =~ ^J[0-9]{6,}[+-][0-9]{6,} ]]
+# if given id looks like a coordinate, keep it in case we need to use it
+if [[ $1 =~ J[0-9]{6,}[+-][0-9]{6,} ]]
 then
-    id=$1
+    id_coord=$BASH_REMATCH
 fi
 
 # if one argument was given (i.e. a name) get ra,dec from sesame, if given coords in a
@@ -86,16 +86,31 @@ fi
 if [ "$id" != "" ]
 then
     echo "\nsesame using name:$id"
-    co=`sesame -rS "$id" | egrep -w 'jradeg|jdedeg'`
+    co=`sesame -rSV "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
     ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
+
+    # if this failed, try id_coord from above
     if [ "$cojoin" == "" ]
     then
-	echo "  sesame found nothing for:$1"
-	echo "  only id given so nothing to do, exiting"
-	exit
+        if [ "$id_coord" != "" ]
+        then
+            echo "\nsesame using coord:$id_coord"
+            co=`sesame -rSV "$id_coord" | egrep -w 'jradeg|jdedeg'`
+            cojoin=${co//[$'\n']/,}
+            cojoin=${cojoin//[^0-9+\-,\.]/}
+            ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
+            de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
+        fi
+        # if this didn't work then give up, s
+        if [ "$cojoin" == "" ]
+        then
+            echo "  sesame found nothing for:$1"
+            echo "  only id given so nothing to do, exiting"
+            exit
+        fi
     fi
     echo "  sesame got coords:$cojoin"
 else
@@ -213,10 +228,10 @@ then
     res=$(mysql $db -N -e "SELECT xid FROM xids WHERE xid='$id';")
     if [ "$res" == "" ]
     then
-	echo "\nAdding given id as an xid"
-	echo $sdbid \"$id\" >> $ft
+        echo "\nAdding given id as an xid"
+        echo $sdbid \"$id\" >> $ft
     else
-	echo "\nNot adding given id as xid, already in list"
+        echo "\nNot adding given id as xid, already in list"
     fi
 fi
 echo "\nUpdating xids to include sbdid"
