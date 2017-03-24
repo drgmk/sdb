@@ -170,7 +170,7 @@ if [[ $res = $sdbid ]]
 then
     echo "\nStopping here, have sdbid $sdbid in xids table"
     echo "------- db-insert-one.sh -------"
-    exit
+#    exit
 else
     echo "\nNew target, going ahead"
 fi
@@ -292,6 +292,14 @@ coga=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(d
 echo $coga
 vizquery -site=$site -mime=votable -source=I/337/gaia -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -out.add=e_Plx -c="$coga" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name _FG_ <FG>' icmd2='colmeta -name e__FG_ e_<FG>' icmd2='colmeta -name _Gmag_ <Gmag>' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
+
+# DENIS, rough mean epoch of 1997
+echo "\nLooking for DENIS entry"
+epoch=1997.0
+code=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
+echo $code
+vizquery -site=$site -mime=votable -source=B/denis/denis -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=q_Imag -out.add=q_Jmag -out.add=q_Kmag -out.add=Iflg -out.add=Jflg -out.add=Kflg -out.add=mult -c="$code" > $ft
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=denis write=$mode
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"

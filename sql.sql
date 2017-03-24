@@ -18,6 +18,11 @@ ALTER TABLE xids ADD PRIMARY KEY (sdbid,xid);
 ALTER TABLE xids ADD INDEX sdbid_sdbid (sdbid);
 ALTER TABLE xids ADD CONSTRAINT sdbid_sdbid FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
 
+ALTER TABLE denis DROP FOREIGN KEY sdbid_de;
+ALTER TABLE denis DROP PRIMARY KEY;
+ALTER TABLE denis ADD PRIMARY KEY sdbid_de (sdbid);
+ALTER TABLE denis ADD CONSTRAINT sdbid_de FOREIGN KEY (sdbid) REFERENCES sdb_pm (sdbid);
+
 ALTER TABLE 2mass DROP FOREIGN KEY sdbid_2m;
 ALTER TABLE 2mass DROP PRIMARY KEY;
 ALTER TABLE 2mass ADD PRIMARY KEY sdbid_2m (sdbid);
