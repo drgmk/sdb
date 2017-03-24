@@ -97,16 +97,20 @@ def sdb_getphot_one(id):
     cursor1 = cnx.cursor(buffered=True)
     cursor1.execute('SELECT * FROM xmatch;')
     for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,
-         excl_col,excl_tab,excl_join,extra,priv) in cursor1:
+         excl,excl_col,excl_tab,excl_join,extra,priv) in cursor1:
         if incl != 1:
             continue
         # columns to select
         stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s'
-        # include excludes if they exist
+        # excludes
+        stmt += ',IF(0 '
+        # table excludes
         if excl_col != None:
-            stmt += ', '+excl_col
-        else:
-            stmt += ', 0'
+            stmt += ' OR '+excl_col
+        # column based excludes
+        if excl != None:
+            stmt += ' OR '+excl
+        stmt += ',1,0)'
         # main join
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
         # join exlude table if exists
@@ -115,7 +119,7 @@ def sdb_getphot_one(id):
         # require flux column not null
         stmt += ' WHERE '+col+' IS NOT NULL'
         # any extra conditions for WHERE
-        if extra != '':
+        if extra != None:
            stmt += ' '+extra
         cursor.execute(stmt,{'band':band,'bib':bib,'unit':unit,'priv':priv} )
         
