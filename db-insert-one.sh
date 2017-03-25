@@ -285,6 +285,14 @@ echo $coty
 vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
 $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name RA_ICRS_ RA(ICRS)' icmd2='colmeta -name DE_ICRS_ DE(ICRS)' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
 
+# APASS, rough mean epoch of 2011
+echo "\nLooking for APASS entry"
+epoch=2011.0
+coap=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
+echo $coap
+vizquery -site=$site -mime=votable -source=II/336/apass9 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$coap" > $ft
+$stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name e_B_V e_B-V' icmd2='colmeta -name B_V B-V' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=apass write=$mode
+
 # Gaia, query against 2015 position
 echo "\nLooking for Gaia entry"
 epoch=2015.0
