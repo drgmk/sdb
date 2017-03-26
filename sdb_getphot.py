@@ -151,6 +151,13 @@ def sdb_getphot_one(id):
         tphot.meta['keywords'] = OrderedDict( zip(keys,tuple(vals[0])) )
     tphot.meta['keywords']['id'] = sdbid
 
+    # look in xids for an id if nothing from simbad table
+    if tphot.meta['keywords']['main_id'] is None:
+        cursor.execute("SELECT DISTINCT xid FROM xids WHERE sdbid='{}' "
+                       "ORDER BY xid LIMIT 1".format(sdbid))
+        if cursor.rowcount == 1:
+            tphot.meta['keywords']['main_id'] = cursor.fetchall()[0][0]
+
     # get aors for any spectra and add file names
     cursor.execute('SELECT instrument,aor_key,bibcode,private,IFNULL(exclude,0) as exclude FROM spectra LEFT JOIN spectra_exclude USING (aor_key,instrument) WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
     tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','i1','i1'))
