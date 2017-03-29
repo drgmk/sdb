@@ -42,30 +42,13 @@ fp=/tmp/pos$RANDOM.xml
 ft=/tmp/tmp$RANDOM.xml
 ft2=/tmp/tmp$RANDOM.xml
 
-# database details, user and pass are taken from /etc/my.cnf, and aren't
-# needed for direct calls, but are needed explicitly for stilts.
-db=sdb
-ssl=?useSSL=false
-sdb=$db$ssl
-tmp=`cat /etc/my.cnf | grep user | sed 's/ //g'`
-eval $tmp
-tmp=`cat /etc/my.cnf | grep password | sed 's/ //g'`
-eval $tmp
-mode=append  # set this to dropcreate to start afresh
-
-# other knobs as required
-rad=2               # rad is the default match radius in arcsec, greater for GALEX
-sdbprefix=sdb-v1-   # prefix for ids
-site=fr             # vizquery site
+# config
+source sdb_insert_config
 
 echo "/~~~~~ db-insert-one.sh ~~~~~~/"
 echo "Using default match radius of $rad arcsec"
 echo "and prefix for sdb ids as $sdbprefix"
 echo "and $site mirror for vizquery calls"
-
-# the basic stilts command to use, no -Xms1g -Xmx1g since presumably
-# little memory needed
-stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
 
 # if two arguments were given (i.e. coords) try to find a name from
 # simbad, failure results in variable "id" being empty

@@ -1,0 +1,19 @@
+# config for inserting things into sdb
+
+# import specifics
+rad=2               # default match radius in arcsec (greater for GALEX)
+sdbprefix=sdb-v1-   # prefix for ids
+site=fr             # vizquery site
+
+# database
+db=sdb
+ssl=?useSSL=false
+sdb=$db$ssl
+tmp=`cat /etc/my.cnf | grep user | sed 's/ //g'`
+eval $tmp
+tmp=`cat /etc/my.cnf | grep password | sed 's/ //g'`
+eval $tmp
+
+# the basic stilts command to use, no -Xms1g -Xmx1g since presumably
+# little memory needed
+stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
