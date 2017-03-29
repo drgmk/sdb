@@ -44,6 +44,7 @@ ft2=/tmp/tmp$RANDOM.xml
 
 # config
 source sdb_insert_config
+mode=append
 
 echo "/~~~~~ db-insert-one.sh ~~~~~~/"
 echo "Using default match radius of $rad arcsec"
@@ -293,19 +294,8 @@ else
     echo "  $sdbid already present"
 fi
 
-# APASS, rough mean epoch of 2011
-echo "\nLooking for APASS entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM apass WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2011.0
-    coap=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $coap
-    vizquery -site=$site -mime=votable -source=II/336/apass9 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$coap" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name e_B_V e_B-V' icmd2='colmeta -name B_V B-V' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=apass write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# APASS
+./sdb_insert_apass.sh $sdbid
 
 # Gaia, query against 2015 position
 echo "\nLooking for Gaia entry"
@@ -321,19 +311,8 @@ else
     echo "  $sdbid already present"
 fi
 
-# DENIS, rough mean epoch of 1997
-echo "\nLooking for DENIS entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM denis WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=1997.0
-    code=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $code
-    vizquery -site=$site -mime=votable -source=B/denis/denis -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=q_Imag -out.add=q_Jmag -out.add=q_Kmag -out.add=Iflg -out.add=Jflg -out.add=Kflg -out.add=mult -c="$code" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=denis write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# DENIS
+./sdb_insert_denis.sh $sdbid
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
