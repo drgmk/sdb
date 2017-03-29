@@ -45,7 +45,7 @@ then
             echo "Nothing found, writing empty entry in $db.apass"
             $(mysql $db -N -e "INSERT INTO $db.apass (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $sdb.apass"
+            echo "Success, writing to $db.apass"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=apass write=append
         fi
     fi
