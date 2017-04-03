@@ -1,6 +1,6 @@
-\catalog = ‘submm_obs’
+\catalog = 'submm_obs'
 \
-\ “sub-mm/mm” is anything on a facility that is normally considered to be in this regime. 350um CSO observations
+\ "sub-mm/mm" is anything on a facility that is normally considered to be in this regime. 350um CSO observations
 \ would fit this description while Herschel SPIRE would not.
 \
 \ Instructions:
@@ -10,10 +10,10 @@
 \ -updating any arXiv references to refereed ones is OK
 \ -tell me you’ve made some changes and I will update the database
 \
-| id                        | hd       | name                      | wav    | instrument   | fnu_mjy   | err_mjy   | 3siglim   | ref                   |
-| char                      | char     | char                      | long   | char         | double    | double    | long      | char                  |
-|                           |          |                           |        |              |           |           |           |                       |
-| null                      | null     | null                      | null   | null         | null      | null      | null      | null                  |
+| id                        | hd       | name                      | wav    | instrument   | fnu_mjy   | err_mjy   | 3siglim   | ref                 |
+| char                      | char     | char                      | long   | char         | double    | double    | long      | char                |
+|                           |          |                           |        |              |           |           |           |                     |
+| null                      | null     | null                      | null   | null         | null      | null      | null      | null                |
   HD 109085                   109085     null                        880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M    
   HIP 59960                   106906     null                        1240     ALMA           0.13        null        1           2016ApJ...828...25L
   HIP 61782                   110058     null                        1240     ALMA           0.71        0.11        null        2016ApJ...828...25L
@@ -38,6 +38,7 @@
   HIP 79977                   146897     null                        1240     ALMA           1.30        0.12        null        2016ApJ...828...25L           
   HIP 80088                   147137     null                        1240     ALMA           0.16        null        1           2016ApJ...828...25L           
   HIP 84881                   156623     null                        1240     ALMA           0.72        0.11        null        2016ApJ...828...25L           
+  HD 22049                    22049      eps Eri                     1100     LMT            27.7        1.3         null        2016MNRAS.462.2285C
   HD 181327                   181327     HD 181327                   1300     ALMA           7.9         2.0         null        2016MNRAS.460.2933M    
   HD 377                      377        null                        9000     VLA            0.0         0.0044      null        2016ApJ...823...79M    
   HD 9672                     9672       49 Cet                      9000     VLA            0.00251     0.0055      null        2016ApJ...823...79M    
@@ -50,6 +51,8 @@
   HD 107146                   107146     HD 107146                   6800     ATCA           0.166       0.0252      null        2015ApJ...813..138R    
   HD 95086                    95086      HD 95086                    6800     ATCA           0.0619      0.0159      null        2015ApJ...813..138R    
   HD 39060                    39060      bet Pic                     6800     ATCA           0.24        0.0332      null        2015ApJ...813..138R    
+  HD 107146                   107146     HD 107146                   1250     ALMA           12.5        1.3         null        2015ApJ...798..124R
+  HD 22049                    22049      eps Eri                     1200     IRAM           17.3        3.5         null        2015A&A...576A..72L
   HD 109085                   109085     eta Corvi                   850      SCUBA2         15.5        1.4         null        2014ApJ...784..148D    
   HD 197481                   197481     AU Mic                      1300     ALMA           7.44        0.5         null        2013ApJ...762L..21M    
   HD 197481                   197481     AU Mic                      1300     SMA            8.2         2.0         null        2012ApJ...749L..27W    
