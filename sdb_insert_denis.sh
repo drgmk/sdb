@@ -37,7 +37,7 @@ then
         echo $co
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
-        vizquery -site=$site -mime=votable -source=B/denis/denis -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=q_Imag -out.add=q_Jmag -out.add=q_Kmag -out.add=Iflg -out.add=Jflg -out.add=Kflg -out.add=mult -c="$code" > $fviz
+        vizquery -site=$site -mime=votable -source=B/denis/denis -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=q_Imag -out.add=q_Jmag -out.add=q_Kmag -out.add=Iflg -out.add=Jflg -out.add=Kflg -out.add=mult -c="$co" > $fviz
         tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
@@ -45,7 +45,7 @@ then
             echo "Nothing found, writing empty entry in $db.denis"
             $(mysql $db -N -e "INSERT INTO $db.denis (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $sdb.denis"
+            echo "Success, writing to $db.denis"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=denis write=append
         fi
     fi
