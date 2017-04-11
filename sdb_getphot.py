@@ -8,6 +8,7 @@ sed_db_samples.
 """        
 
 import argparse
+import re
 from collections import OrderedDict
 from os import mkdir,rename,remove,utime
 from os.path import isdir,isfile,getmtime,basename
@@ -105,8 +106,8 @@ def sdb_getphot_one(id):
         # excludes
         stmt += ',IF(0 '
         # table excludes
-        if excl_col != None:
-            stmt += ' OR '+excl_col
+        if excl_join != None:
+            stmt += ' OR IF(exclude_band IS NULL,0,1)'
         # column based excludes
         if excl != None:
             stmt += ' OR '+excl
@@ -114,8 +115,8 @@ def sdb_getphot_one(id):
         # main join
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
         # join exlude table if exists
-        if excl_col != None:
-            stmt += ' LEFT JOIN '+excl_tab+' USING ('+excl_join+')'
+        if excl_join != None:
+            stmt += ' LEFT JOIN phot_exclude ON ('+excl_join+'=phot_exclude.join_id AND '+band+'=phot_exclude.exclude_band)'
         # require flux column not null
         stmt += ' WHERE '+col+' IS NOT NULL'
         # any extra conditions for WHERE
@@ -166,6 +167,39 @@ def sdb_getphot_one(id):
 
     cursor.close()
     cnx.close()
+
+    # mark photometry duplicates to be excluded from fitting
+    bs,js,ns = np.unique(tphot['Band'],
+                          return_inverse=True,return_counts=True)
+    for i,(band,n) in enumerate(zip(bs,ns)):
+        if n == 1 or band.decode() not in cfg.phot['merge_dupes']:
+            continue
+
+        # indices where this band are in the phot table
+        bib_i = np.where(js == i)[0]
+        bibcodes = tphot['bibcode'][bib_i]
+        srt = np.flipud(np.array(np.argsort(bibcodes)))
+        # reversed argsort of these indices, this puts the highest dates
+        # first, but alphabetical entries come first at this point
+        srt = bib_i[srt]
+
+        # now shift any non-[0-9] starting indices to the end
+        r = re.compile('^[0-9]')
+        vmatch = np.vectorize(lambda x:bool(r.match(x.decode())))
+        num = vmatch(tphot['bibcode'][srt])
+        if np.sum(num) < len(srt) and np.sum(num) > 0:
+            num = np.where(num)[0]
+            srt = np.roll(srt,len(srt)-np.min(num))
+
+        # set exclude for everything beyond the first entry, unless any
+        # of these were alredy excluded, in which case everything beyond
+        # the first included measurement is excluded
+        one_ok = False
+        for j in srt:
+            if one_ok is False and tphot['exclude'][j] == 0:
+                one_ok = True
+            else:
+                tphot['exclude'][j] = 1
 
     # add empty column for file names
     add = np.chararray(len(tspec),itemsize=200)
