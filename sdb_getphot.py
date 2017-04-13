@@ -11,9 +11,10 @@ import argparse
 import re
 from collections import OrderedDict
 from os import mkdir,rename,remove,utime
-from os.path import isdir,isfile,getmtime,basename
+from os.path import isdir,isfile,getmtime,basename,dirname
 import glob
 import hashlib
+import filelock
 import numpy as np
 from astropy.table import Table,vstack,unique,Column
 import mysql.connector
@@ -98,7 +99,7 @@ def sdb_getphot_one(id):
     cursor1 = cnx.cursor(buffered=True)
     cursor1.execute('SELECT * FROM xmatch;')
     for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,
-         excl,excl_col,excl_tab,excl_join,extra,priv) in cursor1:
+         excl,excl_join,extra,priv) in cursor1:
         if incl != 1:
             continue
         # columns to select
@@ -247,7 +248,8 @@ def sdb_getphot_one(id):
     if isdir(sedroot) == False:
         mkdir(sedroot)
     filename = sdbid+'-rawphot.txt'
-    # make list of new dirs needed, 'public' will contain only public 
+
+    # make list of new dirs needed, 'public' will contain only public
     # photometry, 'all' will contain everything and is only needed if 
     # there are multiple private sets of photometry
     newdirs = np.array(['public'])
@@ -281,38 +283,47 @@ def sdb_getphot_one(id):
             fd.write('require group admin '+dir+'\n')
             fd.close()
 
-        # figure which rows to keep, and write temporary file
-        okphot = np.logical_or(tphot['private'] == 0,
-                               tphot['bibcode'].astype(str) == dir.astype(str) )
-        okspec = np.logical_or(tspec['private'] == 0,
-                               tspec['bibcode'].astype(str) == dir.astype(str) )
-        tmpfile = cfg.file['sedtmp']
-        if dir != 'all':
-            sdb_write_rawphot(tmpfile,tphot[okphot],tspec[okspec])
-        else:
-            sdb_write_rawphot(tmpfile,tphot,tspec)
+        # only write if we can get a lock, sdf may be fitting the old file
+        lock = filelock.FileLock(seddir+'/.sdf_lock-'+filename)
+        try:
+            with lock.acquire(timeout = 0):
 
-        # see if update needed, if so move it, otherwise delete
-        if filehash(tmpfile) != oldhash:
-            if oldhash != '':
-                print(sdbid,dir,": Different hash, updating file")
-            else:
-                print(sdbid,dir,": Creating file")
-            rename(tmpfile,seddir+filename)
+                # figure which rows to keep, and write temporary file
+                okphot = np.logical_or(tphot['private'] == 0,
+                                       tphot['bibcode'].astype(str) == dir.astype(str) )
+                okspec = np.logical_or(tspec['private'] == 0,
+                                       tspec['bibcode'].astype(str) == dir.astype(str) )
+                tmpfile = cfg.file['sedtmp']
+                if dir != 'all':
+                    sdb_write_rawphot(tmpfile,tphot[okphot],tspec[okspec])
+                else:
+                    sdb_write_rawphot(tmpfile,tphot,tspec)
 
-            # hack to retain mod time of old file
-#            utime(seddir+filename,times=(mtime,mtime))
-        else:
-            print(sdbid,dir,": Same hash, leaving old file")
-            remove(tmpfile)
+                # see if update needed, if so move it, otherwise delete
+                if filehash(tmpfile) != oldhash:
+                    if oldhash != '':
+                        print(sdbid,dir,": Different hash, updating file")
+                    else:
+                        print(sdbid,dir,": Creating file")
+                    rename(tmpfile,seddir+filename)
 
-        # remove this dir listing if it's there
-        if seddir in cur:
-            cur.remove(seddir)
+                    # hack to retain mod time of old file
+        #            utime(seddir+filename,times=(mtime,mtime))
+                else:
+                    print(sdbid,dir,": Same hash, leaving old file")
+                    remove(tmpfile)
 
-    # check for orphaned SED directories
-    if len(cur) > 0:
-        print("\nWARNING: orphaned directories exist:",cur,"\n")
+                # remove this dir listing if it's there
+                if seddir in cur:
+                    cur.remove(seddir)
+
+            # check for orphaned SED directories
+            if len(cur) > 0:
+                print("\nWARNING: orphaned directories exist:",cur,"\n")
+
+        except filelock.Timeout:
+            print(" WARNING: can't acquire lock for {}".format(dir+'/'+filename))
+            print("  skipping")
 
 
 def sdb_getphot(idlist):
