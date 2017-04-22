@@ -14,7 +14,14 @@
 | char                      | char     | char                      | long   | char         | double    | double    | long      | char                |
 |                           |          |                           |        |              |           |           |           |                     |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                |
-  HD 109085                   109085     null                        880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M    
+  HD 20807                    20807      null                        9000     ATCA           0.054       null        1           2017arXiv170309388M
+  HD 61005                    61005      null                        9000     ATCA           0.059       0.013       null        2017arXiv170309388M
+  HD 109085                   109085     eta Crv                     9000     ATCA           0.036       null        1           2017arXiv170309388M
+  HD 109573                   109573     HR 4796A                    9000     ATCA           0.063       null        1           2017arXiv170309388M
+  HD 131835                   131835     null                        9000     ATCA           0.053       0.017       null        2017arXiv170309388M
+  HD 105                      105        null                        9000     ATCA           0.042       0.014       null        2017arXiv170309388M
+  HD 9672                     9672       49 Cet                      850      ALMA           17.0        3.0         null        2017arXiv170401972H
+  HD 109085                   109085     eta Crv                     880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M    
   HIP 59960                   106906     null                        1240     ALMA           0.13        null        1           2016ApJ...828...25L
   HIP 61782                   110058     null                        1240     ALMA           0.71        0.11        null        2016ApJ...828...25L
   HIP 62482                   111161     null                        1240     ALMA           0.13        0.05        null        2016ApJ...828...25L
