@@ -164,7 +164,7 @@ if [[ $res = $sdbid ]]
 then
     echo "\nStopping here, have sdbid $sdbid in xids table"
     echo "------- db-insert-one.sh -------"
-#    exit
+    exit
 else
     echo "\nNew target, going ahead"
 fi
