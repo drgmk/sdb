@@ -42,8 +42,8 @@ Further instructions at each step are given in the relevant codes.
 --* add sdbid column to sample and sample to projects table if necessary
 2. Grab spectra files, CASSIS for now with cassis_download.sh
 3. Extract photometry into *-rawphot files with sdb_getphot.py
-4. Do fitting with sdf's fit.py
-5. Generate tables and plots with sdb_www.py
+4. Do fitting with sdf's sdf-fit
+5. Generate tables and plots with sdf-sample
 
 ##TODOs
 
