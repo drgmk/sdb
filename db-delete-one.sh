@@ -25,7 +25,7 @@ do
 done
 
 # sbd tables
-for t in 2mass akari_irc allwise gaia galex projects seip simbad spectra tyc2 xids sdb_pm;
+for t in 2mass akari_irc allwise apass denis gaia galex projects seip simbad spectra tyc2 xids sdb_pm;
 do
     st="DELETE FROM $t WHERE sdbid = '$1';"
     echo $st
