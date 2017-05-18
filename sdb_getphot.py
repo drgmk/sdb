@@ -20,6 +20,8 @@ from astropy.table import Table,vstack,unique,Column
 import mysql.connector
 import config as cfg
 
+import sdf.filter
+
 
 def sdb_write_rawphot(file,tphot,tspec):
     """Write raw photometry to a file.
@@ -140,6 +142,19 @@ def sdb_getphot_one(id):
     # fix any NULL values that went to nan
     tphot['Err'][np.invert(np.isfinite(tphot['Err']))] = 0.0
     tphot['Sys'][np.invert(np.isfinite(tphot['Sys']))] = 0.0
+
+    # add wavelengths, sort, and remove
+    tphot['wave'] = np.zeros(len(tphot))
+    for i,filt in enumerate(tphot['Band']):
+        if sdf.filter.iscolour(filt.decode()):
+            f = sdf.filter.Colour.get(filt.decode())
+        else:
+            f = sdf.filter.Filter.get(filt.decode())
+
+        tphot['wave'][i] = f.mean_wavelength
+
+    tphot.sort('wave')
+    tphot.remove_column('wave')
 
     # ready these to receive meta
     tphot.meta['keywords'] = {}
