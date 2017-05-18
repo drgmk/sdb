@@ -373,6 +373,12 @@ else
     echo "  $sdbid already present"
 fi
 
+# Herschel point source catalogues
+for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 spsc_standard_350_v2 spsc_standard_500_v2;
+do
+    ./sdb_herschel_psc_xids.sh "$sdbid" "$t"
+done
+
 # SEIP, epoch less certain, roughly 2006.9 for mid-mission so use AKARI
 echo "\nLooking for SEIP entry"
 res=$(mysql $db -N -e "SELECT sdbid FROM seip WHERE sdbid='$sdbid';")
