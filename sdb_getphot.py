@@ -119,7 +119,7 @@ def sdb_getphot_one(id):
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
         # join exlude table if exists
         if excl_join != None:
-            stmt += ' LEFT JOIN phot_exclude ON ('+excl_join+'=phot_exclude.join_id AND '+band+'=phot_exclude.exclude_band)'
+            stmt += ' LEFT JOIN phot_exclude ON ('+excl_join+'=phot_exclude.join_id AND '+band+'=phot_exclude.exclude_band AND '+bib+'=phot_exclude.exclude_ref)'
         # require flux column not null
         stmt += ' WHERE '+col+' IS NOT NULL'
         # any extra conditions for WHERE
