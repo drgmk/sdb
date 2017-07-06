@@ -99,7 +99,9 @@ def sdb_getphot_one(id):
 
     # now add photometry to that table, use extra cursor
     cursor1 = cnx.cursor(buffered=True)
-    cursor1.execute('SELECT * FROM xmatch;')
+    cursor1.execute('SELECT incl,`table`,xid,band,col,ecol,syserr,'
+                    'lim,bibcode,unit,com1,com2,'
+                    'exclude,exclude_join,extra,private FROM xmatch;')
     for (incl,table,xid,band,col,ecol,sys,lim,bib,unit,c1,c2,
          excl,excl_join,extra,priv) in cursor1:
         if incl != 1:
