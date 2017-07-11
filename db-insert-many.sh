@@ -1,7 +1,8 @@
 #!/bin/sh
 
-# give a table name in the database to get IDs from, optional second arg is the column
-# name to give to SQL
+# give a table name in the database to get IDs from, optional second arg
+# is the column name to give to SQL, or if "coord" indicates coords to
+# be grabbed from "ra" and "dec" columns
 
 db=sdb_samples
 dbroot=/Users/grant/astro/projects/sdb/
@@ -15,11 +16,22 @@ else
 fi
 
 # given sample db name in $1
-mysql $db -N -e "SELECT $name FROM $1" | while read name
-do
-    echo getting:"$name"
-    "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$logroot""$name".log
-done
+if [ "$name" == "coord" ]
+then
+    mysql $db -N -e "SELECT name FROM $1" | while read name
+    do
+        ra=`mysql $db -N -e "SELECT ra FROM $1 WHERE name='$name'"`
+        dec=`mysql $db -N -e "SELECT de FROM $1 WHERE name='$name'"`
+        echo getting:"$name ($ra, $dec)"
+        "$dbroot"sdb/db-insert-one.sh $ra $dec 2>&1 | tee "$logroot""$name".log
+    done
+else
+    mysql $db -N -e "SELECT $name FROM $1" | while read name
+    do
+        echo getting:"$name"
+        "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$logroot""$name".log
+    done
+fi
 
 proj=`echo $1 | sed "s/.*\.//"`
 
