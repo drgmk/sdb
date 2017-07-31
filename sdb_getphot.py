@@ -259,7 +259,10 @@ def sdb_getphot_one(id):
     if len(tpriv) == 0:
         print("No photometry or spectra for {}, skipping".format(sdbid))
         return
-        
+    elif len(tpriv) == len(tspec):
+        print("No photometry, only spectra for {}, skipping".format(sdbid))
+        return
+
     # write file(s), organising things if there is private data
     sedroot = cfg.file['sedroot']+sdbid+'/'
     if isdir(sedroot) == False:
