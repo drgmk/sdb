@@ -11,11 +11,11 @@ echo "\ngetting:"$name
 done
 
 # apass
-#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN apass USING (sdbid) WHERE apass.sdbid IS NULL;" | while read name
-#do
-#    echo "\ngetting:"$name
-#    ./sdb_insert_apass.sh "$name"
-#done
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN apass USING (sdbid) WHERE apass.sdbid IS NULL;" | while read name
+do
+    echo "\ngetting:"$name
+    ./sdb_insert_apass.sh "$name"
+done
 
 # tyc2
 mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN tyc2 USING (sdbid) WHERE tyc2.sdbid IS NULL;" | while read name
@@ -39,25 +39,39 @@ do
 done
 
 # denis
-#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN denis USING (sdbid) WHERE denis.sdbid IS NULL;" | while read name
-#do
-#    echo "\ngetting:"$name
-#    ./sdb_insert_denis.sh "$name"
-#done
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN denis USING (sdbid) WHERE denis.sdbid IS NULL;" | while read name
+do
+    echo "\ngetting:"$name
+    ./sdb_insert_denis.sh "$name"
+done
 
 # akari irc
-#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN akari_irc USING (sdbid) WHERE akari_irc.sdbid IS NULL;" | while read name
-#do
-#echo "\ngetting:"$name
-#./sdb_insert_akari_irc.sh "$name"
-#done
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN akari_irc USING (sdbid) WHERE akari_irc.sdbid IS NULL;" | while read name
+do
+echo "\ngetting:"$name
+./sdb_insert_akari_irc.sh "$name"
+done
 
 # allwise
-#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN allwise USING (sdbid) WHERE allwise.sdbid IS NULL;" | while read name
-#do
-#    echo "\ngetting:"$name
-#    ./sdb_insert_allwise.sh "$name"
-#done
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN allwise USING (sdbid) WHERE allwise.sdbid IS NULL;" | while read name
+do
+    echo "\ngetting:"$name
+    ./sdb_insert_allwise.sh "$name"
+done
+
+# irs staring mode
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN spectra USING (sdbid) WHERE spectra.sdbid IS NULL OR instrument != 'irsstare';" | while read name
+do
+    echo "\ngetting:"$name
+    ./sdb_insert_irsstare.sh "$name"
+done
+
+# seip
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN seip USING (sdbid) WHERE seip.sdbid IS NULL;" | while read name
+do
+    echo "\ngetting:"$name
+    ./sdb_insert_seip.sh "$name"
+done
 
 # herschel xids
 #mysql $db -N -e "SELECT sdbid FROM sdb_pm;" | while read name
