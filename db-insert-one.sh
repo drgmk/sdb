@@ -124,17 +124,24 @@ echo "\nLooking in proper motion catalogues"
 # double which causes problems for stilts. assume instead that tyc2 is
 # subsumed into ppmxl and likely to be in tgas
 vizquery -site=$site -mime=votable -source=I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
-$stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
+numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
 
 # update coordinates if a pm was found, an error will be thrown by stilts
 # if the file $fp wasn't filled above, in which case try harder with sesame
-cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
+if [ "$numrow" != "" ]
+then
+    $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
+    cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
+else
+    cotmp=""
+fi
+
 if [ "$cotmp" != "" ]
 then
     cojoin=$cotmp
     echo "  success, updated epoch 2000.0 coord from pm:$cojoin"
 else
-    echo "Trying sesame"
+    echo "  trying sesame for proper motion"
     co=`sesame "$id"`
     ok=`echo $co | grep 'pmRA'`
     if [ "$ok" != "" ]
@@ -142,7 +149,7 @@ else
         pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
         pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
         posref=`echo $co | sed 's/.*<refPos>\(.*\)<\/refPos>.*/\1/'`
-        echo "  found pm $pmra,$pmde with sesame, position ref $posref"
+        echo "    found pm $pmra,$pmde with sesame, position ref $posref"
         # attempt to be smart about the position ref and implied epoch
         if [ "$posref" != "" ]
         then
@@ -153,9 +160,9 @@ else
                  de=`echo "$de-10.3*$pmde/1000.0/3600.0" | bc -l`
             fi
             cojoin=$ra,$de
-            echo "    ep2000.0 coord changed:$cojoin"
+            echo "      ep2000.0 coord changed:$cojoin"
         else
-            echo "    ep2000.0 coord the same:$cojoin"
+            echo "      ep2000.0 coord the same:$cojoin"
         fi
     else
         echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
