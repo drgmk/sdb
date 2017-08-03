@@ -217,7 +217,7 @@ then
 
     # simbad
     echo "\nUsing id $id to find simbad info"
-    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20basic.main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode%20FROM%20basic%20JOIN%20ident%20ON%20oidref%20=%20oid%20WHERE%20id=%27$cid%27" > $ft2
+    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20basic.main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode,otype_shortname,otype_longname%20FROM%20basic%20JOIN%20ident%20ON%20oidref%20=%20oid%20JOIN otypedef%20on%20basic.otype%20=%20otypedef.otypeWHERE%20id=%27$cid%27" > $ft2
     $stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1='keepcols sdbid' in2=$ft2 ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=simbad write=$mode
 fi
 
@@ -281,97 +281,29 @@ fi
 #### now do catalogues we're not going to store in their entirety but
 #### download as we need. these are sorted roughly in wavelength order
 
-# GALEX All-sky, surveys between early 2003 and late 2007, assume
-# 2005.0, positional crossmatches look to require a large radius, try 5"
-echo "\nLooking for GALEX DR5 entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM galex WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2005.0
-    cogl=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $cogl
-    vizquery -site=$site -mime=votable -source=II/312/ais -c.rs=5 -sort=_r -out.max=1 -out.add=_r -out.add=objid -out.add=Fflux -out.add=e_Fflux -out.add=Nflux -out.add=e_Nflux -c="$cogl" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name r_fov r.fov' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# GALEX
+./sdb_insert_galex.sh $sdbid
 
-# Tycho-2, query against 1991.25 position. add integer version of tyc2
-# id for matching
-echo "\nLooking for Tycho-2 entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM tyc2 WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=1991.25
-    coty=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $coty
-    vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$coty" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name RA_ICRS_ RA(ICRS)' icmd2='colmeta -name DE_ICRS_ DE(ICRS)' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# Tycho-2
+./sdb_insert_tyc2.sh $sdbid
 
 # APASS
 ./sdb_insert_apass.sh $sdbid
 
-# Gaia, query against 2015 position
-echo "\nLooking for Gaia entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM gaia WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2015.0
-    coga=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $coga
-    vizquery -site=$site -mime=votable -source=I/337/gaia -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -out.add=e_Plx -c="$coga" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name _FG_ <FG>' icmd2='colmeta -name e__FG_ e_<FG>' icmd2='colmeta -name _Gmag_ <Gmag>' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# Gaia
+./sdb_inset_gaia.sh $sdbid
 
 # DENIS
 ./sdb_insert_denis.sh $sdbid
 
-# 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
-echo "\nLooking for 2MASS entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM 2mass WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=1999.3
-    cotm=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $cotm
-    vizquery -site=$site -mime=votable -source=2mass -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$cotm" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=2mass write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# 2MASS
+./sdb_insert_2mass.sh $sdbid
 
-# ALLWISE, assume 2010.3, midway through cryo lifetime
-echo "\nLooking for ALLWISE entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM allwise WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2010.3
-    cowise=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $cowise
-    vizquery -site=$site -mime=votable -source=II/328/allwise -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$cowise" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=allwise write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# ALLWISE
+./sdb_insert_allwise.sh $sdbid
 
 # AKARI IRC, assume 2007.0, midway through survey
-echo "\nLooking for AKARI IRC entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM akari_irc WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2007.0
-    coirc=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $coirc
-    vizquery -site=$site -mime=votable -source=II/297 -out.add=_r -c.rs=$rad -sort=_r -out.max=1 -c="$coirc" | grep -v "^#" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=akari_irc write=$mode
-else
-    echo "  $sdbid already present"
-fi
+./sdb_insert_akari_irc.sh $sdbid
 
 # Herschel point source catalogues
 for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 spsc_standard_350_v2 spsc_standard_500_v2;
