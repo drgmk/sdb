@@ -187,7 +187,12 @@ else
 fi
 
 # place an entry that we'll remove on completion
-mysql $db -N -e "INSERT INTO import_failed (sdbid) VALUES ('$sdbid');"
+if [ $# -eq 2 ]
+then
+    mysql $db -N -e "INSERT INTO import_failed (sdbid,arg1,arg2) VALUES ('$sdbid','$1','$2');"
+else
+    mysql $db -N -e "INSERT INTO import_failed (sdbid,arg1) VALUES ('$sdbid','$1');"
+fi
 
 # clear any previous xids
 mysql $db -e "DELETE FROM xids WHERE sdbid='$sdbid';"
@@ -217,7 +222,7 @@ then
 
     # simbad
     echo "\nUsing id $id to find simbad info"
-    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20basic.main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode,otype_shortname,otype_longname%20FROM%20basic%20JOIN%20ident%20ON%20oidref%20=%20oid%20JOIN otypedef%20on%20basic.otype%20=%20otypedef.otypeWHERE%20id=%27$cid%27" > $ft2
+    curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adql&format=votable&query=SELECT%20basic.main_id,sp_type,sp_bibcode,plx_value,plx_err,plx_bibcode,otype_shortname,otype_longname%20FROM%20basic%20JOIN%20ident%20ON%20ident.oidref%20=%20oid%20JOIN%20otypedef%20on%20basic.otype%20=%20otypedef.otype%20WHERE%20id=%27$cid%27" > $ft2
     $stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1='keepcols sdbid' in2=$ft2 ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=simbad write=$mode
 fi
 
@@ -278,6 +283,13 @@ else
     echo "\nHave IRAS PSC ID:$res"
 fi
 
+# Herschel point source catalogues
+for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 spsc_standard_350_v2 spsc_standard_500_v2;
+do
+    ./sdb_herschel_psc_xids.sh "$sdbid" "$t"
+done
+
+
 #### now do catalogues we're not going to store in their entirety but
 #### download as we need. these are sorted roughly in wavelength order
 
@@ -291,7 +303,7 @@ fi
 ./sdb_insert_apass.sh $sdbid
 
 # Gaia
-./sdb_inset_gaia.sh $sdbid
+./sdb_insert_gaia.sh $sdbid
 
 # DENIS
 ./sdb_insert_denis.sh $sdbid
@@ -305,13 +317,7 @@ fi
 # AKARI IRC, assume 2007.0, midway through survey
 ./sdb_insert_akari_irc.sh $sdbid
 
-# Herschel point source catalogues
-for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 spsc_standard_350_v2 spsc_standard_500_v2;
-do
-    ./sdb_herschel_psc_xids.sh "$sdbid" "$t"
-done
-
-# SEIP, epoch less certain, roughly 2006.9 for mid-mission so use AKARI
+# SEIP, epoch less certain, roughly 2006.9 for mid-mission
 echo "\nLooking for SEIP entry"
 res=$(mysql $db -N -e "SELECT sdbid FROM seip WHERE sdbid='$sdbid';")
 if [ "$res" == "" ]
@@ -325,21 +331,8 @@ else
     echo "  $sdbid already present"
 fi
 
-# look for IRS spectra in the observing log
-echo "\nLooking for IRS staring observation in Spitzer log"
-res=$(mysql $db -N -e "SELECT sdbid FROM spectra WHERE sdbid='$sdbid' AND instrument='irsstare';")
-if [ "$res" == "" ]
-then
-    epoch=2006.9
-    irsra=$(mysql $db -N -e "SELECT raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600. from sdb_pm where sdbid = '$sdbid';")
-    irsde=$(mysql $db -N -e "SELECT dej2000 + ($epoch-2000.0) * pmde/1e3/3600. from sdb_pm where sdbid = '$sdbid';")
-    $stilts sqlclient db='jdbc:mysql://localhost/'$sdb user=$user password=$password sql="SELECT sdbid,raj2000 + (2006.9-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600. as ra_ep2006p9,dej2000 + (2006.9-2000.0) * pmde/1e3/3600. as de_ep2006p9 from sdb_pm where sdbid = '$sdbid'" ofmt=votable > $fp
-
-    $stilts sqlclient db='jdbc:mysql://localhost/photometry'$ssl user=$user password=$password sql="SELECT name,ra,dec_,aor_key,'irsstare' as instrument, '2011ApJS..196....8L' as bibcode, 0 as private from spitzer_obslog where ra between $irsra-5.0 and $irsra+5.0 and dec_ between $irsde-5.0 and $irsde+5.0 and aot='irsstare'" ofmt=votable > $ft
-    $stilts tmatch2 in1=$fp ifmt1=votable in2=$ft ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 5.0 5.0 0.0' values2='ra dec_ 5.0 5.0 0.0' params='2' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra find=all write=append
-else
-    echo "  $sdbid already present"
-fi
+# IRS spectra
+./sdb_insert_irsstare.sh $sdbid
 
 # clean up
 rm $fp
