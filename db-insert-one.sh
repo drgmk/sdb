@@ -126,7 +126,8 @@ echo "\nLooking in proper motion catalogues"
 vizquery -site=$site -mime=votable -source=I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
 $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
 
-# update coordinates if a pm was found, otherwise try harder with sesame
+# update coordinates if a pm was found, an error will be thrown by stilts
+# if the file $fp wasn't filled above, in which case try harder with sesame
 cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
 if [ "$cotmp" != "" ]
 then
@@ -174,6 +175,14 @@ echo ra,dec > $ft
 echo $cojoin >> $ft
 sdbid=$sdbprefix`$stilts tpipe in=$ft ifmt=csv cmd='random' cmd='replacecol ra degreesToHms(ra,2)' cmd='replacecol dec degreesToDms(dec,1)' omode=out out=- ofmt=csv-noheader | sed "s/://g" | sed "s/,//"`
 echo "  source id is:$sdbid"
+
+# check there isn't an existing target with a slightly different coord
+dup=$(mysql $db -N -e "SELECT sdbid FROM sdb_pm WHERE sdbid != '$sdbid' AND raj2000 BETWEEN $ra-0.0001 AND $ra+0.0001 AND dej2000 BETWEEN $de-0.0001 AND $de+0.0001;")
+if [ "$dup" != "" ]
+then
+    echo "\nDuplicate source $dup found nearby, deleting before proceeding"
+    ./db-delete-one.sh $dup
+fi
 
 # finally, see if we have this sbdid already
 res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
