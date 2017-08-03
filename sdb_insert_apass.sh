@@ -38,6 +38,8 @@ then
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
         vizquery -site=$site -mime=votable -source=II/336/apass9 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$co" > $fviz
+        # would like to remove warnings created here, but columns have
+        # quotes in them...
         tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='colmeta -name e_B_V e_B-V' icmd2='colmeta -name B_V B-V' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]

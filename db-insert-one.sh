@@ -314,22 +314,11 @@ done
 # ALLWISE
 ./sdb_insert_allwise.sh $sdbid
 
-# AKARI IRC, assume 2007.0, midway through survey
+# AKARI IRC
 ./sdb_insert_akari_irc.sh $sdbid
 
-# SEIP, epoch less certain, roughly 2006.9 for mid-mission
-echo "\nLooking for SEIP entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM seip WHERE sdbid='$sdbid';")
-if [ "$res" == "" ]
-then
-    epoch=2006.9
-    cosp=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
-    echo $cosp
-    curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$cosp" > $ft
-    $stilts tjoin nin=2 in1=$fp ifmt1=votable icmd1='keepcols sdbid' in2=$ft ifmt2=votable icmd2='colmeta -name dec_ dec' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=$mode
-else
-    echo "  $sdbid already present"
-fi
+# SEIP
+./sdb_insert_seip.sh $sdbid
 
 # IRS spectra
 ./sdb_insert_irsstare.sh $sdbid

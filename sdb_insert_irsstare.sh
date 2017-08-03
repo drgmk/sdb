@@ -18,12 +18,6 @@ fi
 # first argument is sdbid
 sdbid=$1
 
-# make a file to join the results to below
-#fid=/tmp/pos$RANDOM.txt
-#echo "#sdbid                    nothing" > $fid
-##     sdb-v1-183656.34+374701.3 bla  # to get spacing right for ascii table
-#echo $sdbid $sdbid >> $fid
-
 # look for IRS spectra in the observing log, 5" crossmatch
 echo "\nLooking for IRS staring observation in Spitzer log"
 res=$(mysql $db -N -e "SELECT sdbid FROM spectra WHERE sdbid='$sdbid' AND instrument='irsstare';")
