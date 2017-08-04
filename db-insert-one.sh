@@ -246,7 +246,7 @@ fi
 res=$(mysql $db -N -e "SELECT sdbid,xid FROM xids WHERE xid='$id' and sdbid != '$sdbid';")
 if [ "$res" != "" ]
 then
-    echo "\nERROR: Found xid for $id different to sdbid: $sdbid"
+    echo "\nERROR: Found xid for $id different to $sdbid: $res"
     exit
 fi
 

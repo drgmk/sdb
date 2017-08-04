@@ -24,6 +24,20 @@ do
     mysql $db_samp -N -e "$st"
 done
 
+# remove other sdbids with the same xids as the sdbid we're deleting
+mysql $db -N -e "SELECT xid FROM xids WHERE sdbid = '$1';" | while read x
+do
+    echo "xid: $x"
+    mysql $db -N -e "SELECT DISTINCT sdbid FROM xids WHERE xid = '$x' AND sdbid != '$1';" | while read s
+    do
+        # do this first to avoid infinite loop
+        st="DELETE FROM xids WHERE sdbid = '$s';"
+        echo $st
+        mysql $db -N -e "$st"
+        ./db-delete-one.sh $s
+    done
+done
+
 # sbd tables
 for t in 2mass akari_irc allwise apass denis gaia galex projects seip simbad spectra tyc2 xids sdb_pm import_failed;
 do
