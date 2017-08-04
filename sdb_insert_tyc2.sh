@@ -46,7 +46,15 @@ then
             echo "Nothing found, writing empty entry in $db.tyc2"
             $(mysql $db -N -e "INSERT INTO $db.tyc2 (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.tyc2"
+            # check if there's an entry for this source already
+            tyc2id=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols tyc2id' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM tyc2 WHERE tyc2id='$tyc2id';")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $tyc2id ($res)"
+                mysql $db -N -e "DELETE FROM tyc2 WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.tyc2"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=append
         fi
     fi

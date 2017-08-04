@@ -38,6 +38,15 @@ then
         ftmp=/tmp/pos$RANDOM.txt
         curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$co" > $ftmp
         
+        # check if there's an entry for this source already
+        objid=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols objid' omode=out ofmt=csv-noheader`
+        res=$(mysql $db -N -e "SELECT sdbid FROM seip WHERE objid='$objid';")
+        if [ "$res" != "" ]
+        then
+            echo "Removing previous entry for $objid ($res)"
+            mysql $db -N -e "DELETE FROM seip WHERE sdbid = '$res';"
+        fi
+
         $stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$ftmp ifmt2=votable icmd2='colmeta -name dec_ dec' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=append
     fi
 else

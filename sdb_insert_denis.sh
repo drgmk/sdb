@@ -45,7 +45,15 @@ then
             echo "Nothing found, writing empty entry in $db.denis"
             $(mysql $db -N -e "INSERT INTO $db.denis (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.denis"
+            # check if there's an entry for this source already
+            denis=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols denis' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM denis WHERE denis='$denis';")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $denis ($res)"
+                mysql $db -N -e "DELETE FROM denis WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.denis"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=denis write=append
         fi
     fi

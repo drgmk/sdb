@@ -47,7 +47,15 @@ then
             echo "Nothing found, writing empty entry in $db.apass"
             $(mysql $db -N -e "INSERT INTO $db.apass (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.apass"
+            # check if there's an entry for this source already
+            recno=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols recno' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM apass WHERE recno=$recno;")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $recno ($res)"
+                mysql $db -N -e "DELETE FROM apass WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.apass"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=apass write=append
         fi
     fi

@@ -59,13 +59,6 @@ do
     ./sdb_insert_allwise.sh "$name"
 done
 
-# irs staring mode
-mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN spectra USING (sdbid) WHERE spectra.sdbid IS NULL OR instrument != 'irsstare';" | while read name
-do
-    echo "\ngetting:"$name
-    ./sdb_insert_irsstare.sh "$name"
-done
-
 # seip
 mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN seip USING (sdbid) WHERE seip.sdbid IS NULL;" | while read name
 do
@@ -73,7 +66,15 @@ do
     ./sdb_insert_seip.sh "$name"
 done
 
-# herschel xids
+# irs staring mode, there could be >1 spectrum for each sdbid so doing
+# this requires running through everything
+#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN spectra USING (sdbid) WHERE spectra.sdbid IS NULL OR instrument != 'irsstare';" | while read name
+#do
+#    echo "\ngetting:"$name
+#    ./sdb_insert_irsstare.sh "$name"
+#done
+
+# herschel xids, this finds xids so needs to be run through everything
 #mysql $db -N -e "SELECT sdbid FROM sdb_pm;" | while read name
 #do
 #    for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 spsc_standard_350_v2 spsc_standard_500_v2;

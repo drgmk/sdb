@@ -46,7 +46,15 @@ then
             echo "Nothing found, writing empty entry in $db.galex"
             $(mysql $db -N -e "INSERT INTO $db.galex (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.galex"
+            # check if there's an entry for this source already
+            objid=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols objid' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM galex WHERE objid=$objid;")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $objid ($res)"
+                mysql $db -N -e "DELETE FROM galex WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.galex"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=galex write=append
         fi
     fi

@@ -45,7 +45,15 @@ then
             echo "Nothing found, writing empty entry in $db.allwise"
             $(mysql $db -N -e "INSERT INTO $db.allwise (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.allwise"
+            # check if there's an entry for this source already
+            allwise=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols allwise' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM allwise WHERE allwise='$allwise';")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $allwise ($res)"
+                mysql $db -N -e "DELETE FROM allwise WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.allwise"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=allwise write=append
         fi
     fi

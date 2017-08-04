@@ -37,6 +37,15 @@ then
 
         $stilts sqlclient db='jdbc:mysql://localhost/photometry'$ssl user=$user password=$password sql="SELECT name,ra,dec_,aor_key,'irsstare' as instrument, '2011ApJS..196....8L' as bibcode, 0 as private from spitzer_obslog where ra between $irsra-5.0 and $irsra+5.0 and dec_ between $irsde-5.0 and $irsde+5.0 and aot='irsstare'" ofmt=votable > $firs
 
+        # check if there's an entry for this source already
+        instaor=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='addcol -before _r instaor concat(instrument,toString(aor_key))' cmd='keepcols instaor' omode=out ofmt=csv-noheader`
+        res=$(mysql $db -N -e "SELECT sdbid FROM spectra WHERE CONCAT(instrument,aor_key)='$instaor';")
+        if [ "$res" != "" ]
+        then
+            echo "Removing previous entry for $instaor ($res)"
+            mysql $db -N -e "DELETE FROM spectra WHERE sdbid = '$res';"
+        fi
+
         $stilts tmatch2 in1=$ftmp ifmt1=votable in2=$firs ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 5.0 5.0 0.0' values2='ra dec_ 5.0 5.0 0.0' params='2' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra find=all write=append
     fi
 else

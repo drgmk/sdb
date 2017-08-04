@@ -45,7 +45,15 @@ then
             echo "Nothing found, writing empty entry in $db.gaia"
             $(mysql $db -N -e "INSERT INTO $db.gaia (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.gaia"
+            # check if there's an entry for this source already
+            src=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols source' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM gaia WHERE source='$src';")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $src ($res)"
+                mysql $db -N -e "DELETE FROM gaia WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.gaia"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=gaia write=append
         fi
     fi

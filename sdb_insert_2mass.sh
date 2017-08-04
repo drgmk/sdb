@@ -37,7 +37,7 @@ then
         echo $co
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
-        vizquery -site=$site -mime=votable -source=2mass -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$co" > $fviz
+        vizquery -site=$site -mime=votable -source=II/246/out -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$co" > $fviz
         tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
@@ -45,7 +45,15 @@ then
             echo "Nothing found, writing empty entry in $db.2mass"
             $(mysql $db -N -e "INSERT INTO $db.2mass (sdbid) VALUES ('$sdbid');")
         else
-            echo "Success, writing to $db.2mass"
+            # check if there's an entry for this source already
+            tmass=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols 2mass' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM 2mass WHERE 2mass='$tmass';")
+            if [ "$res" != "" ]
+            then
+                echo "Removing previous entry for $tmass ($res)"
+                mysql $db -N -e "DELETE FROM 2mass WHERE sdbid = '$res';"
+            fi
+            echo "Writing to $db.2mass"
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=2mass write=append
         fi
     fi
