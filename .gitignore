@@ -1,3 +1,5 @@
 .DS_Store
 sdb.xcodeproj
-*pyc
+*.pyc
+.ipynb_checkpoints
+*.plist
