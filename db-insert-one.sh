@@ -94,6 +94,8 @@ then
             co=`sesame -rSV "$id_coord" | egrep -w 'jradeg|jdedeg'`
             cojoin=${co//[$'\n']/,}
             cojoin=${cojoin//[^0-9+\-,\.]/}
+            # extra cut for cases with two+ lots of ra/dec
+            cojoin=`echo $cojoin | cut -f1,2 -d','`
             ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
             de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
         fi
