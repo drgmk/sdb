@@ -74,6 +74,12 @@ done
 #    ./sdb_insert_irsstare.sh "$name"
 #done
 
+# iras xids, this finds xids so needs to be run through everything
+mysql $db -N -e "SELECT sdbid FROM sdb_pm;" | while read name
+do
+    ./sdb_iras_xids.sh "$name"
+done
+
 # herschel xids, this finds xids so needs to be run through everything
 #mysql $db -N -e "SELECT sdbid FROM sdb_pm;" | while read name
 #do
