@@ -14,20 +14,20 @@
 | char                      | char     | char                      | long   | char         | double    | double    | long      | char                |
 |                           |          |                           |        |              |           |           |           |                     |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                |
-  HD 145880                   145880     null                        1330     ALMA           0.234       null        1
-  HD 143675                   143675     null                        1330     ALMA           0.228       null        1
-  HD 131488                   131488     null                        1330     ALMA           2.91        0.31        null
-  HD 121617                   121617     null                        1330     ALMA           1.86        0.29        null
-  HD 121191                   121191     null                        1330     ALMA           0.130       0.029       null
-  HD 109832                   109832     null                        1330     ALMA           0.105       null        1
-  HD 98363                    98363      null                        1330     ALMA           0.107       0.027       null
-  HD 95086                    95086      null                        1300     ALMA           2.79        0.1         null
-  HD 20807                    20807      null                        9000     ATCA           0.054       null        1           2017arXiv170309388M
-  HD 61005                    61005      null                        9000     ATCA           0.059       0.013       null        2017arXiv170309388M
-  HD 109085                   109085     eta Crv                     9000     ATCA           0.036       null        1           2017arXiv170309388M
-  HD 109573                   109573     HR 4796A                    9000     ATCA           0.063       null        1           2017arXiv170309388M
-  HD 131835                   131835     null                        9000     ATCA           0.053       0.017       null        2017arXiv170309388M
-  HD 105                      105        null                        9000     ATCA           0.042       0.014       null        2017arXiv170309388M
+  HD 145880                   145880     null                        1330     ALMA           0.234       null        1           2017arXiv170908414M
+  HD 143675                   143675     null                        1330     ALMA           0.228       null        1           2017arXiv170908414M
+  HD 131488                   131488     null                        1330     ALMA           2.91        0.31        null        2017arXiv170908414M
+  HD 121617                   121617     null                        1330     ALMA           1.86        0.29        null        2017arXiv170908414M
+  HD 121191                   121191     null                        1330     ALMA           0.130       0.029       null        2017arXiv170908414M
+  HD 109832                   109832     null                        1330     ALMA           0.105       null        1           2017arXiv170908414M
+  HD 98363                    98363      null                        1330     ALMA           0.107       0.027       null        2017arXiv170908414M
+  HD 95086                    95086      null                        1300     ALMA           2.79        0.1         null        2017arXiv170910129S
+  HD 20807                    20807      null                        9000     ATCA           0.054       null        1           2017MNRAS.468.2719M
+  HD 61005                    61005      null                        9000     ATCA           0.059       0.013       null        2017MNRAS.468.2719M
+  HD 109085                   109085     eta Crv                     9000     ATCA           0.036       null        1           2017MNRAS.468.2719M
+  HD 109573                   109573     HR 4796A                    9000     ATCA           0.063       null        1           2017MNRAS.468.2719M
+  HD 131835                   131835     null                        9000     ATCA           0.053       0.017       null        2017MNRAS.468.2719M
+  HD 105                      105        null                        9000     ATCA           0.042       0.014       null        2017MNRAS.468.2719M
   HD 9672                     9672       49 Cet                      850      ALMA           17.0        3.0         null        2017arXiv170401972H
   HD 109085                   109085     eta Crv                     880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M    
   HIP 59960                   106906     null                        1240     ALMA           0.13        null        1           2016ApJ...828...25L
