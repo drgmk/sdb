@@ -148,10 +148,10 @@ def sdb_getphot_one(id):
     # add wavelengths, sort, and remove
     tphot['wave'] = np.zeros(len(tphot))
     for i,filt in enumerate(tphot['Band']):
-        if sdf.filter.iscolour(filt.decode()):
-            f = sdf.filter.Colour.get(filt.decode())
+        if sdf.filter.iscolour(filt):
+            f = sdf.filter.Colour.get(filt)
         else:
-            f = sdf.filter.Filter.get(filt.decode())
+            f = sdf.filter.Filter.get(filt)
 
         tphot['wave'][i] = f.mean_wavelength
 
@@ -190,7 +190,7 @@ def sdb_getphot_one(id):
     bs,js,ns = np.unique(tphot['Band'],
                           return_inverse=True,return_counts=True)
     for i,(band,n) in enumerate(zip(bs,ns)):
-        if n == 1 or band.decode() not in cfg.phot['merge_dupes']:
+        if n == 1 or band not in cfg.phot['merge_dupes']:
             continue
 
         # indices where this band are in the phot table
@@ -236,11 +236,11 @@ def sdb_getphot_one(id):
     # now add these as table metadata, adding a number to the instrument
     # name so that the keys are unique
     for i in range(len(tspec)):
-        if tspec['file'][i] != b'':
+        if tspec['file'][i] != '':
             if tspec['exclude'][i]:
-                tphot.meta['comments'].append(tspec['instrument'][i].decode()+str(i)+'='+tspec['file'][i].decode())
+                tphot.meta['comments'].append(tspec['instrument'][i]+str(i)+'='+tspec['file'][i])
             else:
-                tphot.meta['keywords'][tspec['instrument'][i].decode()+str(i)] = tspec['file'][i].decode()
+                tphot.meta['keywords'][tspec['instrument'][i]+str(i)] = tspec['file'][i]
 
     # rearrange to ensure keyword structure is correct for IPAC ascii
     # format, which is {'keywords':{'keyword': {'value': value} }
