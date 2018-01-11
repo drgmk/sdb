@@ -82,8 +82,11 @@ then
     co=`sesame -rSV "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
-    ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
+    # cojoin may contain two sets of jradeg,jdedeg, so take number before
+    # first comma for ra and after last for dec 
+    ra=`echo $cojoin | sed 's/\([0-9\.]*\),.*/\1/'`
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
+    cojoin=$ra,$de
 
     # if this failed, try id_coord from above
     if [ "$cojoin" == "" ]
