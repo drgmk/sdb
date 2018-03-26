@@ -46,7 +46,7 @@ then
             mysql $db -N -e "DELETE FROM spectra WHERE sdbid = '$res';"
         fi
 
-        $stilts tmatch2 in1=$ftmp ifmt1=votable in2=$firs ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 5.0 5.0 0.0' values2='ra dec_ 5.0 5.0 0.0' params='2' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra find=all write=append
+        $stilts tmatch2 in1=$ftmp ifmt1=votable in2=$firs ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 6.0 6.0 0.0' values2='ra dec_ 6.0 6.0 0.0' params='2' find=all omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra write=append
     fi
 else
     echo "  $sdbid already present"
