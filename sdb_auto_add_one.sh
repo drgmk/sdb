@@ -77,8 +77,11 @@ fi
 
 # extract the photometry, need to know sdbid for that
 echo "\n"
+echo "/~~~~~~ sdb_getphot.py ~~~~~~/"
+echo "using $id"
 sdbid=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$id';")
 ./sdb_getphot.py -i "$sdbid"
+echo "------- sdb_getphot.py -------"
 popd
 
 # run fitting, do once without spectra for speed, and then redo with
