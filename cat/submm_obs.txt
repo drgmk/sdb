@@ -14,21 +14,22 @@
 | char                      | char     | char                      | long   | char         | double    | double    | long      | char                |
 |                           |          |                           |        |              |           |           |           |                     |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                |
-  HD 145880                   145880     null                        1330     ALMA           0.234       null        1           2017arXiv170908414M
-  HD 143675                   143675     null                        1330     ALMA           0.228       null        1           2017arXiv170908414M
-  HD 131488                   131488     null                        1330     ALMA           2.91        0.31        null        2017arXiv170908414M
-  HD 121617                   121617     null                        1330     ALMA           1.86        0.29        null        2017arXiv170908414M
-  HD 121191                   121191     null                        1330     ALMA           0.130       0.029       null        2017arXiv170908414M
-  HD 109832                   109832     null                        1330     ALMA           0.105       null        1           2017arXiv170908414M
-  HD 98363                    98363      null                        1330     ALMA           0.107       0.027       null        2017arXiv170908414M
-  HD 95086                    95086      null                        1300     ALMA           2.79        0.1         null        2017arXiv170910129S
+  HR 8799                     218396     null                        1300     ALMA           3.44        0.344       null        2018ApJ...855...56W
+  HD 145880                   145880     null                        1330     ALMA           0.234       null        1           2017ApJ...849..123M
+  HD 143675                   143675     null                        1330     ALMA           0.228       null        1           2017ApJ...849..123M
+  HD 131488                   131488     null                        1330     ALMA           2.91        0.31        null        2017ApJ...849..123M
+  HD 121617                   121617     null                        1330     ALMA           1.86        0.29        null        2017ApJ...849..123M
+  HD 121191                   121191     null                        1330     ALMA           0.130       0.029       null        2017ApJ...849..123M
+  HD 109832                   109832     null                        1330     ALMA           0.105       null        1           2017ApJ...849..123M
+  HD 98363                    98363      null                        1330     ALMA           0.107       0.027       null        2017ApJ...849..123M
+  HD 95086                    95086      null                        1300     ALMA           2.79        0.1         null        2017AJ....154..225S
   HD 20807                    20807      null                        9000     ATCA           0.054       null        1           2017MNRAS.468.2719M
   HD 61005                    61005      null                        9000     ATCA           0.059       0.013       null        2017MNRAS.468.2719M
   HD 109085                   109085     eta Crv                     9000     ATCA           0.036       null        1           2017MNRAS.468.2719M
   HD 109573                   109573     HR 4796A                    9000     ATCA           0.063       null        1           2017MNRAS.468.2719M
   HD 131835                   131835     null                        9000     ATCA           0.053       0.017       null        2017MNRAS.468.2719M
   HD 105                      105        null                        9000     ATCA           0.042       0.014       null        2017MNRAS.468.2719M
-  HD 9672                     9672       49 Cet                      850      ALMA           17.0        3.0         null        2017arXiv170401972H
+  HD 9672                     9672       49 Cet                      850      ALMA           17.0        3.0         null        2017ApJ...839...86H
   HD 109085                   109085     eta Crv                     880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M    
   HIP 59960                   106906     null                        1240     ALMA           0.13        null        1           2016ApJ...828...25L
   HIP 61782                   110058     null                        1240     ALMA           0.71        0.11        null        2016ApJ...828...25L
@@ -56,11 +57,11 @@
   HD 22049                    22049      eps Eri                     1100     LMT            27.7        1.3         null        2016MNRAS.462.2285C
   HD 181327                   181327     HD 181327                   1300     ALMA           7.9         2.0         null        2016MNRAS.460.2933M    
   HD 377                      377        null                        9000     VLA            0.0         0.0131      null        2016ApJ...823...79M    
-  HD 9672                     9672       49 Cet                      9000     VLA            0.0251     0.0055      null        2016ApJ...823...79M    
-  HD 15115                    15115      null                        9000     VLA            0.0128     0.0041      null        2016ApJ...823...79M    
-  HD 61005                    61005      null                        9000     VLA            0.0573     0.0086      null        2016ApJ...823...79M    
-  HD 104860                   104860     null                        9000     VLA            0.014      0.0035      null        2016ApJ...823...79M    
-  HD 141569                   141569     null                        9000     VLA            0.085      0.0051      null        2016ApJ...823...79M    
+  HD 9672                     9672       49 Cet                      9000     VLA            0.0251      0.0055      null        2016ApJ...823...79M
+  HD 15115                    15115      null                        9000     VLA            0.0128      0.0041      null        2016ApJ...823...79M
+  HD 61005                    61005      null                        9000     VLA            0.0573      0.0086      null        2016ApJ...823...79M
+  HD 104860                   104860     null                        9000     VLA            0.014       0.0035      null        2016ApJ...823...79M
+  HD 141569                   141569     null                        9000     VLA            0.085       0.0051      null        2016ApJ...823...79M
   HD 181327                   181327     HD 181327                   6800     ATCA           0.145       0.0192      null        2015ApJ...813..138R    
   HD 10647                    10647      q1 Eri                      6800     ATCA           0.0926      0.0166      null        2015ApJ...813..138R    
   HD 107146                   107146     HD 107146                   6800     ATCA           0.166       0.0252      null        2015ApJ...813..138R    
