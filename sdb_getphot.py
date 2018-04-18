@@ -38,7 +38,8 @@ def sdb_write_rawphot(file,tphot,tspec):
     
     fh = open(file,'w')
     print('\ photometry/spectra for '+tphot.meta['keywords']['id']['value']+'\n\\',file=fh)
-    tphot.write(fh,format='ascii.ipac')
+    tphot.write(fh, format='ascii.ipac',
+                formats={'Phot': '%6.4g', 'Err': '%6.4g', 'Sys': '%6.4g'})
     fh.close()
 
 
