@@ -25,10 +25,10 @@ do
 done
 
 # gaia
-mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN gaia USING (sdbid) WHERE gaia.sdbid IS NULL;" | while read name
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN gaia_dr2 USING (sdbid) WHERE gaia_dr2.sdbid IS NULL;" | while read name
 do
 echo "\ngetting:"$name
-./sdb_insert_gaia.sh "$name"
+./sdb_insert_gaia_dr2.sh "$name"
 done
 
 # 2mass
