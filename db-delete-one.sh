@@ -39,7 +39,7 @@ do
 done
 
 # sbd tables
-for t in 2mass akari_irc allwise apass denis gaia galex projects seip simbad spectra tyc2 xids sdb_pm import_failed;
+for t in 2mass akari_irc allwise apass denis gaia_dr2 galex projects seip simbad spectra tyc2 xids sdb_pm import_failed;
 do
     st="DELETE FROM $t WHERE sdbid = '$1';"
     echo $st

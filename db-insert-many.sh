@@ -37,10 +37,10 @@ proj=`echo $1 | sed "s/.*\.//"`
 
 # modify source table, these bits may need to be done by hand
 # TODO: put this in a separate script
-echo "if this is a real sample you may want to execute some sql:"
-echo "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
-echo "UPDATE $1 LEFT JOIN sdb.xids ON name=xid SET $1.sdbid=xids.sdbid;"
-echo "ALTER TABLE $1 ADD INDEX sdbid_$proj (sdbid);"
-echo "ALTER TABLE $1 ADD CONSTRAINT sdbid_$proj FOREIGN KEY (sdbid) REFERENCES sdb.sdb_pm (sdbid);"
-echo "DELETE FROM sdb.projects WHERE project='$proj';"
-echo "INSERT INTO sdb.projects SELECT sdbid,'$proj' FROM $1 WHERE sdbid IS NOT NULL;"
+echo "executing sql to add/update sdbids"
+mysql $db -N -e "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
+mysql $db -N -e "UPDATE $1 LEFT JOIN sdb.xids ON name=xid SET $1.sdbid=xids.sdbid;"
+mysql $db -N -e "ALTER TABLE $1 ADD INDEX sdbid_$proj (sdbid);"
+mysql $db -N -e "ALTER TABLE $1 ADD CONSTRAINT sdbid_$proj FOREIGN KEY (sdbid) REFERENCES sdb.sdb_pm (sdbid);"
+mysql $db -N -e "DELETE FROM sdb.projects WHERE project='$proj';"
+mysql $db -N -e "INSERT INTO sdb.projects SELECT sdbid,'$proj' FROM $1 WHERE sdbid IS NOT NULL;"

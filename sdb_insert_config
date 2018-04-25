@@ -2,7 +2,7 @@
 
 # import specifics
 rad=2               # default match radius in arcsec (greater for GALEX)
-sdbprefix=sdb-v1-   # prefix for ids
+sdbprefix=sdb-v2-   # prefix for ids
 site=fr             # vizquery site
 
 # database
