@@ -301,7 +301,8 @@ done
 ./sdb_insert_apass.sh $sdbid
 
 # Gaia
-./sdb_insert_gaia.sh $sdbid
+#./sdb_insert_gaia.sh $sdbid
+./sdb_insert_gaia_dr2.sh $sdbid
 
 # DENIS
 ./sdb_insert_denis.sh $sdbid
