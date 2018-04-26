@@ -1,5 +1,14 @@
-mysql sdb_samples -N -e "SHOW TABLES;" | while read t
+#!/bin/sh
+
+db=sdb_samples
+
+mysql $db -N -e "SHOW TABLES;" | while read t
 do
-    ./db-insert-many.sh $t
-    # echo $st
+    nn=`mysql $db -N -e "select count(name) from $t;"`
+    ns=`mysql $db -N -e "select count(sdbid) from $t;"`
+    if [ $nn != $ns ]
+    then
+        echo $t
+        ./db-insert-many.sh $t
+    fi
 done

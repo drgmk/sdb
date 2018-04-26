@@ -89,7 +89,7 @@ then
     cojoin=$ra,$de
 
     # if this failed, try id_coord from above
-    if [ "$cojoin" == "" ]
+    if [ "$cojoin" == "" -o "$cojoin" == "," ]
     then
         if [ "$id_coord" != "" ]
         then
@@ -103,7 +103,7 @@ then
             de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
         fi
         # if this didn't work then give up, s
-        if [ "$cojoin" == "" ]
+        if [ "$cojoin" == "" -o "$cojoin" == "," ]
         then
             echo "  sesame found nothing for:$1"
             echo "  only id given so nothing to do, exiting"
