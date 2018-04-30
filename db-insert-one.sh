@@ -79,7 +79,7 @@ fi
 if [ "$id" != "" ]
 then
     echo "\nsesame using name:$id"
-    co=`sesame -rSV "$id" | egrep -w 'jradeg|jdedeg'`
+    co=`sesame -oIx -rSV "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
     # cojoin may contain two sets of jradeg,jdedeg, so take number before
@@ -330,5 +330,5 @@ rm $ft2
 # note success (or at least completion)
 mysql $db -N -e "DELETE FROM import_failed WHERE sdbid = '$sdbid';"
 
-echo "\nDone"
+echo "\nDone $sdbid"
 echo "------- db-insert-one.sh -------"
