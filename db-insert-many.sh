@@ -15,10 +15,13 @@ else
     name='name'
 fi
 
+# in case this column doesn't exist
+mysql $db -N -e "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
+
 # given sample db name in $1
 if [ "$name" == "coord" ]
 then
-    mysql $db -N -e "SELECT name FROM $1" | while read name
+    mysql $db -N -e "SELECT name FROM $1 WHERE sdbid IS NULL" | while read name
     do
         ra=`mysql $db -N -e "SELECT ra FROM $1 WHERE name='$name'"`
         dec=`mysql $db -N -e "SELECT de FROM $1 WHERE name='$name'"`
@@ -26,7 +29,7 @@ then
         "$dbroot"sdb/db-insert-one.sh $ra $dec 2>&1 | tee "$logroot""$name".log
     done
 else
-    mysql $db -N -e "SELECT $name FROM $1" | while read name
+    mysql $db -N -e "SELECT name FROM $1 WHERE sdbid IS NULL" | while read name
     do
         echo getting:"$name"
         "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$logroot""$name".log
