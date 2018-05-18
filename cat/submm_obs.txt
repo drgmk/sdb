@@ -14,6 +14,12 @@
 | char                      | char     | char                      | long   | char         | double    | double    | long      | char                |
 |                           |          |                           |        |              |           |           |           |                     |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                |
+  HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        arXiv:1805.01915
+  HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        arXiv:1805.01915
+  HD 109573                   109573     HR 4796A                    880      ALMA           14.8        1.5         null        2018MNRAS.475.4924K
+  HD 39060                    39060      beta Pic                    618      ALMA           112         13          null        arXiv:1804.06479
+  HD 39060                    39060      beta Pic                    1350     SMA            21.0        3.0         null        2018ApJ...853..147M
+  HD 39060                    39060      beta Pic                    1094     SMA            25.9        6.4         null        2018ApJ...853..147M  
   HR 8799                     218396     null                        1300     ALMA           3.44        0.344       null        2018ApJ...855...56W
   HD 145880                   145880     null                        1330     ALMA           0.234       null        1           2017ApJ...849..123M
   HD 143675                   143675     null                        1330     ALMA           0.228       null        1           2017ApJ...849..123M
