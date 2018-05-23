@@ -197,7 +197,7 @@ then
 fi
 
 # finally, see if we have this sbdid already
-res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE xid='$sdbid';")
+res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE BINARY xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "\nStopping here, have sdbid $sdbid in xids table"
@@ -248,7 +248,7 @@ then
 fi
 
 # sanity check, that no xid matches the given id for another sdbid
-res=$(mysql $db -N -e "SELECT sdbid,xid FROM xids WHERE xid='$id' and sdbid != '$sdbid';")
+res=$(mysql $db -N -e "SELECT sdbid,xid FROM xids WHERE BINARY xid='$id' and sdbid != '$sdbid';")
 if [ "$res" != "" ]
 then
     echo "\nERROR: Found xid for $id different to $sdbid: $res"
@@ -263,7 +263,7 @@ fi
 if [ "$id" != "" -a 1 == 1 ]
 then
     # check we don't have it as an xid already
-    res=$(mysql $db -N -e "SELECT xid FROM xids WHERE xid='$id';")
+    res=$(mysql $db -N -e "SELECT xid FROM xids WHERE BINARY xid='$id';")
     if [ "$res" == "" ]
     then
         echo "\nAdding given id as an xid"
