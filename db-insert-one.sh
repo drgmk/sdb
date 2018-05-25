@@ -127,8 +127,9 @@ echo "\nLooking in proper motion catalogues"
 # get multiple tables with the same column format, give tables in order
 # of precision so don't sort. tycho2 has pm as floats but others are
 # double which causes problems for stilts. assume instead that tyc2 is
-# subsumed into ppmxl and likely to be in tgas
-vizquery -site=$site -mime=votable -source=I/345/gaia2,I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+# subsumed into ppmxl and likely to be in tgas. gaia dr2 may have entries
+# with no pm, so require pmRA not null
+vizquery -site=$site -mime=votable -source=I/345/gaia2,I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
 numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
 
 # update coordinates if a pm was found, an error will be thrown by stilts
