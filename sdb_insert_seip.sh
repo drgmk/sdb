@@ -30,13 +30,18 @@ res=$(mysql $db -N -e "SELECT sdbid FROM seip WHERE sdbid='$sdbid';")
 if [ "$res" == "" ]
 then
     epoch=2006.9
-    co=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
+    ra=$(mysql $db -N -e "SELECT raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600. from sdb_pm where sdbid = '$sdbid';")
+    de=$(mysql $db -N -e "SELECT dej2000 + ($epoch-2000.0) * pmde/1e3/3600. from sdb_pm where sdbid = '$sdbid';")
 
-    if [ "$co" != "" ]
+    if [ "$ra" != "" ]
     then
-        echo $co
+        echo $ra,$de
         ftmp=/tmp/pos$RANDOM.txt
-        curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$co" > $ftmp
+
+        # TAP query, assume first row is closest
+        curl -s "https://irsa.ipac.caltech.edu/TAP/sync?QUERY=SELECT+*+FROM+slphotdr4+WHERE+CONTAINS(POINT(%27J2000%27,ra,dec),CIRCLE(%27J2000%27,$ra,$de,0.000555))=1" > $ftmp
+
+#        curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$co" > $ftmp
 
         numrow=`$stilts tpipe in=$ftmp cmd='keepcols objid' cmd='stats NGood' ofmt=csv-noheader`
         echo "N rows $numrow"
@@ -55,7 +60,7 @@ then
                 mysql $db -N -e "DELETE FROM seip WHERE sdbid = '$res';"
             fi
 
-            $stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$ftmp ifmt2=votable icmd2='colmeta -name dec_ dec' ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=append
+            $stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$ftmp ifmt2=votable icmd2='colmeta -name dec_ dec' ocmd='random' ocmd='rowrange 1 1' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=seip write=append
         fi
     fi
 else
