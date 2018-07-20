@@ -75,7 +75,9 @@ fi
 # if one argument was given (i.e. a name) get ra,dec from sesame, if
 # given coords in a 2MASS-like format (need at least 9 digits total)
 # then also proceeed. these are corrected to epoch 2000.0 (where
-# possible)
+# possible). also attempt to get proper motion
+pmra=0.0
+pmde=0.0
 if [ "$id" != "" ]
 then
     echo "\nsesame using name:$id"
@@ -87,6 +89,16 @@ then
     ra=`echo $cojoin | sed 's/\([0-9\.]*\),.*/\1/'`
     de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
     cojoin=$ra,$de
+
+    echo "  trying sesame for proper motion"
+    co=`sesame "$id"`
+    ok=`echo $co | grep 'pmRA'`
+    if [ "$ok" != "" ]
+    then
+        pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
+        pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
+        echo "    found pm $pmra,$pmde with sesame"
+    fi
 
     # if this failed, try id_coord from above
     if [ "$cojoin" == "" -o "$cojoin" == "," ]
@@ -101,6 +113,17 @@ then
             cojoin=`echo $cojoin | cut -f1,2 -d','`
             ra=`echo $cojoin | sed 's/\(.*\),.*/\1/'`
             de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
+
+            echo "  trying sesame for proper motion"
+            co=`sesame "$id_coord"`
+            ok=`echo $co | grep 'pmRA'`
+            if [ "$ok" != "" ]
+            then
+                pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
+                pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
+                echo "    found pm $pmra,$pmde with sesame"
+            fi
+
         fi
         # if this didn't work then give up, s
         if [ "$cojoin" == "" -o "$cojoin" == "," ]
@@ -119,67 +142,80 @@ else
 fi
 echo "\nFinal set of coords:$cojoin"
 
-# now try to find something at these coords in a table with proper
+# if no proper motion was found,
+# try to find something at these coords in a table with proper
 # motions, this will allow use of epoch-corrected coords when searching
 # for matches in other tables below. put in a file to use again below.
-echo "\nLooking in proper motion catalogues"
 
 # get multiple tables with the same column format, give tables in order
 # of precision so don't sort. tycho2 has pm as floats but others are
 # double which causes problems for stilts. assume instead that tyc2 is
 # subsumed into ppmxl and likely to be in tgas. gaia dr2 may have entries
 # with no pm, so require pmRA not null
-vizquery -site=$site -mime=votable -source=I/345/gaia2,I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
-numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
-
-# update coordinates if a pm was found, an error will be thrown by stilts
-# if the file $fp wasn't filled above, in which case try harder with sesame
-if [ "$numrow" != "" ]
+if [ $pmra == 0.0 ]
 then
-    $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
-    cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
-else
-    cotmp=""
-fi
+    echo "\nLooking in proper motion catalogues"
+    vizquery -site=$site -mime=votable -source=I/345/gaia2,I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+    numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
 
-if [ "$cotmp" != "" ]
-then
-    cojoin=$cotmp
-    echo "  success, updated epoch 2000.0 coord from pm:$cojoin"
-else
-    echo "  trying sesame for proper motion"
-    co=`sesame "$id"`
-    ok=`echo $co | grep 'pmRA'`
-    if [ "$ok" != "" ]
+    # update coordinates if a pm was found, an error will be thrown by stilts
+    # if the file $fp wasn't filled above
+    if [ "$numrow" != "" ]
     then
-        pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
-        pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
-        posref=`echo $co | sed 's/.*<refPos>\(.*\)<\/refPos>.*/\1/'`
-        echo "    found pm $pmra,$pmde with sesame, position ref $posref"
-        # attempt to be smart about the position ref and implied epoch
-        if [ "$posref" != "" ]
-        then
-            # ALLWISE papers, position about 2010.3
-            if [ "$posref" == "2012yCat.2311....0C" -o "$posref" == "2011ApJ...726...30M" -o "$posref" == "2011ApJS..197...19K" -o "$posref" == "2014ApJ...786L..18L" ]
-            then
-                 ra=`echo "$ra-10.3*$pmra/1000.0/3600.0/c($de*a(1)/45.0)" | bc -l`
-                 de=`echo "$de-10.3*$pmde/1000.0/3600.0" | bc -l`
-            fi
-            cojoin=$ra,$de
-            echo "      ep2000.0 coord changed:$cojoin"
-        else
-            echo "      ep2000.0 coord the same:$cojoin"
-        fi
+        $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
+        cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
+        echo "  success"
     else
         echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
-        pmra=0.0
-        pmde=0.0
+        echo "_r,_raj2000,_dej2000,pmRA,pmDE" > $ft
+        echo "-1.0,$cojoin,0.0,0.0" >> $ft
+        $stilts tpipe in=$ft ifmt=csv cmd='random' omode=out out=- ofmt=votable > $fp
     fi
-
+else
+    # if we got a proper motion from sesame above, keep it
     echo "_r,_raj2000,_dej2000,pmRA,pmDE" > $ft
     echo "-1.0,$cojoin,$pmra,$pmde" >> $ft
     $stilts tpipe in=$ft ifmt=csv cmd='random' omode=out out=- ofmt=votable > $fp
 fi
+
+#if [ "$cotmp" != "" ]
+#then
+#    cojoin=$cotmp
+#    echo "  success, updated epoch 2000.0 coord from pm:$cojoin"
+#else
+#    echo "  trying sesame for proper motion"
+#    co=`sesame "$id"`
+#    ok=`echo $co | grep 'pmRA'`
+#    if [ "$ok" != "" ]
+#    then
+#        pmra=`echo $co | sed 's/.*<pmRA>\(.*\)<\/pmRA>.*/\1/'`
+#        pmde=`echo $co | sed 's/.*<pmDE>\(.*\)<\/pmDE>.*/\1/'`
+#        posref=`echo $co | sed 's/.*<refPos>\(.*\)<\/refPos>.*/\1/'`
+#        echo "    found pm $pmra,$pmde with sesame, position ref $posref"
+#        # attempt to be smart about the position ref and implied epoch
+#        if [ "$posref" != "" ]
+#        then
+#            # ALLWISE papers, position about 2010.3
+#            if [ "$posref" == "2012yCat.2311....0C" -o "$posref" == "2011ApJ...726...30M" -o "$posref" == "2011ApJS..197...19K" -o "$posref" == "2014ApJ...786L..18L" ]
+#            then
+#                 ra=`echo "$ra-10.3*$pmra/1000.0/3600.0/c($de*a(1)/45.0)" | bc -l`
+#                 de=`echo "$de-10.3*$pmde/1000.0/3600.0" | bc -l`
+#            fi
+#            cojoin=$ra,$de
+#            echo "      ep2000.0 coord changed:$cojoin"
+#        else
+#            echo "      ep2000.0 coord the same:$cojoin"
+#        fi
+#    else
+#        echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
+#        pmra=0.0
+#        pmde=0.0
+#    fi
+#
+#    echo "_r,_raj2000,_dej2000,pmRA,pmDE" > $ft
+#    echo "-1.0,$cojoin,$pmra,$pmde" >> $ft
+#    $stilts tpipe in=$ft ifmt=csv cmd='random' omode=out out=- ofmt=votable > $fp
+#fi
 
 # convert these coords to an ID to be used for this target, need to put
 # coords in a temporary file first since stilts can't stream ascii
