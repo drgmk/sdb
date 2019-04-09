@@ -14,6 +14,9 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 172555                   172555     null                        1330     ALMA           0.120       0.031       null        LucaMatra               null
+  BD+45 598                   null       BD+45 598                   1300     SMA            2.17        0.67        null        DavidWilner             null
+  HD 170773                   170773     HD 170773                   1300     ALMA           6.2         0.6         null        AldoSepulveda           null
   TWA 7                       null       TWA 7                       880      ALMA           2.1         0.4         null        arXiv:1806.09252v2      null
   HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        arXiv:1805.01915        null      
   HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        arXiv:1805.01915        null      
