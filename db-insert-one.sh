@@ -147,16 +147,35 @@ echo "\nFinal set of coords:$cojoin"
 # motions, this will allow use of epoch-corrected coords when searching
 # for matches in other tables below. put in a file to use again below.
 
-# get multiple tables with the same column format, give tables in order
-# of precision so don't sort. tycho2 has pm as floats but others are
-# double which causes problems for stilts. assume instead that tyc2 is
-# subsumed into ppmxl and likely to be in tgas. gaia dr2 may have entries
-# with no pm, so require pmRA not null
+# sequential trawl through DR2, HIP, PPMXL
 if [ $pmra == 0.0 ]
 then
     echo "\nLooking in proper motion catalogues"
-    vizquery -site=$site -mime=votable -source=I/345/gaia2,I/337/tgas,I/311/hip2,ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+    echo "  Gaia DR2"
+    vizquery -site=$site -mime=votable -source=I/345/gaia2 -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
     numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
+    if [ "$numrow" == "" ]
+    then
+        echo "  not in DR2, try HIP"
+        vizquery -site=$site -mime=votable -source=I/311/hip2 -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+        numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
+        if [ "$numrow" == "" ]
+        then
+            echo "  not in DR2, HIP, try PPMXL"
+            vizquery -site=$site -mime=votable -source=ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+            numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
+            if [ "$numrow" == "" ]
+            then
+                echo "    no PM in Gaia DR2, HIP, ppmxl"
+            else
+                echo "    ppmxl success"
+            fi
+        else
+            echo "    HIP success"
+        fi
+    else
+        echo "    DR2 success"
+    fi
 
     # update coordinates if a pm was found, an error will be thrown by stilts
     # if the file $fp wasn't filled above
@@ -164,7 +183,7 @@ then
     then
         $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
         cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
-        echo "  success"
+        echo "  pm success"
     else
         echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
         echo "_r,_raj2000,_dej2000,pmRA,pmDE" > $ft
