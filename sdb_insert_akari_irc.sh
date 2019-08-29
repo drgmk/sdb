@@ -38,7 +38,7 @@ then
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
         vizquery -site=$site -mime=votable -source=II/297 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$co" > $fviz
-        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
+        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='delcols objID' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
         then
