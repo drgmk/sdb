@@ -29,7 +29,7 @@ then
         "$dbroot"sdb/db-insert-one.sh $ra $dec 2>&1 | tee "$logroot""$name".log
     done
 else
-    mysql $db -N -e "SELECT name FROM $1 WHERE sdbid IS NULL" | while read name
+    mysql $db -N -e "SELECT name FROM $1 WHERE sdbid IS NULL AND name IS NOT NULL" | while read name
     do
         echo getting:"$name"
         "$dbroot"sdb/db-insert-one.sh "$name" 2>&1 | tee "$logroot""$name".log
