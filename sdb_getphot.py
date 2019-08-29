@@ -367,6 +367,7 @@ if __name__ == "__main__":
                         dest='idlist',metavar='sdbid',help='Get photometry for one sdbid')
     parser.add_argument('--sample','-s',type=str,metavar='table',help='Get photometry for sample')
     parser.add_argument('--all','-a',action='store_true',help='Get all photometry')
+    parser1.add_argument('--ra','-r',type=float,metavar='X',help='Only extract for RA>Xh with -a')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
                          default=cfg.mysql['sampledb'],metavar=cfg.mysql['sampledb'])
     args = parser1.parse_args()
@@ -390,7 +391,11 @@ if __name__ == "__main__":
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
                                       host=cfg.mysql['host'],database='sdb')
         cursor = cnx.cursor(buffered=True)
-        cursor.execute("SELECT sdbid FROM sdb_pm;")
+        if args.ra is None:
+            cursor.execute("SELECT sdbid FROM sdb_pm;")
+        else:
+            cursor.execute("SELECT sdbid FROM sdb_pm WHERE raj2000>{};".format(args.ra*15))
+
         for id in cursor:
             sdb_getphot_one(id[0])
         cursor.close()
