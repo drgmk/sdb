@@ -159,6 +159,8 @@ then
         echo "  not in DR2, try HIP"
         vizquery -site=$site -mime=votable -source=I/311/hip2 -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
         numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
+        # remove "hidden" Sn column
+        $stilts tcat in=$ft2 omode=out ofmt=votable ocmd='delcols "Sn"' out=$ft2
         if [ "$numrow" == "" ]
         then
             echo "  not in DR2, HIP, try PPMXL"
