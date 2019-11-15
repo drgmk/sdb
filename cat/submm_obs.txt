@@ -14,11 +14,72 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  GJ 14                       null       null                        1270     ALMA           1.8         0.3         null        REASONS                 null
+  HD 10638                    10638      null                        1270     SMA            1.2         0.4         null        REASONS                 null
+  HD 14055                    14055      gamma Tri                   1270     ALMA           3.4         0.4         null        REASONS                 null
+  HD 15257                    15257      12 Tri                      1270     SMA            3.0         1.2         null        REASONS                 null
+  HD 15745                    15745      null                        1270     ALMA           1.12        0.13        null        REASONS                 null
+  HD 35841                    35841      null                        1270     ALMA           0.62        0.07        null        REASONS                 null
+  HD 76582                    76582      63 Cnc                      1270     ALMA           3.2         0.4         null        REASONS                 null
+  HD 84870                    84870      null                        1270     ALMA           1.9         0.5         null        REASONS                 null
+  HD 127821                   127821     null                        1270     SMA            1.9         0.6         null        REASONS                 null
+  HD 158352                   158352     null                        1270     ALMA           1.6         0.3         null        REASONS                 null
+  HD 161868                   161868     gamma Oph                   1270     ALMA           2.5         0.3         null        REASONS                 null
+  HD 170773                   170773     null                        1270     ALMA           6.2         0.6         null        REASONS                 null
+  HD 182681                   182681     null                        1270     ALMA           1.41        0.15        null        REASONS                 null
+  HD 191089                   191089     null                        1270     ALMA           1.83        0.19        null        REASONS                 null
+  HD 205674                   205674     null                        1270     ALMA           1.07        0.16        null        REASONS                 null
+  HD 105                      105        null                        1350     ALMA           1.36        0.17        null        REASONS                 null
+  HD 9672                     9672       49 Cet                      855      ALMA           16.3        1.8         null        REASONS                 null
+  HD 10647                    10647      q01 Eri                     1260     ALMA           5.3         0.6         null        REASONS                 null
+  HD 15115                    15115      null                        1340     ALMA           2.0         0.2         null        REASONS                 null
+  HD 22049                    22049      eps Eri                     1260     ALMA           12.0        1.4         null        REASONS                 null
+  HD 21997                    21997      null                        895      ALMA           3.5         0.4         null        REASONS                 null
+  HD 32297                    32297      null                        1340     ALMA           3.5         0.4         null        REASONS                 null
+  HD 39060                    39060      beta Pic                    1330     ALMA           20          2           null        2019AJ....157..135M     null
+  HD 48682                    48682      56 Aur                      1310     SMA            2.1         1.2         null        REASONS                 null
+  HD 61005                    61005      null                        1290     ALMA           6.3         0.6         null        REASONS                 null
+  TWA 7                       null       TWA 7                       878      ALMA           2.8         0.3         null        REASONS                 null
+  HD 92945                    92945      V419 Hya                    856      ALMA           10.8        1.2         null        REASONS                 null
+  HD 95086                    95086      null                        1300     ALMA           3.0         0.3         null        REASONS                 null
+  HD 105211                   105211     eta Cru                     1290     ALMA           2.4         0.3         null        REASONS                 null
+  HD 106906                   106906     null                        1260     ALMA           0.36        0.05        null        REASONS                 null
+  HD 109085                   109085     eta Crv                     880      ALMA           16.8        1.8         null        REASONS                 null
+  HD 109573                   109573     HR 4796A                    880      ALMA           15.4        1.5         null        REASONS                 null
+  HD 110058                   110058     null                        1250     ALMA           0.64        0.12        null        REASONS                 null
+  HD 111520                   111520     null                        1250     ALMA           1.33        0.16        null        REASONS                 null
+  HD 112810                   112810     null                        1250     ALMA           0.56        0.10        null        REASONS                 null
+  HD 113556                   113556     null                        1250     ALMA           0.41        0.18        null        REASONS                 null
+  HD 113766                   113766     null                        1250     ALMA           0.65        0.10        null        REASONS                 null
+  HD 114082                   114082     null                        1260     ALMA           0.69        0.08        null        REASONS                 null
+  HD 115600                   115600     null                        1250     ALMA           0.29        0.11        null        REASONS                 null
+  HD 117214                   117214     null                        1260     ALMA           0.75        0.08        null        REASONS                 null
+  HD 121191                   121191     null                        1260     ALMA           0.41        0.05        null        REASONS                 null
+  HD 121617                   121617     null                        1330     ALMA           1.8         0.2         null        REASONS                 null
+  HD 129590                   129590     null                        1260     ALMA           1.30        0.13        null        REASONS                 null
+  HD 131488                   131488     null                        1330     ALMA           2.9         0.3         null        REASONS                 null
+  HD 131835                   131835     null                        890      ALMA           5.4         0.5         null        REASONS                 null
+  HD 138813                   138813     null                        1330     ALMA           1.25        0.15        null        REASONS                 null
+  HD 139664                   139664     g Lup                       1260     ALMA           1.7         0.2         null        REASONS                 null
+  HD 142315                   142315     null                        1250     ALMA           0.51        0.16        null        REASONS                 null
+  HD 142446                   142446     null                        1250     ALMA           0.81        0.18        null        REASONS                 null
+  HD 145560                   145560     null                        1250     ALMA           1.71        0.20        null        REASONS                 null
+  HD 146181                   146181     null                        1250     ALMA           0.83        0.11        null        REASONS                 null
+  HD 146897                   146897     null                        1250     ALMA           1.36        0.16        null        REASONS                 null
+  HD 147137                   147137     null                        1250     ALMA           0.53        0.19        null        REASONS                 null
+  HD 164249                   164249     null                        1350     ALMA           1.0         0.2         null        REASONS                 null
+  HD 172167                   172167     Vega                        1340     ALMA           13          3           null        REASONS                 null
+  HD 181327                   181327     null                        880      ALMA           18.8        1.9         null        REASONS                 null
+  HD 197481                   197481     AU Mic                      1350     ALMA           6.0         0.6         null        REASONS                 null
+  HD 202628                   202628     null                        1250     ALMA           1.14        0.13        null        REASONS                 null
+  HD 207129                   207129     null                        1260     ALMA           3.0         0.5         null        REASONS                 null
+  HD 216956                   216956     Fomalhaut A                 1340     ALMA           24.9        2.5         null        REASONS                 null
+  HD 218396                   218396     HR 8799                     1340     ALMA           3.8         0.6         null        REASONS                 null
+  TYC 9340-437-1              null       null                        1330     ALMA           3.9         0.6         null        REASONS                 null
+
   LP 876-10                   null       Fomalhaut C                 880      ALMA           0.87        0.16        null        PatrickCC               null
   HD 172555                   172555     null                        1330     ALMA           0.120       0.031       null        LucaMatra               null
   BD+45 598                   null       BD+45 598                   1300     SMA            2.17        0.67        null        DavidWilner             null
-  HD 170773                   170773     HD 170773                   1300     ALMA           6.2         0.6         null        AldoSepulveda           null
-  TWA 7                       null       TWA 7                       880      ALMA           2.1         0.4         null        arXiv:1806.09252v2      null
   HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        arXiv:1805.01915        null      
   HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        arXiv:1805.01915        null      
   HD 109573                   109573     HR 4796A                    880      ALMA           14.8        1.5         null        2018MNRAS.475.4924K     null      
@@ -41,7 +102,7 @@
   HD 131835                   131835     null                        9000     ATCA           0.053       0.017       null        2017MNRAS.468.2719M     null      
   HD 105                      105        null                        9000     ATCA           0.042       0.014       null        2017MNRAS.468.2719M     null      
   HD 9672                     9672       49 Cet                      850      ALMA           17.0        3           null        2017ApJ...839...86H     null      
-  HD 109085                   109085     eta Crv                     880      ALMA           10.1        0.4         null        2017MNRAS.465.2595M     null      
+  HD 109085                   109085     eta Crv                     880      ALMA           13.3        1.6         null        2017MNRAS.465.2595M     null      
   HIP 59960                   106906     null                        1240     ALMA           0.13        null        1           2016ApJ...828...25L     null      
   HIP 61782                   110058     null                        1240     ALMA           0.71        0.11        null        2016ApJ...828...25L     null      
   HIP 62482                   111161     null                        1240     ALMA           0.13        0.05        null        2016ApJ...828...25L     null      
