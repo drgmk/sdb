@@ -250,8 +250,9 @@ echo "  source id is:$sdbid"
 dup=$(mysql $db -N -e "SELECT sdbid FROM sdb_pm WHERE sdbid != '$sdbid' AND raj2000 BETWEEN $ra-0.0001 AND $ra+0.0001 AND dej2000 BETWEEN $de-0.0001 AND $de+0.0001;")
 if [ "$dup" != "" ]
 then
-    echo "\nDuplicate source $dup found nearby, deleting before proceeding"
-    ./db-delete-one.sh $dup
+    echo "\nPossible duplicate source found nearby"
+#    echo "\nDuplicate source $dup found nearby, deleting before proceeding"
+#    ./db-delete-one.sh $dup
 fi
 
 # finally, see if we have this sbdid already
