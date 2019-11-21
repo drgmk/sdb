@@ -15,6 +15,7 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 54341                    54341      null                        1340     ALMA           0.57        0.06        null        GrantK                  null
   GJ 14                       null       null                        1270     ALMA           1.8         0.3         null        REASONS                 null
   HD 10638                    10638      null                        1270     SMA            1.2         0.4         null        REASONS                 null
   HD 14055                    14055      gamma Tri                   1270     ALMA           3.4         0.4         null        REASONS                 null
@@ -81,10 +82,10 @@
   LP 876-10                   null       Fomalhaut C                 880      ALMA           0.87        0.16        null        PatrickCC               null
   HD 172555                   172555     null                        1330     ALMA           0.120       0.031       null        LucaMatra               null
   BD+45 598                   null       BD+45 598                   1300     SMA            2.17        0.67        null        DavidWilner             null
-  HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        arXiv:1805.01915        null      
-  HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        arXiv:1805.01915        null      
+  HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        2018MNRAS.479.5423M     null      
+  HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        2018MNRAS.479.5423M     null      
   HD 109573                   109573     HR 4796A                    880      ALMA           14.8        1.5         null        2018MNRAS.475.4924K     null      
-  HD 39060                    39060      beta Pic                    610      ALMA           112.0       13          null        arXiv:1804.06479        null
+  HD 39060                    39060      beta Pic                    610      ALMA           112.0       13          null        2018ApJ...861...72C     null
   HD 39060                    39060      beta Pic                    1350     SMA            21.0        3           null        2018ApJ...853..147M     null      
   HD 39060                    39060      beta Pic                    1100     SMA            25.9        6.4         null        2018ApJ...853..147M     null
   HR 8799                     218396     null                        1300     ALMA           3.44        0.344       null        2018ApJ...855...56W     null      
