@@ -37,6 +37,7 @@
   HD 22049                    22049      eps Eri                     1260     ALMA           12.0        1.4         null        REASONS                 null
   HD 21997                    21997      null                        895      ALMA           3.5         0.4         null        REASONS                 null
   HD 32297                    32297      null                        1340     ALMA           3.5         0.4         null        REASONS                 null
+  HD 38858                    38858      null                        1260     ALMA           2.7         0.7         null        REASONS                 null
   HD 39060                    39060      beta Pic                    1330     ALMA           20          2           null        2019AJ....157..135M     null
   HD 48682                    48682      56 Aur                      1310     SMA            2.1         1.2         null        REASONS                 null
   HD 61005                    61005      null                        1290     ALMA           6.3         0.6         null        REASONS                 null
