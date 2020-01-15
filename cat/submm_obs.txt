@@ -42,7 +42,7 @@
   HD 39060                    39060      beta Pic                    1330     ALMA           20          2           null        2019AJ....157..135M     null
   HD 48682                    48682      56 Aur                      1310     SMA            2.1         1.2         null        REASONS                 null
   HD 61005                    61005      null                        1290     ALMA           6.3         0.6         null        REASONS                 null
-  TWA 7                       null       TWA 7                       878      ALMA           2.8         0.3         null        REASONS                 null
+  TWA 7                       null       TWA 7                       880      ALMA           2.8         0.3         null        REASONS                 null
   HD 92945                    92945      V419 Hya                    855      ALMA           10.8        1.2         null        REASONS                 null
   HD 95086                    95086      null                        1300     ALMA           3.0         0.3         null        REASONS                 null
   HD 105211                   105211     eta Cru                     1290     ALMA           2.4         0.3         null        REASONS                 null
