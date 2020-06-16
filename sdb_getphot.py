@@ -111,12 +111,15 @@ def sdb_getphot_one(id):
         stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s'
         # excludes
         stmt += ',IF(0 '
-        # table excludes
+        # table excludes, if band is present include must be null
+        # (i.e. we are not actually including instead)
         if excl_join != None:
-            stmt += ' OR IF(exclude_band IS NULL,0,1)'
-        # column based excludes
-        if excl != None:
+            stmt += ' OR IF(IF(exclude_band IS NOT NULL,1,0) AND IF(include IS NULL,1,0),1,0)'
+        # column based excludes (which can be overridden by joined table)
+        if excl != None and excl_join is None:
             stmt += ' OR '+excl
+        if excl != None and excl_join != None:
+            stmt += ' OR ('+excl+' AND IF(include is NOT NULL,0,1))'
         stmt += ',1,0)'
         # main join
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
