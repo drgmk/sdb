@@ -37,4 +37,4 @@ phot['merge_dupes'] = cfg['phot']['merge_dupes'].split(',')
 # given by the file configuration, and two parts of a file glob where
 # the aor goes in between
 spectra = {'irsstare':('cassis/irsstare/',
-                       'cassis_yaaar_spcfw_','[tu].fits')}
+                       'cassis_yaaar_*_','*.fits')}
