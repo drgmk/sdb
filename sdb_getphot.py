@@ -167,7 +167,7 @@ def sdb_getphot_one(id):
     tphot.meta['comments'] = []
 
     # get some addtional stellar data
-    cursor.execute("SELECT main_id,raj2000,dej2000,sp_type,sp_bibcode,COALESCE(gaia_dr2.plx,simbad.plx_value) AS plx_value,COALESCE(gaia_dr2.e_plx,simbad.plx_err) AS plx_err,COALESCE(IF(gaia_dr2.plx IS NULL,NULL,'2018yCat.1345....0G'),plx_bibcode) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia_dr2 USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
+    cursor.execute("SELECT main_id,raj2000,dej2000,sp_type,sp_bibcode,COALESCE(simbad.plx_value,gaia_dr2.plx) AS plx_value,COALESCE(simbad.plx_err,gaia_dr2.e_plx) AS plx_err,COALESCE(plx_bibcode,IF(gaia_dr2.plx IS NULL,NULL,'2018yCat.1345....0G')) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia_dr2 USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
     vals = cursor.fetchall()
     keys = cursor.column_names
     if len(vals) > 0:
