@@ -147,24 +147,38 @@ echo "\nFinal set of coords:$cojoin"
 # motions, this will allow use of epoch-corrected coords when searching
 # for matches in other tables below. put in a file to use again below.
 
+# vizquery returns positions as expected, but _r is for original catalogue
+# position, so doesn't take proper motion into account!
+
 # sequential trawl through DR2, HIP, PPMXL
 if [ $pmra == 0.0 ]
 then
     echo "\nLooking in proper motion catalogues"
+
+    # set epoch to 2000.0 by default, but use 1993.3 if a 2MASS id
+    epoch=2000.0
+    # use an increased radius to capture high pm objects
+    rad=5
+    if [[ $1 =~ ^2MASS ]]
+    then
+        epoch=1993.3
+        echo "  set epoch to $epoch for 2MASS ID"
+    fi
+
     echo "  Gaia DR2"
-    vizquery -site=$site -mime=votable -source=I/345/gaia2 -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+    vizquery -site=$site -mime=votable -source=I/345/gaia2 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
     numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
     if [ "$numrow" == "" ]
     then
         echo "  not in DR2, try HIP"
-        vizquery -site=$site -mime=votable -source=I/311/hip2 -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+        vizquery -site=$site -mime=votable -source=I/311/hip2 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
         numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
         # remove "hidden" Sn column
         $stilts tcat in=$ft2 omode=out ofmt=votable ocmd='delcols "Sn"' out=$ft2
         if [ "$numrow" == "" ]
         then
             echo "  not in DR2, HIP, try PPMXL"
-            vizquery -site=$site -mime=votable -source=ppmxl -c.rs=$rad pmRA="!=" -out.max=1 -out.add=_r -c=$cojoin -out="_RA(J2000,2000.0)" -out="_DE(J2000,2000.0)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+            vizquery -site=$site -mime=votable -source=ppmxl -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
             numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
             if [ "$numrow" == "" ]
             then
@@ -179,13 +193,18 @@ then
         echo "    DR2 success"
     fi
 
+    # get closest match with input coords and overwrite $ft2
+    echo "raj2000,dej2000" > $ft
+    echo "$cojoin" >> $ft
+    $stilts tmatch2 in1=$ft ifmt1=csv in2=$ft2 ifmt2=votable ocmd='keepcols "_r _RAJ2000 _DEJ2000 pmRA pmDE"' matcher=sky values1='raj2000 dej2000' values2='_RAJ2000 _DEJ2000' params='10' find=best omode=out out=$ft2 ofmt=votable > /dev/null
+
     # update coordinates if a pm was found, an error will be thrown by stilts
-    # if the file $fp wasn't filled above
+    # if the file $ft2 wasn't filled above
     if [ "$numrow" != "" ]
     then
         $stilts tcat in=$ft2 multi=true omode=out ofmt=votable out=$fp
-        cotmp=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
-        echo "  pm success"
+        cojoin=`$stilts tpipe in=$fp ifmt=votable cmd='random' cmd="sort _r" cmd='keepcols "_RAJ2000 _DEJ2000"' cmd="rowrange 1 1" omode=out out=- ofmt=csv-noheader`
+        echo "  pm success, updating coords to $cojoin"
     else
         echo "  no pm source found, keeping:$cojoin and assuming pm is zero"
         echo "_r,_raj2000,_dej2000,pmRA,pmDE" > $ft
