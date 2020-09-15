@@ -39,7 +39,7 @@ then
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
         vizquery -site=$site -mime=votable -source=I/259/tyc2 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_BTmag -out.add=e_VTmag -out.add=prox -out.add=CCDM -c="$co" > $fviz
-        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='colmeta -name RA_ICRS_ RA(ICRS)' icmd2='colmeta -name DE_ICRS_ DE(ICRS)' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
+        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='colmeta -name RA_ICRS_ RA(ICRS)' icmd2='colmeta -name DE_ICRS_ DE(ICRS)' ocmd='random' ocmd='addcol -before _r tyc2id concat(toString(tyc1),concat(\"-\",concat(toString(tyc2),concat(\"-\",toString(tyc3)))))' icmd2='delcols recno' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
         then
@@ -55,6 +55,7 @@ then
                 mysql $db -N -e "DELETE FROM tyc2 WHERE sdbid = '$res';"
             fi
             echo "Writing to $db.tyc2"
+	    cat $ftmp
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=append
         fi
     fi
