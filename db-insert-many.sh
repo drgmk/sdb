@@ -18,6 +18,9 @@ fi
 # in case this column doesn't exist
 mysql $db -N -e "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
 
+# add sdbids to save trying to ingest them
+mysql $db -N -e "UPDATE $1 LEFT JOIN sdb.xids ON name=xid SET $1.sdbid=xids.sdbid;"
+
 # given sample db name in $1
 if [ "$name" == "coord" ]
 then
@@ -41,7 +44,6 @@ proj=`echo $1 | sed "s/.*\.//"`
 # modify source table, these bits may need to be done by hand
 # TODO: put this in a separate script
 echo "executing sql to add/update sdbids"
-mysql $db -N -e "ALTER TABLE $1 ADD COLUMN sdbid VARCHAR(25);"
 mysql $db -N -e "UPDATE $1 LEFT JOIN sdb.xids ON name=xid SET $1.sdbid=xids.sdbid;"
 mysql $db -N -e "ALTER TABLE $1 ADD INDEX sdbid_$proj (sdbid);"
 mysql $db -N -e "ALTER TABLE $1 ADD CONSTRAINT sdbid_$proj FOREIGN KEY (sdbid) REFERENCES sdb.sdb_pm (sdbid);"
