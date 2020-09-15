@@ -6,7 +6,7 @@ ft=/tmp/pos$RANDOM.txt
 ft2=/tmp/pos$RANDOM.txt
 
 # initial select, tailor to whatever is needed
-mysql $db -N -e "SELECT sdbid FROM simbad WHERE plx_bibcode != '2018yCat.1345....0G' OR plx_bibcode IS NULL" | while read sdbid
+mysql $db -N -e "SELECT sdbid FROM simbad WHERE sdbid='sdb-v2-120902.25-512041.0'" | while read sdbid
 do
 
     # get the simbad id, and replace with unicode strings for url
