@@ -55,7 +55,6 @@ then
                 mysql $db -N -e "DELETE FROM tyc2 WHERE sdbid = '$res';"
             fi
             echo "Writing to $db.tyc2"
-	    cat $ftmp
             $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tyc2 write=append
         fi
     fi
