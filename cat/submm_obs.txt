@@ -15,6 +15,37 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  GSC 07396-00759             null       null                        880      ALMA           1.8         0.2         null        GrantK                  null
+  MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2020arXiv201012657L     null
+  2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2020arXiv201012657L     null
+  V* NO Lup                   null       null                        855      ALMA           0.21        0.04        null        2020arXiv201012657L     null
+  Sz 107                      null       null                        855      ALMA           0.22        0.04        null        2020arXiv201012657L     null
+  Sz 108                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 119                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  MT Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 67                       null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  2MASS J15430624-3920194     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  CD-35 10498                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  V* MV Lup                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  MW Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  MX Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  V* NN Lup                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  CD-39 10292                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  CD-31 12522                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  RX J1607.2-3839             null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  2MASS J16071400-3852375     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 94                       null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  2MASS J16075888-3924347     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  SONYC Lup3-5                null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  V* V1027 Sco                null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 109                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  2MASS J16090850-3903430     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  2MASS J16091713-3927096     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 116                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 121                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 122                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  Sz 124                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  V1097 Sco                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
   HD 54341                    54341      null                        1340     ALMA           0.57        0.06        null        GrantK                  null
   GJ 14                       null       null                        1270     ALMA           1.8         0.3         null        REASONS                 null
   HD 10638                    10638      null                        1270     SMA            1.2         0.4         null        REASONS                 null
@@ -83,6 +114,7 @@
   LP 876-10                   null       Fomalhaut C                 880      ALMA           0.87        0.16        null        PatrickCC               null
   HD 172555                   172555     null                        1330     ALMA           0.120       0.031       null        LucaMatra               null
   BD+45 598                   null       BD+45 598                   1300     SMA            2.17        0.67        null        DavidWilner             null
+  BD+45 598                   null       BD+45 598                   1300     NOEMA          1.11        0.17        null        JFLestrade              null
   HD 107146                   107146     null                        860      ALMA           34.4        3.5         null        2018MNRAS.479.5423M     null      
   HD 107146                   107146     null                        1100     ALMA           16.1        1.6         null        2018MNRAS.479.5423M     null      
   HD 109573                   109573     HR 4796A                    880      ALMA           14.8        1.5         null        2018MNRAS.475.4924K     null      
