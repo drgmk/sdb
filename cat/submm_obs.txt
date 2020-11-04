@@ -15,6 +15,9 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD150682                    150682     null                        1270     ALMA           0.072       null        1           REASONS                 null
+  HD212965                    212695     null                        1270     ALMA           0.063       null        1           REASONS                 null
+  TYC7443-1102-1              null       null                        1270     ALMA           0.039       null        1           REASONS                 null
   HD213617                    213617     null                        1270     SMA            1.5         null        1           REASONS                 null
   HD143894                    143894     44 Ser                      1270     SMA            0.9         null        1           REASONS                 null
   HD125162                    125162     lambda Boo                  1270     SMA            0.7         0.35        null        REASONS                 null
