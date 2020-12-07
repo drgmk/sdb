@@ -15,16 +15,16 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
-  HD150682                    150682     null                        1270     ALMA           0.072       null        1           REASONS                 null
-  HD212965                    212695     null                        1270     ALMA           0.063       null        1           REASONS                 null
-  TYC7443-1102-1              null       null                        1270     ALMA           0.039       null        1           REASONS                 null
-  HD213617                    213617     null                        1270     SMA            1.5         null        1           REASONS                 null
-  HD143894                    143894     44 Ser                      1270     SMA            0.9         null        1           REASONS                 null
-  HD125162                    125162     lambda Boo                  1270     SMA            0.7         0.35        null        REASONS                 null
+  HD 150682                   150682     null                        1270     ALMA           0.072       null        1           REASONS                 null
+  HD 212965                   212695     null                        1270     ALMA           0.063       null        1           REASONS                 null
+  TYC 7443-1102-1             null       null                        1270     ALMA           0.039       null        1           REASONS                 null
+  HD 213617                   213617     null                        1270     SMA            1.5         null        1           REASONS                 null
+  HD 143894                   143894     44 Ser                      1270     SMA            0.9         null        1           REASONS                 null
+  HD 125162                   125162     lambda Boo                  1270     SMA            0.7         0.35        null        REASONS                 null
   GJ 322                      null       null                        1270     SMA            1.5         null        1           REASONS                 null
-  HD25457                     25457      null                        1270     SMA            0.9         0.2         null        REASONS                 null
-  HD13161                     13161      beta Tri                    1270     SMA            1.1         0.4         null        REASONS                 null
-  HD6798                      6798       null                        1310     SMA            0.6         null        1           REASONS                 null
+  HD 25457                    25457      null                        1270     SMA            0.9         0.2         null        REASONS                 null
+  HD 13161                    13161      beta Tri                    1270     SMA            1.1         0.4         null        REASONS                 null
+  HD 6798                     6798       null                        1310     SMA            0.6         null        1           REASONS                 null
   GSC 07396-00759             null       null                        880      ALMA           1.8         0.2         null        GrantK                  null
   MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2020arXiv201012657L     null
   2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2020arXiv201012657L     null
