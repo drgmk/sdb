@@ -7,7 +7,7 @@
 \ -add new rows at their appropriate location based on the reference, checking that you aren’t adding duplicates
 \ -add photometry in original form (i.e. don’t convert to upper limits)
 \ -round wavelengths to multiples of 5 (for practical reasons in sdf)
-\ -ensure that the id is simbad-resolvable
+\ -ensure that the id is identical to one that appears in simbad
 \ -updating any arXiv references to refereed ones is OK
 \ -tell me you’ve made some changes and I will update the database
 \
@@ -15,6 +15,12 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 48370                    48370      null                        8800     ATCA           0.00700     0.00108     null        BrodieNorfolk           null
+  CPD-72 2713                 null       null                        8800     ATCA           0.00959     0.00161     null        BrodieNorfolk           null
+  HD 131488                   131488     null                        8800     ATCA           0.00595     0.00124     null        BrodieNorfolk           null
+  HD 32297                    32297      null                        8800     ATCA           0.00562     0.00167     null        BrodieNorfolk           null
+  HD 48370                    48370      null                        1250     NIKA           7.3         1.5         null        2016ApJ...826..123M     null
+  HD 48370                    48370      null                        2140     NIKA           2.0         0.3         null        2016ApJ...826..123M     null
   HD 150682                   150682     null                        1270     ALMA           0.072       null        1           REASONS                 null
   HD 212965                   212695     null                        1270     ALMA           0.063       null        1           REASONS                 null
   TYC 7443-1102-1             null       null                        1270     ALMA           0.039       null        1           REASONS                 null
@@ -26,36 +32,36 @@
   HD 13161                    13161      beta Tri                    1270     SMA            1.1         0.4         null        REASONS                 null
   HD 6798                     6798       null                        1310     SMA            0.6         null        1           REASONS                 null
   GSC 07396-00759             null       null                        880      ALMA           1.8         0.2         null        GrantK                  null
-  MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2020arXiv201012657L     null
-  2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2020arXiv201012657L     null
-  V* NO Lup                   null       null                        855      ALMA           0.21        0.04        null        2020arXiv201012657L     null
-  Sz 107                      null       null                        855      ALMA           0.22        0.04        null        2020arXiv201012657L     null
-  Sz 108                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 119                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  MT Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 67                       null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  2MASS J15430624-3920194     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  CD-35 10498                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  V* MV Lup                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  MW Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  MX Lup                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  V* NN Lup                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  CD-39 10292                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  CD-31 12522                 null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  RX J1607.2-3839             null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  2MASS J16071400-3852375     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 94                       null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  2MASS J16075888-3924347     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  SONYC Lup3-5                null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  V* V1027 Sco                null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 109                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  2MASS J16090850-3903430     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  2MASS J16091713-3927096     null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 116                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 121                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 122                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  Sz 124                      null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
-  V1097 Sco                   null       null                        855      ALMA           0.18        null        1           2020arXiv201012657L     null
+  MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2021MNRAS.500.4878L     null
+  2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2021MNRAS.500.4878L     null
+  V* NO Lup                   null       null                        855      ALMA           0.21        0.04        null        2021MNRAS.500.4878L     null
+  Sz 107                      null       null                        855      ALMA           0.22        0.04        null        2021MNRAS.500.4878L     null
+  Sz 108                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 119                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  MT Lup                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 67                       null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  2MASS J15430624-3920194     null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  CD-35 10498                 null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  V* MV Lup                   null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  MW Lup                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  MX Lup                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  V* NN Lup                   null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  CD-39 10292                 null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  CD-31 12522                 null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  RX J1607.2-3839             null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  2MASS J16071400-3852375     null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 94                       null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  2MASS J16075888-3924347     null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  SONYC Lup3-5                null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  V* V1027 Sco                null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 109                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  2MASS J16090850-3903430     null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  2MASS J16091713-3927096     null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 116                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 121                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 122                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  Sz 124                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
+  V1097 Sco                   null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
   HD 54341                    54341      null                        1340     ALMA           0.57        0.06        null        GrantK                  null
   GJ 14                       null       null                        1270     ALMA           1.8         0.3         null        REASONS                 null
   HD 10638                    10638      null                        1270     SMA            1.2         0.4         null        REASONS                 null
