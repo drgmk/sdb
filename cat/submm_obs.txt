@@ -15,6 +15,8 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 142091                   142091     kap CrB                     1340     ALMA           0.96        0.1         null        JoshLovell              null
+  HD 48370                    48370      null                        1330     ALMA           5.0         0.5         null        GrantK                  null
   HD 48370                    48370      null                        8800     ATCA           0.00700     0.00108     null        BrodieNorfolk           null
   CPD-72 2713                 null       null                        8800     ATCA           0.00959     0.00161     null        BrodieNorfolk           null
   HD 131488                   131488     null                        8800     ATCA           0.00595     0.00124     null        BrodieNorfolk           null
