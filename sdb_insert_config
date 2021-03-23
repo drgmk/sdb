@@ -15,5 +15,6 @@ tmp=`cat /etc/my.cnf | grep password | sed 's/ //g'`
 eval $tmp
 
 # the basic stilts command to use, no -Xms1g -Xmx1g since presumably
-# little memory needed
+# little memory needed.
+# TODO: jdbc.drivers need not be specified?
 stilts='/Applications/stilts -classpath /Library/Java/Extensions/mysql-connector-java-5.1.8-bin.jar -Djdbc.drivers=com.mysql.jdbc.Driver'
