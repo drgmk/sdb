@@ -76,7 +76,8 @@ def sdb_getphot_one(id):
     cnx = mysql.connector.connect(user=cfg.mysql['user'],
                                   password=cfg.mysql['passwd'],
                                   host=cfg.mysql['host'],
-                                  database=cfg.mysql['db'])
+                                  database=cfg.mysql['db'],
+                                  auth_plugin='mysql_native_password')
     cursor = cnx.cursor(buffered=True)
 
     # set up temporary table with what we'll want in the output
@@ -117,9 +118,9 @@ def sdb_getphot_one(id):
             stmt += ' OR IF(IF(exclude_band IS NOT NULL,1,0) AND IF(include IS NULL,1,0),1,0)'
         # column based excludes (which can be overridden by joined table)
         if excl != None and excl_join is None:
-            stmt += ' OR '+excl
+            stmt += ' OR ('+excl+')'
         if excl != None and excl_join != None:
-            stmt += ' OR ('+excl+' AND IF(include is NOT NULL,0,1))'
+            stmt += ' OR ( ('+excl+') AND IF(include is NOT NULL,0,1))'
         stmt += ',1,0)'
         # main join
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
@@ -132,7 +133,7 @@ def sdb_getphot_one(id):
         if extra != None:
            stmt += ' '+extra
         cursor.execute(stmt,{'band':band,'bib':bib,'unit':unit,'priv':priv} )
-        
+
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
     tphot = Table(names=cursor.column_names,
@@ -381,7 +382,8 @@ if __name__ == "__main__":
     elif args.sample != None:
         print("Running sdb_getphot for targets in sample:",args.sample)
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                      host=cfg.mysql['host'],database=args.dbname)
+                                      host=cfg.mysql['host'],database=args.dbname,
+                                      auth_plugin='mysql_native_password')
         cursor = cnx.cursor(buffered=True)
         cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+" "
                        "WHERE sdbid IS NOT NULL;")
@@ -392,7 +394,8 @@ if __name__ == "__main__":
     elif args.all != None:
         print("Running sdb_getphot for all targets")
         cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                      host=cfg.mysql['host'],database='sdb')
+                                      host=cfg.mysql['host'],database='sdb',
+                                      auth_plugin='mysql_native_password')
         cursor = cnx.cursor(buffered=True)
         if args.ra is None:
             cursor.execute("SELECT sdbid FROM sdb_pm;")
