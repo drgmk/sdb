@@ -85,10 +85,8 @@ echo "------- sdb_getphot.py -------"
 popd
 
 # run fitting, do once without spectra for speed, and then redo with
-# can't set DYLD_LIBRARY_PATH within launchctl
 echo "\nRunning sdf"
 pushd $sedroot
-export DYLD_LIBRARY_PATH=/Users/grant/astro/code/github/MultiNest/lib
 sdf-fit -f $sdbid/public/$sdbid-rawphot.txt --no-spectra -w -b
 sdf-fit -f $sdbid/public/$sdbid-rawphot.txt -u -w -b
 popd
