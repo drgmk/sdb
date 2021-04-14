@@ -80,6 +80,9 @@ def sdb_getphot_one(id):
                                   auth_plugin='mysql_native_password')
     cursor = cnx.cursor(buffered=True)
 
+    # allow GROUP BY used by some xmatch queries
+    cursor.execute("SET sql_mode='';")
+
     # set up temporary table with what we'll want in the output
     cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(10) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0', exclude int(1) NOT NULL DEFAULT '0');")
 
