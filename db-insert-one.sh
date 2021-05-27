@@ -333,6 +333,9 @@ then
     exit
 fi
 
+# remove any double spaces in the xids
+mysql $db -N -e "UPDATE xids SET xid = REPLACE(REPLACE(REPLACE(xid,' ','<>'),'><',''),'<>',' ') WHERE sdbid='$sdbid';"
+
 # add given id as a xid. this is a potential issue if the given id is
 # not unique. by leaving this option on we assume we'll only ever be
 # given unique ids. this should be OK as an id will either be a
@@ -364,7 +367,6 @@ for t in HPPSC_070_v1 HPPSC_100_v1 HPPSC_160_v1 HPESL_v1 spsc_standard_250_v2 sp
 do
     ./sdb_herschel_psc_xids.sh "$sdbid" "$t"
 done
-
 
 #### now do catalogues we're not going to store in their entirety but
 #### download as we need. these are sorted roughly in wavelength order
