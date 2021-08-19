@@ -18,10 +18,10 @@
   HD 104860                   104860     null                        1360     SMA+CARMA      4.0         0.8         null        REASONS                 null  
   HD 142091                   142091     kap CrB                     1340     ALMA           0.96        0.1         null        JoshLovell              null
   HD 48370                    48370      null                        1330     ALMA           5.0         0.5         null        GrantK                  null
-  HD 48370                    48370      null                        8800     ATCA           0.00700     0.00108     null        BrodieNorfolk           null
-  CPD-72 2713                 null       null                        8800     ATCA           0.00959     0.00161     null        BrodieNorfolk           null
-  HD 131488                   131488     null                        8800     ATCA           0.00595     0.00124     null        BrodieNorfolk           null
-  HD 32297                    32297      null                        8800     ATCA           0.00562     0.00167     null        BrodieNorfolk           null
+  HD 48370                    48370      null                        8800     ATCA           0.0700      0.00108     null        BrodieNorfolk           null
+  CPD-72 2713                 null       null                        8800     ATCA           0.0959      0.00161     null        BrodieNorfolk           null
+  HD 131488                   131488     null                        8800     ATCA           0.0595      0.00124     null        BrodieNorfolk           null
+  HD 32297                    32297      null                        8800     ATCA           0.0562      0.00167     null        BrodieNorfolk           null
   HD 48370                    48370      null                        1250     NIKA           7.3         1.5         null        2016ApJ...826..123M     null
   HD 48370                    48370      null                        2140     NIKA           2.0         0.3         null        2016ApJ...826..123M     null
   HD 150682                   150682     null                        1270     ALMA           0.072       null        1           REASONS                 null
