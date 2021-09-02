@@ -380,6 +380,9 @@ done
 # APASS
 ./sdb_insert_apass.sh $sdbid
 
+# SDSS
+./sdb_insert_sdss12.sh $sdbid
+
 # Gaia
 #./sdb_insert_gaia.sh $sdbid
 ./sdb_insert_gaia_dr2.sh $sdbid
