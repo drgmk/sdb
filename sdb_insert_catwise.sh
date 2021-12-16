@@ -24,12 +24,12 @@ echo "#sdbid                    nothing" > $fid
 #     sdb-v1-183656.34+374701.3 bla  # to get spacing right for ascii table
 echo $sdbid $sdbid >> $fid
 
-# catWISE, assume 2000.0 as stated
+# catWISE, assume 2015.4 as stated
 echo "\nLooking for catWISE entry"
 res=$(mysql $db -N -e "SELECT sdbid FROM catwise WHERE sdbid='$sdbid';")
 if [ "$res" == "" ]
 then
-    epoch=2000.0
+    epoch=2015.4
     co=$(mysql $db -N -e "SELECT CONCAT(raj2000 + ($epoch-2000.0) * pmra/1e3/cos(dej2000*pi()/180.0)/3600.,',',dej2000 + ($epoch-2000.0) * pmde/1e3/3600.) from sdb_pm where sdbid = '$sdbid';")
 
     if [ "$co" != "" ]

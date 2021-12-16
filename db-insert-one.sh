@@ -396,6 +396,9 @@ done
 # ALLWISE
 ./sdb_insert_allwise.sh $sdbid
 
+# catWISE
+./sdb_insert_catwise.sh $sdbid
+
 # AKARI IRC
 ./sdb_insert_akari_irc.sh $sdbid
 
