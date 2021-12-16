@@ -54,7 +54,7 @@ then
                 mysql $db -N -e "DELETE FROM catwise WHERE sdbid = '$res';"
             fi
             echo "Writing to $db.catwise"
-            $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=catwise write=dropcreate
+            $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=catwise write=append
         fi
     fi
 else
