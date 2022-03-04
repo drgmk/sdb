@@ -15,7 +15,11 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
-  HD 104860                   104860     null                        1360     SMA+CARMA      4.0         0.8         null        REASONS                 null  
+  V* RZ Psc                   null       RZ Psc                      1260     ALMA           0.042       0.008       null        GrantK                  null
+  V* AT Mic A                 null       null                        880      ALMA           0.35        0.03        null        PatCC                   null
+  V* AT Mic B                 null       null                        880      ALMA           0.13        0.03        null        PatCC                   null
+  GJ 2006 A                   null       null                        880      ALMA           0.47        0.03        null        PatCC                   null
+  HD 104860                   104860     null                        1360     SMA+CARMA      4.0         0.8         null        REASONS                 null
   HD 142091                   142091     kap CrB                     1340     ALMA           0.96        0.1         null        JoshLovell              null
   HD 48370                    48370      null                        1330     ALMA           5.0         0.5         null        GrantK                  null
   HD 48370                    48370      null                        8800     ATCA           0.0700      0.00108     null        BrodieNorfolk           null
