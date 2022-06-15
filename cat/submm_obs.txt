@@ -76,7 +76,6 @@
   Sz 122                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
   Sz 124                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
   V1097 Sco                   null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
-  HD 54341                    54341      null                        1340     ALMA           0.57        0.06        null        GrantK                  null
   GJ 14                       null       null                        1270     ALMA           1.8         0.3         null        REASONS                 null
   HD 10638                    10638      null                        1270     SMA            1.2         0.4         null        REASONS                 null
   HD 14055                    14055      gamma Tri                   1270     ALMA           3.4         0.4         null        REASONS                 null
