@@ -15,6 +15,7 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 54341                    54341      null                        1340     ALMA           0.58        0.12        null        REASONS                 null
   HD 36546                    36546      null                        1330     ALMA           2.45        0.25        null        REASONS                 null
   HD 38206                    38206      null                        1350     ALMA           0.90        0.13        null        REASONS                 null
   HD 50571                    50571      null                        875      ALMA           3.8         0.5         null        REASONS                 null
