@@ -22,9 +22,6 @@
   HD 53143                    53143      null                        1260     ALMA           1.59        0.17        null        REASONS                 null
   LP 876-10                   null       Fomalhaut C                 880      ALMA           0.80        0.13        null        REASONS                 null
   V* RZ Psc                   null       RZ Psc                      1260     ALMA           0.042       0.008       null        GrantK                  null
-  V* AT Mic A                 null       null                        880      ALMA           0.35        0.03        null        PatCC                   null
-  V* AT Mic B                 null       null                        880      ALMA           0.13        0.03        null        PatCC                   null
-  GJ 2006 A                   null       null                        880      ALMA           0.47        0.03        null        PatCC                   null
   HD 104860                   104860     null                        1360     SMA+CARMA      4.0         0.8         null        REASONS                 null
   HD 142091                   142091     kap CrB                     1340     ALMA           0.96        0.1         null        JoshLovell              null
   HD 48370                    48370      null                        1330     ALMA           5.0         0.5         null        GrantK                  null
@@ -44,7 +41,6 @@
   HD 25457                    25457      null                        1270     SMA            0.9         0.2         null        REASONS                 null
   HD 13161                    13161      beta Tri                    1270     SMA            1.1         0.4         null        REASONS                 null
   HD 6798                     6798       null                        1310     SMA            0.6         null        1           REASONS                 null
-  GSC 07396-00759             null       null                        880      ALMA           1.84        0.2         null        2022MNRAS.512.4752C     null
   MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2021MNRAS.500.4878L     null
   2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2021MNRAS.500.4878L     null
   V* NO Lup                   null       null                        855      ALMA           0.21        0.04        null        2021MNRAS.500.4878L     null
@@ -140,7 +136,7 @@
   HD 218396                   218396     HR 8799                     1340     ALMA           3.9         0.6         null        REASONS                 null
   TYC 9340-437-1              null       null                        1330     ALMA           3.9         0.6         null        REASONS                 null
   HD 10647                    10647      q01 Eri                     860      ALMA           13.19       1.3         null        JoshLovell              null
-  LP 876-10                   null       Fomalhaut C                 880      ALMA           0.87        0.16        null        PatrickCC               null
+  LP 876-10                   null       Fomalhaut C                 880      ALMA           0.87        0.16        null        PatCC                   null
   HD 172555                   172555     null                        1330     ALMA           0.120       0.031       null        LucaMatra               null
   BD+45 598                   null       BD+45 598                   1300     SMA            2.17        0.67        null        DavidWilner             null
   BD+45 598                   null       BD+45 598                   1300     NOEMA          1.11        0.17        null        JFLestrade              null
@@ -812,3 +808,40 @@
   HD 39060                    39060      beta Pic                    1300     MPIfR          24.9        2.6         null        1991A&A...252..220C     null      
   HD 22049                    22049      eps Eri                     1300     MPIfR          24.2        3.4         null        1991A&A...252..220C     null      
   HD 17206                    17206      tau01 Eri                   1300     MPIfR          20.7        3.9         null        1991A&A...252..220C     1         
+  GSC2.3 N9OB003170           null       null                        880      ALMA           -0.032      0.04        null        PatCCBPMG               null
+  PM J05243-1601A             null       null                        880      ALMA           0.014       0.043       null        PatCCBPMG               null
+  PM J05243-1601B             null       null                        880      ALMA           0.011       0.043       null        PatCCBPMG               null
+  1SWASP J191028.18-231948.0  null       null                        880      ALMA           -0.0021     0.05        null        PatCCBPMG               null
+  SCR J2033-2556              null       null                        880      ALMA           0.041       0.023       null        PatCCBPMG               null
+  ASAS J164301-1754.4         null       null                        880      ALMA           0.0012      0.047       null        PatCCBPMG               null
+  Barta 161 12                null       null                        880      ALMA           -0.0005     0.04        null        PatCCBPMG               null
+  BD+30   397B                null       null                        880      ALMA           -0.049      0.085       null        PatCCBPMG               null
+  CD-57  1054                 null       null                        880      ALMA           0.024       0.04        null        PatCCBPMG               null
+  2MASSW J0335020+234235      null       null                        880      ALMA           -0.088      0.046       null        PatCCBPMG               null
+  GJ  2006 A                  null       null                        880      ALMA           0.39        0.033       null        PatCCBPMG               null
+  GJ  2006 B                  null       null                        880      ALMA           0.037       0.033       null        PatCCBPMG               null
+  LP  467-16                  null       null                        880      ALMA           0.038       0.036       null        PatCCBPMG               null
+  RX J0613.2-2742             null       null                        880      ALMA           0.042       0.033       null        PatCCBPMG               null
+  GSC 07396-00759             null       null                        880      ALMA           1.84        0.2         null        2022MNRAS.512.4752C     null
+  GSC 08350-01924             null       null                        880      ALMA           -0.0035     0.025       null        PatCCBPMG               null
+  HD 139084                   null       null                        880      ALMA           0.016       0.06        null        PatCCBPMG               null
+  HD 139084B                  null       null                        880      ALMA           -0.024      0.06        null        PatCCBPMG               null
+  HD 155555C                  155555C    null                        880      ALMA           0.115       0.04        null        PatCCBPMG               null
+  L  836-122                  null       null                        880      ALMA           -0.061      0.05        null        PatCCBPMG               null
+  LP  353-51                  null       null                        880      ALMA           0.019       0.057       null        PatCCBPMG               null
+  LP  476-207 A               null       null                        880      ALMA           0.027       0.045       null        PatCCBPMG               null
+  LP  476-207 B               null       null                        880      ALMA           0.042       0.045       null        PatCCBPMG               null
+  MCC 124                     null       null                        880      ALMA           0.0051      0.045       null        PatCCBPMG               null
+  V* AT Mic A                 null       null                        880      ALMA           0.24        0.027       null        PatCCBPMG               null
+  V* AT Mic B                 null       null                        880      ALMA           0.12        0.027       null        PatCCBPMG               null
+  PM J02179+1225              null       null                        880      ALMA           -0.009      0.037       null        PatCCBPMG               null
+  Smethells 20                null       null                        880      ALMA           0.072       0.047       null        PatCCBPMG               null
+  RX J2200.7+2715             null       null                        880      ALMA           -0.0035     0.037       null        PatCCBPMG               null
+  1RXS J185803.4-295318       null       null                        880      ALMA           -0.035      0.047       null        PatCCBPMG               null
+  TYC 7443-1102-1             null       null                        880      ALMA           0.047       null        1           PatCCBPMG               null
+  UCAC2  19527490             null       null                        880      ALMA           -0.014      0.05        null        PatCCBPMG               null
+  UCAC3 116-474938            null       null                        880      ALMA           0.079       0.04        null        PatCCBPMG               null
+  SCR J2010-2801              null       null                        880      ALMA           0.013       0.047       null        PatCCBPMG               null
+  RX J0534.0-0221             null       null                        880      ALMA           0.025       0.04        null        PatCCBPMG               null
+  V* TX PsA                   null       null                        880      ALMA           0.036       0.03        null        PatCCBPMG               null
+  V* WW PsA                   null       null                        880      ALMA           0.077       0.035       null        PatCCBPMG               null
