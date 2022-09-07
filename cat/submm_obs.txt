@@ -844,4 +844,3 @@
   RX J0534.0-0221             null       null                        880      ALMA           0.025       0.04        null        PatCC                   null
   V* TX PsA                   null       null                        880      ALMA           0.036       0.03        null        PatCC                   null
   V* WW PsA                   null       null                        880      ALMA           0.077       0.035       null        PatCC                   null
-  V* AU Mic                   null       null                        880      ALMA           0.12        null        1           PatCC                   null
