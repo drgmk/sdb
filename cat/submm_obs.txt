@@ -831,7 +831,7 @@
   LP 476-207 A                null       null                        880      ALMA           0.027       0.045       null        PatCC                   null
   LP 476-207 B                null       null                        880      ALMA           0.042       0.045       null        PatCC                   null
   MCC 124                     null       null                        880      ALMA           0.0051      0.045       null        PatCC                   null
-  V* AT Mic A                 null       null                        880      ALMA           0.24        0.027       null        PatCC                   null
+  V* AT Mic A                 null       null                        880      ALMA           0.30        0.027       null        PatCC                   null
   V* AT Mic B                 null       null                        880      ALMA           0.12        0.027       null        PatCC                   null
   PM J02179+1225              null       null                        880      ALMA           -0.009      0.037       null        PatCC                   null
   Smethells 20                null       null                        880      ALMA           0.072       0.047       null        PatCC                   null
