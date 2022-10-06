@@ -809,38 +809,38 @@
   HD 22049                    22049      eps Eri                     1300     MPIfR          24.2        3.4         null        1991A&A...252..220C     null      
   HD 17206                    17206      tau01 Eri                   1300     MPIfR          20.7        3.9         null        1991A&A...252..220C     1         
   GSC2.3 N9OB003170           null       null                        880      ALMA           -0.032      0.04        null        PatCC                   null
-  PM J05243-1601              null       null                        880      ALMA           0.014       0.043       null        PatCC                   null
-  1SWASP J191028.18-231948.0  null       null                        880      ALMA           -0.0021     0.05        null        PatCC                   null
+  PM J05243-1601              null       null                        880      ALMA           0.015       0.043       null        PatCC                   null
+  1SWASP J191028.18-231948.0  null       null                        880      ALMA           -0.009      0.05        null        PatCC                   null
   SCR J2033-2556              null       null                        880      ALMA           0.041       0.023       null        PatCC                   null
-  ASAS J164301-1754.4         null       null                        880      ALMA           0.0012      0.047       null        PatCC                   null
+  ASAS J164301-1754.4         null       null                        880      ALMA           0.0006      0.047       null        PatCC                   null
   Barta 161 12                null       null                        880      ALMA           -0.0005     0.04        null        PatCC                   null
-  BD+30 397B                  null       null                        880      ALMA           -0.049      0.085       null        PatCC                   null
-  CD-57 1054                  null       null                        880      ALMA           0.024       0.04        null        PatCC                   null
-  2MASSW J0335020+234235      null       null                        880      ALMA           -0.088      0.046       null        PatCC                   null
-  GJ 2006 A                   null       null                        880      ALMA           0.39        0.033       null        PatCC                   null
-  GJ 2006 B                   null       null                        880      ALMA           0.037       0.033       null        PatCC                   null
+  BD+30 397B                  null       null                        880      ALMA           -0.010      0.085       null        PatCC                   null
+  CD-57 1054                  null       null                        880      ALMA           0.026       0.04        null        PatCC                   null
+  2MASSW J0335020+234235      null       null                        880      ALMA           -0.087      0.046       null        PatCC                   null
+  GJ 2006 A                   null       null                        880      ALMA           0.391       0.033       null        PatCC                   null
+  GJ 2006 B                   null       null                        880      ALMA           0.002       0.033       null        PatCC                   null
   LP 467-16                   null       null                        880      ALMA           0.038       0.036       null        PatCC                   null
-  RX J0613.2-2742             null       null                        880      ALMA           0.042       0.033       null        PatCC                   null
+  RX J0613.2-2742             null       null                        880      ALMA           0.039       0.033       null        PatCC                   null
   GSC 07396-00759             null       null                        880      ALMA           1.84        0.2         null        2022MNRAS.512.4752C     null
-  GSC 08350-01924             null       null                        880      ALMA           -0.0035     0.025       null        PatCC                   null
-  HD 139084                   null       null                        880      ALMA           0.016       0.06        null        PatCC                   null
-  HD 139084B                  null       null                        880      ALMA           -0.024      0.06        null        PatCC                   null
-  HD 155555C                  155555C    null                        880      ALMA           0.115       0.04        null        PatCC                   null
-  L 836-122                   null       null                        880      ALMA           -0.061      0.05        null        PatCC                   null
+  GSC 08350-01924             null       null                        880      ALMA           -0.012      0.025       null        PatCC                   null
+  HD 139084                   null       null                        880      ALMA           0.133       0.06        null        PatCC                   null
+  HD 139084B                  null       null                        880      ALMA           -0.022      0.06        null        PatCC                   null
+  HD 155555C                  155555C    null                        880      ALMA           0.092       0.04        null        PatCC                   null
+  L 836-122                   null       null                        880      ALMA           -0.060      0.05        null        PatCC                   null
   LP 353-51                   null       null                        880      ALMA           0.019       0.057       null        PatCC                   null
-  LP 476-207 A                null       null                        880      ALMA           0.027       0.045       null        PatCC                   null
+  LP 476-207 A                null       null                        880      ALMA           0.028       0.045       null        PatCC                   null
   LP 476-207 B                null       null                        880      ALMA           0.042       0.045       null        PatCC                   null
-  MCC 124                     null       null                        880      ALMA           0.0051      0.045       null        PatCC                   null
-  V* AT Mic A                 null       null                        880      ALMA           0.30        0.027       null        PatCC                   null
-  V* AT Mic B                 null       null                        880      ALMA           0.12        0.027       null        PatCC                   null
-  PM J02179+1225              null       null                        880      ALMA           -0.009      0.037       null        PatCC                   null
-  Smethells 20                null       null                        880      ALMA           0.072       0.047       null        PatCC                   null
-  RX J2200.7+2715             null       null                        880      ALMA           -0.0035     0.037       null        PatCC                   null
+  MCC 124                     null       null                        880      ALMA           0.006       0.045       null        PatCC                   null
+  V* AT Mic A                 null       null                        880      ALMA           0.335       0.027       null        PatCC                   null
+  V* AT Mic B                 null       null                        880      ALMA           0.125       0.027       null        PatCC                   null
+  PM J02179+1225              null       null                        880      ALMA           -0.012      0.037       null        PatCC                   null
+  Smethells 20                null       null                        880      ALMA           0.075       0.047       null        PatCC                   null
+  RX J2200.7+2715             null       null                        880      ALMA           -0.004      0.037       null        PatCC                   null
   1RXS J185803.4-295318       null       null                        880      ALMA           -0.035      0.047       null        PatCC                   null
   TYC 7443-1102-1             null       null                        880      ALMA           0.047       null        1           PatCC                   null
-  UCAC2 19527490              null       null                        880      ALMA           -0.014      0.05        null        PatCC                   null
-  UCAC3 116-474938            null       null                        880      ALMA           0.079       0.04        null        PatCC                   null
-  SCR J2010-2801              null       null                        880      ALMA           0.013       0.047       null        PatCC                   null
+  UCAC2 19527490              null       null                        880      ALMA           -0.028      0.05        null        PatCC                   null
+  UCAC3 116-474938            null       null                        880      ALMA           0.080       0.04        null        PatCC                   null
+  SCR J2010-2801              null       null                        880      ALMA           0.007       0.047       null        PatCC                   null
   RX J0534.0-0221             null       null                        880      ALMA           0.025       0.04        null        PatCC                   null
   V* TX PsA                   null       null                        880      ALMA           0.036       0.03        null        PatCC                   null
-  V* WW PsA                   null       null                        880      ALMA           0.077       0.035       null        PatCC                   null
+  V* WW PsA                   null       null                        880      ALMA           0.078       0.035       null        PatCC                   null
