@@ -43,8 +43,9 @@
   HD 6798                     6798       null                        1310     SMA            0.6         null        1           REASONS                 null
   MU Lup                      null       null                        855      ALMA           0.26        0.05        null        2021MNRAS.500.4878L     null
   2MASS J15552621-3338232     null       null                        855      ALMA           0.68        0.07        null        2021MNRAS.500.4878L     null
-  V* NO Lup                   null       null                        855      ALMA           0.21        0.04        null        2021MNRAS.500.4878L     null
-  V* NO Lup                   null       null                        1350     ALMA           0.22        0.04        null        JLovell_2015.1.00791.S  null
+  V* NO Lup                   null       null                        855      ALMA           0.296       0.041       null        2021MNRAS.500.4878L     null
+  V* NO Lup                   null       null                        1050      ALMA          0.167       0.019       null        JLovell_2021.1.00914.S null
+  V* NO Lup                   null       null                        1350     ALMA           0.240       0.034       null        JLovell_2015.1.00791.S  null
   Sz 107                      null       null                        855      ALMA           0.22        0.04        null        2021MNRAS.500.4878L     null
   Sz 108                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
   Sz 119                      null       null                        855      ALMA           0.18        null        1           2021MNRAS.500.4878L     null
