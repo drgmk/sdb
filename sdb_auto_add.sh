@@ -3,7 +3,7 @@
 # run when files added to auto_add dir, this is launched with a launchd plist by
 # launchctl load ~/Library/LaunchAgents/sdb_auto_watch.plist, which watches the auto_add
 # folder. Upon addition of a file this script is launched. The LaunchAgents folder also
-# contains plist files to set the enviroment variables PATH and IDL_STARTUP
+# contains plist files to set the environment variables PATH and IDL_STARTUP
 
 root=/Users/grant/astro/projects/sdb/sdb/
 pushd $root

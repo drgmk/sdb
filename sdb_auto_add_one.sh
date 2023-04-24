@@ -1,6 +1,7 @@
 #!/bin/sh
 
 # automation of additions to sdb, relies on target being sesame/simbad resolvable for now
+source activate sdf
 
 root=/Users/grant/astro/projects/sdb/sdb/
 pushd $root
@@ -87,12 +88,14 @@ popd
 # run fitting, do once without spectra for speed, and then redo with
 echo "\nRunning sdf"
 pushd $sedroot
-sdf-fit -f $sdbid/public/$sdbid-rawphot.txt --no-spectra -w -b
-sdf-fit -f $sdbid/public/$sdbid-rawphot.txt -u -w -b
+# sdf-fit -f $sdbid/public/$sdbid-rawphot.txt --no-spectra -w -b
+sdf-fit -f $sdbid/public/$sdbid-rawphot.txt -w -b
 popd
 
 # remove the lock file
 rm $lock
+
+conda deactivate
 
 echo "\nDone"
 echo "------- sdb_auto_add_one.sh -------"
