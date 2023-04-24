@@ -38,10 +38,11 @@ then
         echo $ra,$de
         ftmp=/tmp/pos$RANDOM.txt
 
-        # TAP query, assume first row is closest
-        curl -s "https://irsa.ipac.caltech.edu/TAP/sync?QUERY=SELECT+*+FROM+slphotdr4+WHERE+CONTAINS(POINT(%27J2000%27,ra,dec),CIRCLE(%27J2000%27,$ra,$de,0.000555))=1" > $ftmp
-
+        # TAP/SCS/gator query, assume first row is closest
+#         curl -s "https://irsa.ipac.caltech.edu/TAP/sync?QUERY=SELECT+*+FROM+slphotdr4+WHERE+CONTAINS(POINT(%27J2000%27,ra,dec),CIRCLE(%27J2000%27,$ra,$de,0.000555))=1" > $ftmp
 #        curl -s "http://irsa.ipac.caltech.edu/cgi-bin/Gator/nph-query?catalog=slphotdr4&spatial=cone&radius=$rad&outrows=1&outfmt=3&objstr=$co" > $ftmp
+
+        curl -s "https://irsa.ipac.caltech.edu/SCS?table=slphotdr4&RA=$ra&DEC=$de&SR=0.000555&format=votable" > $ftmp
 
         numrow=`$stilts tpipe in=$ftmp cmd='keepcols objid' cmd='stats NGood' ofmt=csv-noheader`
         echo "N rows $numrow"
