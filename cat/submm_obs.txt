@@ -15,7 +15,7 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
-  ASASSN -21qj                null       null                        880      ALMA           20          null        1           GrantK                  null
+  ASASSN -21qj                null       null                        880      ALMA           0.02        null        1           GrantK                  null
   HD 15257                    15257      null                        885      ALMA           2.7         0.2         null        ARKS                    null
   HD 54341                    54341      null                        1340     ALMA           0.58        0.12        null        REASONS                 null
   HD 36546                    36546      null                        1330     ALMA           2.45        0.25        null        REASONS                 null
