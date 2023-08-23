@@ -18,7 +18,7 @@ fi
 # first argument is sdbid
 sdbid=$1
 
-# look for IRS spectra in the observing log, 5" crossmatch
+# look for IRS spectra in the observing log, 6" crossmatch
 echo "\nLooking for IRS staring observation in Spitzer log"
 res=$(mysql $db -N -e "SELECT sdbid FROM spectra WHERE sdbid='$sdbid' AND instrument='irsstare';")
 if [ "$res" == "" ]
@@ -46,7 +46,7 @@ then
             mysql $db -N -e "DELETE FROM spectra WHERE sdbid = '$res';"
         fi
 
-        $stilts tmatch2 in1=$ftmp ifmt1=votable in2=$firs ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 6.0 6.0 0.0' values2='ra dec_ 6.0 6.0 0.0' params='2' find=all omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra write=append
+        $stilts tmatch2 in1=$ftmp ifmt1=votable in2=$firs ifmt2=votable ocmd='keepcols "sdbid instrument aor_key bibcode private"' matcher=skyellipse values1='ra_ep2006p9 de_ep2006p9 1.0 1.0 0.0' values2='ra dec_ 6.0 6.0 0.0' params='2' find=all omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=spectra write=append
     fi
 else
     echo "  $sdbid already present"
