@@ -36,8 +36,9 @@ phot['merge_dupes'] = cfg['phot']['merge_dupes'].split(',')
 # spectra. tuple has location, which is relative to somewhere which is
 # given by the file configuration, and two parts of a file glob where
 # the aor goes in between
-spectra = {'irsstare':('cassis/irsstare/',
-                       'cassis_yaaar_*_','*.fits'),
-           'visir':('visir/','*','*.csv'),
-           'spex':('irtf_spex/','*','.fits')
+spectra = {'irsstare': ('cassis/irsstare/',
+                        'cassis_yaaar_*_', '*.fits'),
+           'visir': ('visir/', '*', '*.csv'),
+           'spex': ('irtf_spex/', '*', '.fits'),
+           'csv': ('csv/', '*', '*')
 }
