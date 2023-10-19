@@ -7,9 +7,9 @@ import config as cfg
 import dd.web
 
 # set up connection
-cnx = mysql.connector.connect(user=cfg.mysql['user'],
-                              password=cfg.mysql['passwd'],
-                              host=cfg.mysql['host'],
+cnx = mysql.connector.connect(user=cfg.db['user'],
+                              password=cfg.db['passwd'],
+                              host=cfg.db['host'],
                               database='sdb_samples',
                               auth_plugin='mysql_native_password')
 cursor = cnx.cursor(buffered=True)

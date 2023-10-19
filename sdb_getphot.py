@@ -73,10 +73,10 @@ def sdb_getphot_one(id):
     """
 
     # set up connection
-    cnx = mysql.connector.connect(user=cfg.mysql['user'],
-                                  password=cfg.mysql['passwd'],
-                                  host=cfg.mysql['host'],
-                                  database=cfg.mysql['db'],
+    cnx = mysql.connector.connect(user=cfg.db['user'],
+                                  password=cfg.db['passwd'],
+                                  host=cfg.db['host'],
+                                  database=cfg.db['db'],
                                   auth_plugin='mysql_native_password')
     cursor = cnx.cursor(buffered=True)
 
@@ -376,7 +376,7 @@ if __name__ == "__main__":
     parser.add_argument('--all','-a',action='store_true',help='Get all photometry')
     parser1.add_argument('--ra','-r',type=float,metavar='X',help='Only extract for RA>Xh with -a')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
-                         default=cfg.mysql['sampledb'],metavar=cfg.mysql['sampledb'])
+                         default=cfg.db['sampledb'],metavar=cfg.db['sampledb'])
     args = parser1.parse_args()
 
     if args.idlist != None:
@@ -384,8 +384,8 @@ if __name__ == "__main__":
         sdb_getphot(args.idlist[0])
     elif args.sample != None:
         print("Running sdb_getphot for targets in sample:",args.sample)
-        cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                      host=cfg.mysql['host'],database=args.dbname,
+        cnx = mysql.connector.connect(user=cfg.db['user'],password=cfg.db['passwd'],
+                                      host=cfg.db['host'],database=args.dbname,
                                       auth_plugin='mysql_native_password')
         cursor = cnx.cursor(buffered=True)
         cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+" "
@@ -396,8 +396,8 @@ if __name__ == "__main__":
         cnx.close()
     elif args.all != None:
         print("Running sdb_getphot for all targets")
-        cnx = mysql.connector.connect(user=cfg.mysql['user'],password=cfg.mysql['passwd'],
-                                      host=cfg.mysql['host'],database='sdb',
+        cnx = mysql.connector.connect(user=cfg.db['user'],password=cfg.db['passwd'],
+                                      host=cfg.db['host'],database='sdb',
                                       auth_plugin='mysql_native_password')
         cursor = cnx.cursor(buffered=True)
         if args.ra is None:

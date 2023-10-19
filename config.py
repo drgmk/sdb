@@ -27,8 +27,13 @@ cfg.read([
          ])
 
 file = cfg['file']
-mysql = cfg['mysql']
 www = cfg['www']
+
+db = cfg['db']
+if db['type'] == 'mysql':
+    db.update(cfg['mysql'])
+elif db['type'] == 'sqlite':
+    db.update(cfg['sqlite'])
 
 phot = {}
 phot['merge_dupes'] = cfg['phot']['merge_dupes'].split(',')
