@@ -60,11 +60,11 @@ db=sdb
 #done
 #
 ## catwise
-mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN catwise USING (sdbid) WHERE catwise.sdbid IS NULL;" | while read name
-do
-    echo "\ngetting:"$name
-    ./sdb_insert_catwise.sh "$name"
-done
+# mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN catwise USING (sdbid) WHERE catwise.sdbid IS NULL;" | while read name
+# do
+#     echo "\ngetting:"$name
+#     ./sdb_insert_catwise.sh "$name"
+# done
 #
 ## seip
 #mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN seip USING (sdbid) WHERE seip.sdbid IS NULL;" | while read name
@@ -75,11 +75,11 @@ done
 #
 ## irs staring mode, there could be >1 spectrum for each sdbid so doing
 ## this requires running through everything
-#mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN spectra USING (sdbid) WHERE spectra.sdbid IS NULL OR instrument != 'irsstare';" | while read name
-#do
-#    echo "\ngetting:"$name
-#    ./sdb_insert_irsstare.sh "$name"
-#done
+mysql $db -N -e "SELECT sdbid FROM sdb_pm LEFT JOIN spectra USING (sdbid) WHERE spectra.sdbid IS NULL OR instrument != 'irsstare';" | while read name
+do
+   echo "\ngetting:"$name
+   ./sdb_insert_irsstare.sh "$name"
+done
 #
 ## iras xids, this finds xids so needs to be run through everything
 #mysql $db -N -e "SELECT sdbid FROM sdb_pm;" | while read name

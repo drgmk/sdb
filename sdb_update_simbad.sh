@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # need an argument
-if [[ $# -ne 1 ]]
+if [[ $# -gt 2 ]]
 then
 echo "give sdbid as argument"
 exit
@@ -21,8 +21,14 @@ sdbid=$1
 ft=/tmp/pos$RANDOM.txt
 ft2=/tmp/pos$RANDOM.txt
 
-# get the simbad id, and replace with unicode strings for url
-id=$(mysql $db -N -e "SELECT main_id FROM simbad WHERE sdbid = '$sdbid';")
+# get the simbad id if it wasn't the second arg, and replace with unicode strings for url
+if [ $# -eq 2 ]
+then
+  id=$2
+else
+  id=$(mysql $db -N -e "SELECT main_id FROM simbad WHERE sdbid = '$sdbid';")
+fi
+
 cid=`echo "$id" | sed 's/ /%20/g' | sed 's/+/%2B/g' | sed 's/\*/%2A/g' | sed 's/\[/%5B/g' | sed 's/\]/%5D/g'`
 
 # create temp file with sdbid in it
@@ -36,6 +42,11 @@ curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adq
 $stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1='keepcols sdbid' in2=$ft2 ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tmp write=dropcreate
 
 # update simbad table with new results
+if [ $# -eq 2 ]
+then
+mysql $db -N -e "INSERT INTO simbad SELECT * from tmp;"
+else
 mysql $db -N -e "UPDATE simbad LEFT JOIN tmp USING (sdbid) SET simbad.sp_type=tmp.sp_type, simbad.sp_bibcode=tmp.sp_bibcode, simbad.plx_value=tmp.plx_value, simbad.plx_err=tmp.plx_err, simbad.plx_bibcode=tmp.plx_bibcode, simbad.type_short=tmp.otype_shortname, simbad.type_long=tmp.otype_longname WHERE simbad.sdbid=tmp.sdbid;"
+fi
 
 mysql $db -N -e "DROP TABLE tmp;"

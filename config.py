@@ -3,7 +3,7 @@
 """Config for sdb code
 
 This is mostly configured with a .conf file, but some post-processing is
-done here. The imformation contained herein can be accessed from 
+done here. The information contained herein can be accessed from
 elsewhere by importing this module:
 
 >>> import config as cfg
@@ -13,6 +13,8 @@ For now code assumes it will be run in this directory. Shell scripts can
 access these parameters with commands like
 
 >ddir=`echo "import config; print(config.mysql['host'])" | python`
+
+The database config is common with sdf, so those come from .sdf.conf.
 
 """
 
@@ -29,12 +31,6 @@ cfg.read([
 file = cfg['file']
 www = cfg['www']
 
-db = cfg['db']
-if db['type'] == 'mysql':
-    db.update(cfg['mysql'])
-elif db['type'] == 'sqlite':
-    db.update(cfg['sqlite'])
-
 phot = {}
 phot['merge_dupes'] = cfg['phot']['merge_dupes'].split(',')
 
@@ -47,3 +43,9 @@ spectra = {'irsstare': ('cassis/irsstare/',
            'spex': ('irtf_spex/', '*', '.fits'),
            'csv': ('csv/', '*', '*')
 }
+
+try:
+    import sdf.config
+    db = sdf.config.db
+except ImportError:
+    pass

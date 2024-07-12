@@ -18,8 +18,10 @@ import filelock
 import numpy as np
 from astropy.table import Table,vstack,unique,Column
 import mysql.connector
+import sqlite3
 import config as cfg
 
+import sdf.db
 import sdf.filter
 
 
@@ -73,21 +75,28 @@ def sdb_getphot_one(id):
     """
 
     # set up connection
-    cnx = mysql.connector.connect(user=cfg.db['user'],
-                                  password=cfg.db['passwd'],
-                                  host=cfg.db['host'],
-                                  database=cfg.db['db'],
-                                  auth_plugin='mysql_native_password')
-    cursor = cnx.cursor(buffered=True)
+    if cfg.db['type'] == 'sqlite':
+        cnx, cursor = sdf.db.get_cnx(':memory:')
+    elif cfg.db['type'] == 'mysql':
+        cnx, cursor = sdf.db.get_cnx(cfg.db['db_sdb'])
 
-    # allow GROUP BY used by some xmatch queries
-    cursor.execute("SET sql_mode='';")
+    if cfg.db['type'] == 'mysql':
+        # allow GROUP BY used by some xmatch queries
+        cursor.execute("SET SESSION SQL_MODE = REPLACE(@@SQL_MODE,'ONLY_FULL_GROUP_BY','');")
+    elif cfg.db['type'] == 'sqlite':
+        cursor.execute(f'ATTACH DATABASE "{cfg.db["path"]}photometry.db" AS photometry')
 
     # set up temporary table with what we'll want in the output
-    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(15) NOT NULL DEFAULT '', Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', bibcode varchar(19) NOT NULL DEFAULT '', Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '',SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0', exclude int(1) NOT NULL DEFAULT '0');")
+    cursor.execute("CREATE TEMPORARY TABLE fluxes ( Band varchar(15) NOT NULL DEFAULT '', "
+                   "Phot double DEFAULT NULL, Err double DEFAULT 0.0, Sys double DEFAULT 0.0, "
+                   "Lim int(1) NOT NULL DEFAULT '0', Unit varchar(10) NOT NULL DEFAULT '', "
+                   "bibcode varchar(30) NOT NULL DEFAULT '', "
+                   "Note1 varchar(100) NOT NULL DEFAULT '', Note2 varchar(100) NOT NULL DEFAULT '', "
+                   "SourceID varchar(100) DEFAULT NULL, private int(1) NOT NULL DEFAULT '0', "
+                   "exclude int(1) NOT NULL DEFAULT '0');")
 
     # get sdbid and xids
-    cursor.execute('SELECT DISTINCT sdbid FROM xids WHERE xid=%(tmp)s;',{'tmp':id})
+    cursor.execute(f"SELECT DISTINCT sdbid FROM xids WHERE xid='{id}';")
     if cursor.rowcount > 1:
         print("Found multiple sdbids for given ID in xids {}, exiting".format(id))
         exit()
@@ -99,11 +108,11 @@ def sdb_getphot_one(id):
 
     # make cross id table to match on
     cursor.execute('DROP TABLE IF EXISTS TheIDs;')
-    cursor.execute('CREATE TEMPORARY TABLE TheIDs SELECT * from xids WHERE sdbid = %(tmp)s;',{'tmp':sdbid})
-    cursor.execute('ALTER TABLE TheIDs ADD INDEX (xid);')
+    cursor.execute(f"CREATE TEMPORARY TABLE TheIDs AS SELECT * from xids WHERE sdbid = '{sdbid}';")
+    cursor.execute('CREATE INDEX xidind ON TheIDs (xid);')
 
     # now add photometry to that table, use extra cursor
-    cursor1 = cnx.cursor(buffered=True)
+    cnx1, cursor1 = sdf.db.get_cnx(cfg.db['db_sdb'])
     cursor1.execute('SELECT incl,`table`,xid,band,col,ecol,syserr,'
                     'lim,bibcode,unit,com1,com2,'
                     'exclude,exclude_join,extra,private FROM xmatch;')
@@ -112,7 +121,9 @@ def sdb_getphot_one(id):
         if incl != 1:
             continue
         # columns to select
-        stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s'
+        # stmt = 'Insert INTO fluxes SELECT DISTINCT '+band+', '+col+', '+ecol+', '+sys+', '+lim+', %(unit)s, '+bib+', '+c1+', '+c2+', TheIDs.xid, %(priv)s'
+        stmt = f'Insert INTO fluxes SELECT DISTINCT {band}, {col}, {ecol}, {sys}, {lim}, ' \
+               f"'{unit}', {bib}, {c1}, {c2}, TheIDs.xid, {priv}"
         # excludes
         stmt += ',IF(0 '
         # table excludes, if band is present include must be null
@@ -129,17 +140,29 @@ def sdb_getphot_one(id):
         stmt += ' FROM TheIDs LEFT JOIN '+table+' ON TheIDs.xid = '+xid
         # join exlude table if exists
         if excl_join != None:
-            stmt += ' LEFT JOIN phot_exclude ON ('+excl_join+'=phot_exclude.join_id AND '+band+'=phot_exclude.exclude_band AND '+bib+'=phot_exclude.exclude_ref)'
+            stmt += ' LEFT JOIN phot_exclude ON ('+excl_join+'=phot_exclude.join_id ' \
+                    'AND '+band+'=phot_exclude.exclude_band AND '+bib+'=phot_exclude.exclude_ref)'
         # require flux column not null
         stmt += ' WHERE '+col+' IS NOT NULL'
         # any extra conditions for WHERE
         if extra != None:
            stmt += ' '+extra
-        cursor.execute(stmt,{'band':band,'bib':bib,'unit':unit,'priv':priv} )
+
+        # db-specific edits
+        if cfg.db['type'] == 'sqlite':
+            stmt = stmt.replace('IF(', 'IIF(')
+        elif cfg.db['type'] == 'mysql':
+            stmt = stmt.replace('LIKE', 'BINARY LIKE')
+
+        # print(stmt)
+        cursor.execute(stmt)
+
+    cursor1.close()
+    cnx1.close()
 
     # now get the fluxes
     cursor.execute("SELECT DISTINCT * FROM fluxes;")
-    tphot = Table(names=cursor.column_names,
+    tphot = Table(names=[desc[0] for desc in cursor.description],
                   dtype=('S15','f','f','f','i1','S10','S25','S200','S200','S100','i1','i1'))
     for row in cursor:
         try:
@@ -171,23 +194,31 @@ def sdb_getphot_one(id):
     tphot.meta['comments'] = []
 
     # get some addtional stellar data
-    cursor.execute("SELECT main_id,raj2000,dej2000,sp_type,sp_bibcode,COALESCE(simbad.plx_value,gaia_dr2.plx) AS plx_value,COALESCE(simbad.plx_err,gaia_dr2.e_plx) AS plx_err,COALESCE(plx_bibcode,IF(gaia_dr2.plx IS NULL,NULL,'2018yCat.1345....0G')) AS plx_bibcode FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia_dr2 USING (sdbid) where sdbid=%(tmp)s;",{'tmp':sdbid})
+    cursor.execute("SELECT main_id,raj2000,dej2000,sp_type,sp_bibcode,"
+                   "COALESCE(simbad.plx_value,gaia_dr2.plx) AS plx_value,"
+                   "COALESCE(simbad.plx_err,gaia_dr2.e_plx) AS plx_err,"
+                   "COALESCE(plx_bibcode,CASE WHEN gaia_dr2.plx IS NULL THEN NULL ELSE '2018yCat.1345....0G' END) AS plx_bibcode "
+                   "FROM sdb_pm LEFT JOIN simbad USING (sdbid) LEFT JOIN gaia_dr2 USING (sdbid) "
+                   f"WHERE sdbid='{sdbid}';")
     vals = cursor.fetchall()
-    keys = cursor.column_names
+    keys = [desc[0] for desc in cursor.description]
     if len(vals) > 0:
         tphot.meta['keywords'] = OrderedDict( zip(keys,tuple(vals[0])) )
     tphot.meta['keywords']['id'] = sdbid
 
     # look in xids for an id if nothing from simbad table
     if tphot.meta['keywords']['main_id'] is None:
-        cursor.execute("SELECT DISTINCT xid FROM xids WHERE sdbid='{}' "
-                       "ORDER BY xid LIMIT 1".format(sdbid))
+        cursor.execute(f"SELECT DISTINCT xid FROM xids WHERE sdbid='{sdbid}' "
+                       "ORDER BY xid LIMIT 1")
         if cursor.rowcount == 1:
             tphot.meta['keywords']['main_id'] = cursor.fetchall()[0][0]
 
     # get aors for any spectra and add file names
-    cursor.execute('SELECT instrument,aor_key,bibcode,private,IFNULL(exclude,0) as exclude FROM spectra LEFT JOIN spectra_exclude USING (aor_key,instrument) WHERE sdbid = %(tmp)s ORDER BY aor_key DESC;',{'tmp':sdbid})
-    tspec = Table(names=cursor.column_names,dtype=('S20','i8','S19','i1','i1'))
+    cursor.execute('SELECT instrument,aor_key,bibcode,private,IFNULL(exclude,0) as exclude FROM spectra '
+                   'LEFT JOIN spectra_exclude USING (aor_key,instrument) '
+                   f"WHERE sdbid = '{sdbid}' ORDER BY aor_key DESC;")
+    tspec = Table(names=[desc[0] for desc in cursor.description],
+                  dtype=('S20','i8','S19','i1','i1'))
     for row in cursor:
         tspec.add_row(row)
 
@@ -376,7 +407,7 @@ if __name__ == "__main__":
     parser.add_argument('--all','-a',action='store_true',help='Get all photometry')
     parser1.add_argument('--ra','-r',type=float,metavar='X',help='Only extract for RA>Xh with -a')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
-                         default=cfg.db['sampledb'],metavar=cfg.db['sampledb'])
+                         default=cfg.db['db_samples'],metavar=cfg.db['db_samples'])
     args = parser1.parse_args()
 
     if args.idlist != None:

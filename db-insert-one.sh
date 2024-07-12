@@ -81,7 +81,7 @@ pmde=0.0
 if [ "$id" != "" ]
 then
     echo "\nsesame using name:$id"
-    co=`sesame -oIx -rSV "$id" | egrep -w 'jradeg|jdedeg'`
+    co=`sesame -S$sessite -oIx -rSV "$id" | egrep -w 'jradeg|jdedeg'`
     cojoin=${co//[$'\n']/,}
     cojoin=${cojoin//[^0-9+\-,\.]/}
     # cojoin may contain two sets of jradeg,jdedeg, so take number before
@@ -91,7 +91,7 @@ then
     cojoin=$ra,$de
 
     echo "  trying sesame for proper motion"
-    co=`sesame "$id"`
+    co=`sesame -S$sessite "$id"`
     ok=`echo $co | grep 'pmRA'`
     if [ "$ok" != "" ]
     then
@@ -106,7 +106,7 @@ then
         if [ "$id_coord" != "" ]
         then
             echo "\nsesame using coord:$id_coord"
-            co=`sesame -rSV "$id_coord" | egrep -w 'jradeg|jdedeg'`
+            co=`sesame -S$sessite -rSV "$id_coord" | egrep -w 'jradeg|jdedeg'`
             cojoin=${co//[$'\n']/,}
             cojoin=${cojoin//[^0-9+\-,\.]/}
             # extra cut for cases with two+ lots of ra/dec
@@ -115,7 +115,7 @@ then
             de=`echo $cojoin | sed 's/.*,\(.*\)/\1/'`
 
             echo "  trying sesame for proper motion"
-            co=`sesame "$id_coord"`
+            co=`sesame -S$sessite "$id_coord"`
             ok=`echo $co | grep 'pmRA'`
             if [ "$ok" != "" ]
             then
@@ -150,7 +150,7 @@ echo "\nFinal set of coords:$cojoin"
 # vizquery returns positions as expected, but _r is for original catalogue
 # position, so doesn't take proper motion into account!
 
-# sequential trawl through DR2, HIP, PPMXL
+# sequential trawl through DR3, HIP, PPMXL
 if [ $pmra == 0.0 ]
 then
     echo "\nLooking in proper motion catalogues"
@@ -165,24 +165,24 @@ then
         echo "  set epoch to $epoch for 2MASS ID"
     fi
 
-    echo "  Gaia DR2"
-    vizquery -site=$site -mime=votable -source=I/345/gaia2 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+    echo "  Gaia DR3"
+    vizquery -site=$site -mime=votable -source=I/355/gaiadr3 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
     numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
     if [ "$numrow" == "" ]
     then
-        echo "  not in DR2, try HIP"
+        echo "  not in DR3, try HIP"
         vizquery -site=$site -mime=votable -source=I/311/hip2 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
         numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
         # remove "hidden" Sn column
         $stilts tcat in=$ft2 omode=out ofmt=votable ocmd='delcols "Sn"' out=$ft2
         if [ "$numrow" == "" ]
         then
-            echo "  not in DR2, HIP, try PPMXL"
+            echo "  not in DR3, HIP, try PPMXL"
             vizquery -site=$site -mime=votable -source=ppmxl -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
             numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
             if [ "$numrow" == "" ]
             then
-                echo "    no PM in Gaia DR2, HIP, ppmxl"
+                echo "    no PM in Gaia DR3, HIP, ppmxl"
             else
                 echo "    ppmxl success"
             fi
@@ -190,7 +190,7 @@ then
             echo "    HIP success"
         fi
     else
-        echo "    DR2 success"
+        echo "    DR3 success"
     fi
 
     # get closest match with input coords and overwrite $ft2
@@ -279,6 +279,8 @@ res=$(mysql $db -N -e "SELECT sdbid FROM xids WHERE BINARY xid='$sdbid';")
 if [[ $res = $sdbid ]]
 then
     echo "\nStopping here, have sdbid $sdbid in xids table"
+    echo "\nUpdating xids"
+    ./sdb_update_xids.sh $sdbid
     echo "------- db-insert-one.sh -------"
     exit
 else
@@ -386,6 +388,7 @@ done
 # Gaia
 #./sdb_insert_gaia.sh $sdbid
 ./sdb_insert_gaia_dr2.sh $sdbid
+# ./sdb_insert_gaia_dr3.sh $sdbid
 
 # DENIS
 ./sdb_insert_denis.sh $sdbid

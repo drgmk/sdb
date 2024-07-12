@@ -26,7 +26,7 @@ echo $sdbid $sdbid >> $fid
 
 # 2MASS, mean epoch of 1999.3, midway through survey 2006AJ....131.1163S
 echo "\nLooking for 2MASS entry"
-res=$(mysql $db -N -e "SELECT sdbid FROM 2mass WHERE sdbid='$sdbid';")
+res=$(mysql $db -N -e "SELECT sdbid FROM twomass WHERE sdbid='$sdbid';")
 if [ "$res" == "" ]
 then
     epoch=1999.3
@@ -38,23 +38,23 @@ then
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
         vizquery -site=$site -mime=votable -source=II/246/out -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -c="$co" > $fviz
-        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
+        tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='colmeta -name twomass 2mass' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
         then
-            echo "Nothing found, writing empty entry in $db.2mass"
-            $(mysql $db -N -e "INSERT INTO $db.2mass (sdbid) VALUES ('$sdbid');")
+            echo "Nothing found, writing empty entry in $db.twomass"
+            $(mysql $db -N -e "INSERT INTO $db.twomass (sdbid) VALUES ('$sdbid');")
         else
             # check if there's an entry for this source already
-            tmass=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols 2mass' omode=out ofmt=csv-noheader`
-            res=$(mysql $db -N -e "SELECT sdbid FROM 2mass WHERE 2mass='$tmass';")
+            tmass=`$stilts tpipe in=$ftmp ifmt=votable cmd=random cmd='keepcols twomass' omode=out ofmt=csv-noheader`
+            res=$(mysql $db -N -e "SELECT sdbid FROM twomass WHERE twomass='$tmass';")
             if [ "$res" != "" ]
             then
                 echo "Removing previous entry for $tmass ($res)"
-                mysql $db -N -e "DELETE FROM 2mass WHERE sdbid = '$res';"
+                mysql $db -N -e "DELETE FROM twomass WHERE sdbid = '$res';"
             fi
-            echo "Writing to $db.2mass"
-            $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=2mass write=append
+            echo "Writing to $db.twomass"
+            $stilts tpipe in=$ftmp ifmt=votable cmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=twomass write=append
         fi
     fi
 else

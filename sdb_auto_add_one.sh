@@ -5,7 +5,7 @@ source activate sdf
 
 root=/Users/grant/astro/projects/sdb/sdb/
 pushd $root
-sedroot=`echo "import config; print(config.file['sedroot'])" | python3`
+sedroot=`echo "import config; print(config.file['sedroot'])" | python3 | grep masters`
 
 # database details, user and pass are taken from /etc/my.cnf, and aren't needed for
 # direct calls, but are needed explicitly for stilts.
