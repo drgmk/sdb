@@ -15,6 +15,30 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 61005                    61005                                  885      ALMA           14.82       1.49        null        ARKS                    null
+  HD 131835                   131835                                 885      ALMA           6.578       0.66        null        ARKS                    null
+  TYC 9340-437-1                                                     885      ALMA           9.504       1.01        null        ARKS                    null
+  HD 15257                    15257                                  885      ALMA           3.762       0.46        null        ARKS                    null
+  HD 145560                   145560                                 885      ALMA           4.649       0.49        null        ARKS                    null
+  HD 95086                    95086                                  885      ALMA           9.311       1.00        null        ARKS                    null
+  HD 109573                   109573                                 885      ALMA           13.76       1.39        null        ARKS                    null
+  HD 107146                   107146                                 1000     ALMA           22.09       2.21        null        ARKS                    null
+  HD 121617                   121617                                 885      ALMA           4.177       0.42        null        ARKS                    null
+  HD 161868                   161868                                 885      ALMA           7.460       0.83        null        ARKS                    null
+  HD 170773                   170773                                 885      ALMA           14.23       1.53        null        ARKS                    null
+  HD 197481                   197481                                 1350     ALMA           4.721       0.49        null        ARKS                    null
+  HD 131488                   131488                                 885      ALMA           7.375       0.76        null        ARKS                    null
+  HD 76582                    76582                                  885      ALMA           8.076       0.87        null        ARKS                    null
+  HD 10647                    10647                                  885      ALMA           14.84       1.51        null        ARKS                    null
+  HD 218396                   218396                                 880      ALMA           7.128       0.75        null        ARKS                    null
+  HD 39060                    39060      beta Pic                    1335     ALMA           18.59       1.89        null        ARKS                    null
+  HD 9672                     9672       49 Ceti                     885      ALMA           13.94       1.42        null        ARKS                    null
+  HD 15115                    15115                                  885      ALMA           4.788       0.48        null        ARKS                    null
+  HD 14055                    14055                                  885      ALMA           8.104       0.87        null        ARKS                    null
+  HD 92945                    92945                                  855      ALMA           11.07       1.14        null        ARKS                    null
+  HD 32297                    32297                                  885      ALMA           10.80       1.11        null        ARKS                    null
+  HD 206893                   206893                                 1350     ALMA           0.954       0.10        null        ARKS                    null
+  HD 84870                    84870                                  885      ALMA           2.554       0.28        null        ARKS                    null
   HD 120326                   120326     null                        1330     ALMA           0.57        0.06        null        JamesMiley              null
   ASASSN -21qj                null       null                        880      ALMA           0.06        null        1           GrantK                  null
   HD 15257                    15257      null                        885      ALMA           2.7         0.2         null        ARKS                    null
