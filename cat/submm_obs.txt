@@ -15,6 +15,7 @@
 | char                      | char     | char                      | int    | char         | float     | char      | char      | char                  | char     |
 |                           |          |                           |        |              |           |           |           |                       |          |
 | null                      | null     | null                      | null   | null         | null      | null      | null      | null                  | null     |
+  HD 126062                   126062                                 1380     ALMA           0.9         0.1         null        JamesMiley              null
   HD 61005                    61005                                  885      ALMA           14.82       1.49        null        ARKS                    null
   HD 131835                   131835                                 885      ALMA           6.578       0.66        null        ARKS                    null
   TYC 9340-437-1                                                     885      ALMA           9.504       1.01        null        ARKS                    null
