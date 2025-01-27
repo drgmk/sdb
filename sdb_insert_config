@@ -4,7 +4,7 @@
 rad=2               # default match radius in arcsec (greater for GALEX)
 sdbprefix=sdb-v2-   # prefix for ids
 site=us             # vizquery site (fr seems very slow)
-sessite=cfa
+sessite=cfa         # sesame site
 
 # database
 db=sdb

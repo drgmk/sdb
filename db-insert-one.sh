@@ -166,7 +166,7 @@ then
     fi
 
     echo "  Gaia DR3"
-    vizquery -site=$site -mime=votable -source=I/355/gaiadr3 -c.rs=$rad pmRA="!=" -out.max=3 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
+    vizquery -site=$site -mime=votable -source=I/355/gaiadr3 -c.rs=$rad pmRA="!=" -out.max=10 -out.add=_r -c=$cojoin -out="_RA(J2000,$epoch)" -out="_DE(J2000,$epoch)" -out="*pos.pm;pos.eq.ra" -out="*pos.pm;pos.eq.dec" > $ft2
     numrow=`$stilts tpipe in=$ft2 cmd='keepcols _r' cmd='stats NGood' ofmt=csv-noheader`
     if [ "$numrow" == "" ]
     then
