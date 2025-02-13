@@ -37,7 +37,7 @@ then
         echo $co
         fviz=/tmp/pos$RANDOM.txt
         ftmp=/tmp/pos$RANDOM.txt
-        vizquery -site=$site -mime=votable -source=I/355/gaiadr3 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -out.add=e_Plx -out.add='E(BP-RP)' -c="$co" > $fviz
+        vizquery -site=$site -mime=votable -source=I/355/gaiadr3 -c.rs=$rad -sort=_r -out.max=1 -out.add=_r -out.add=e_pmRA -out.add=e_pmDE -out.add=epsi -out.add=sepsi -out.add=e_Plx -out.add=e_Gmag -out.add=e_BPmag -out.add=e_RPmag -out.add='E(BP-RP)' -c="$co" > $fviz
         tout=`$stilts tjoin nin=2 in1=$fid ifmt1=ascii icmd1='keepcols sdbid' in2=$fviz ifmt2=votable icmd2='colmeta -name BP_RP BP-RP' icmd2='colmeta -name E_BP_RP_ E(BP-RP)' icmd2='colmeta -name And_ And' icmd2='colmeta -name _Fe_H_ [Fe/H]' ocmd='random' omode=out ofmt=votable 2>&1 > $ftmp`
 
         if [[ "$tout" == "Error: No TABLE element found" ]]
