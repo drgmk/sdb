@@ -951,8 +951,8 @@
  Gaia DR3 3417960606523879680  null      V1364TauB                   1330     SMA            0.000938    null        1           JBLovell                null
  Gaia DR3 3405690061051973760  null      StHa34A                     1330     SMA            0.0042      null        1           JBLovell                null
  Gaia DR3 152416436443721728   null      L09-06A                     1330     SMA            0.0018      null        1           JBLovell                null
- Gaia DR3 145196252820109440   null      XEST17-036                  1330     ALMA           0.000116    null        1           JBLovell                null
- Gaia DR3 145212711134828672   null      XEST08-033                  1330     ALMA           0.000157    1.93E-5     null        JBLovell                null
+ Gaia DR3 145196252820109440   null      XEST17-036                  890      ALMA           0.00036     null        1           JBLovell                null
+ Gaia DR3 145212711134828672   null      XEST08-033                  890      ALMA           0.00049     0.00006     null        JBLovell                null
  Gaia DR3 148141775750936960   null      L04-10                      1330     SMA            0.0016      null        1           JBLovell                null
  Gaia DR3 152305248330621184   null      L04-05                      1330     SMA            0.003       null        1           JBLovell                null
  Gaia DR3 164502062096975744   null      V410X-ray6                  1330     SMA            0.0021      null        1           JBLovell                null
