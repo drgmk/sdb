@@ -63,7 +63,7 @@ def filehash(file):
     return hasher.hexdigest()
 
 
-def sdb_getphot_one(id):
+def sdb_getphot_one(id, verb=False):
     """Extract photometry and other info from a database.
     
     Results are put in text files within sub-directories for the given
@@ -154,7 +154,8 @@ def sdb_getphot_one(id):
         elif cfg.db['type'] == 'mysql':
             stmt = stmt.replace('LIKE', 'BINARY LIKE')
 
-        # print(stmt)
+        if verb:
+            print(stmt)
         cursor.execute(stmt)
 
     cursor1.close()
@@ -385,14 +386,14 @@ def sdb_getphot_one(id):
             print("  skipping")
 
 
-def sdb_getphot(idlist):
+def sdb_getphot(idlist, verb=False):
     """Call sdb_getphot for a list of ids."""
     
     if not isinstance(idlist, list):
         print("sdb_getphot expects a list")
         raise TypeError
     for id in idlist:
-        sdb_getphot_one(id)
+        sdb_getphot_one(id, verb=verb)
 
 
 # run from the command line
@@ -408,11 +409,12 @@ if __name__ == "__main__":
     parser1.add_argument('--ra','-r',type=float,metavar='X',help='Only extract for RA>Xh with -a')
     parser1.add_argument('--dbname',type=str,help='Database containing sample table',
                          default=cfg.db['db_samples'],metavar=cfg.db['db_samples'])
+    parser1.add_argument('--verb','-v',action='store_true',help='Be more verbose')
     args = parser1.parse_args()
 
     if args.idlist != None:
         print("Running sdb_getphot for list:",args.idlist[0])
-        sdb_getphot(args.idlist[0])
+        sdb_getphot(args.idlist[0], verb=args.verb)
     elif args.sample != None:
         print("Running sdb_getphot for targets in sample:",args.sample)
         cnx = mysql.connector.connect(user=cfg.db['user'],password=cfg.db['passwd'],
@@ -422,7 +424,7 @@ if __name__ == "__main__":
         cursor.execute("SELECT sdbid FROM "+args.dbname+"."+args.sample+" "
                        "WHERE sdbid IS NOT NULL;")
         for id in cursor:
-            sdb_getphot_one(id[0])
+            sdb_getphot_one(id[0], verb=args.verb)
         cursor.close()
         cnx.close()
     elif args.all != None:
@@ -437,6 +439,6 @@ if __name__ == "__main__":
             cursor.execute("SELECT sdbid FROM sdb_pm WHERE raj2000>{};".format(args.ra*15))
 
         for id in cursor:
-            sdb_getphot_one(id[0])
+            sdb_getphot_one(id[0], verb=args.verb)
         cursor.close()
         cnx.close()
