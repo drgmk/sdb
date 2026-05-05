@@ -900,7 +900,7 @@
  Gaia DR3 49340897830486912     284266    null                        1330      SMA            1.805       null        1           JBLovell                null
  Gaia DR3 145034968209407232    284496    null                        1330      SMA            1.749       null        1           JBLovell                null
  Gaia DR3 154586318344905216    283782    null                        1330      SMA            1.098       null        1           JBLovell                null
- Gaia DR3 3392887171563820288   286178    null                        1330      SMA            1.459       null        1           JBLovell                null
+ 2MASS J04571766+1525094        286178    null                        1330      SMA            1.459       null        1           JBLovell                null
  Gaia DR3 152104381299305728    null      V1201Tau                    1330      SMA            1.708       null        1           JBLovell                null
  Gaia DR3 3410633602770942464   285840    null                        1330      SMA            1.618       null        1           JBLovell                null
  Gaia DR3 3412878010943270784   null      V1341Tau                    1330      SMA            1.684       null        1           JBLovell                null
@@ -908,7 +908,7 @@
  Gaia DR3 156900622818205312    null      LkCa19                      1330      SMA            0.89        null        1           JBLovell                null
  Gaia DR3 3312019813623548160   285751    null                        1330      SMA            1.416       null        1           JBLovell                null
  Gaia DR3 162641276107387136    283323    null                        1330      SMA            1.001       null        1           JBLovell                null
- Gaia DR3 3411215210060678784   null      V1325Tau                    1330      SMA            1.303       null        1           JBLovell                null
+ Gaia DR2 3411215210060678784   null      V1325Tau                    1330      SMA            1.303       null        1           JBLovell                null
  Gaia DR3 45787585487165184     null      HBC372                      1330      ALMA           0.436       null        1           JBLovell                null
  Gaia DR3 164518589131083136    null      V410Tau                     1330      SMA            1.251       null        1           JBLovell                null
  Gaia DR3 3408608886467493376   null      V1354Tau                    1330      SMA            1.839       null        1           JBLovell                null
@@ -919,7 +919,7 @@
  Gaia DR3 3406444051151221504   null      V1346Tau                    1330      SMA            1.549       null        1           JBLovell                null
  Gaia DR3 159667475109927808    null      V961Per                     1330      SMA            1.404       null        1           JBLovell                null
  Gaia DR3 3405202462005029760   null      V1347Tau                    1330      SMA            3.543       null        1           JBLovell                null
- Gaia DR3 48841131139979904     null      V1307Tau                    1330      SMA            1.692       null        1           JBLovell                null
+ 2MASS J04125064+1936581        null      V1307Tau                    1330      SMA            1.692       null        1           JBLovell                null
  Gaia DR3 166295842301421952    null      V652Per                     1330      SMA            0.978       null        1           JBLovell                null
  Gaia DR3 173480674049214592    null      V583Aur                     1330      SMA            1.112       null        1           JBLovell                null
  Gaia DR3 148037764527442944    null      LkCa14                      1330      SMA            1.113       null        1           JBLovell                null
@@ -927,8 +927,8 @@
  Gaia DR3 3410400884263390720   null      RXJ0437.4+1851A             1330      SMA            3.735       null        1           JBLovell                null
  Gaia DR3 3314251749212034816   null      L1551-51                    1330      SMA            1.036       null        1           JBLovell                null
  Gaia DR3 3419134438264747648   null      RXJ0507.2+2437              1330      SMA            1.05        null        1           JBLovell                null
- Gaia DR3 162260226608005120    null      V1195TauA                   1330      SMA            1.484       null        1           JBLovell                null
- Gaia DR3 162260226605718784    null      V1195TauB                   1330      SMA            1.484       null        1           JBLovell                null
+ 2MASS J04065134+2541282        null      V1195Tau                    1330      SMA            1.484       null        1           JBLovell                null
+\ Gaia DR3 162260226605718784    null      V1195TauB                   1330      SMA            1.484       null        1           JBLovell                null
  Gaia DR3 145157941711889536    null      XEST09-042                  1330      SMA            1.651       null        1           JBLovell                null
  Gaia DR3 3409036871368311424   null      V1207Tau                    1330      SMA            1.776       null        1           JBLovell                null
  Gaia DR3 3416236744087968768   null      V1366Tau                    1330      SMA            1.08        null        1           JBLovell                null
@@ -951,7 +951,7 @@
  Gaia DR3 3314508622617470848   null      UXTauC                      1330      ALMA           0.37        null        1           JBLovell                null
  Gaia DR3 3417960606523879680   null      V1364TauB                   1330      SMA            0.938       null        1           JBLovell                null
  Gaia DR3 3405690061051973760   null      StHa34A                     1330      SMA            4.2         null        1           JBLovell                null
- Gaia DR3 152416436443721728    null      L09-06A                     1330      SMA            1.8         null        1           JBLovell                null
+ 2MASS J04210934+2750368        null      L09-06A                     1330      SMA            1.8         null        1           JBLovell                null
  Gaia DR3 145196252820109440    null      XEST17-036                   890      ALMA           0.36        null        1           JBLovell                null
  Gaia DR3 145212711134828672    null      XEST08-033                   890      ALMA           0.49        0.06        null        JBLovell                null
  Gaia DR3 148141775750936960    null      L04-10                      1330      SMA            1.60        null        1           JBLovell                null
