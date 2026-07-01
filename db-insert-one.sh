@@ -270,6 +270,8 @@ dup=$(mysql $db -N -e "SELECT sdbid FROM sdb_pm WHERE sdbid != '$sdbid' AND raj2
 if [ "$dup" != "" ]
 then
     echo "\nPossible duplicate source found nearby"
+    echo $dup
+    exit
 #    echo "\nDuplicate source $dup found nearby, deleting before proceeding"
 #    ./db-delete-one.sh $dup
 fi

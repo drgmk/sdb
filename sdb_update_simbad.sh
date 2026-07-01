@@ -27,6 +27,10 @@ then
   id=$2
 else
   id=$(mysql $db -N -e "SELECT main_id FROM simbad WHERE sdbid = '$sdbid';")
+  if [ -z "$id" ]
+  then
+    id=$(mysql $db -N -e "SELECT xid FROM xids WHERE sdbid = '$sdbid' AND xid NOT REGEXP '^sdb' LIMIT 1;")
+  fi
 fi
 
 cid=`echo "$id" | sed 's/ /%20/g' | sed 's/+/%2B/g' | sed 's/\*/%2A/g' | sed 's/\[/%5B/g' | sed 's/\]/%5D/g'`
@@ -42,7 +46,8 @@ curl -s "http://simbad.u-strasbg.fr/simbad/sim-tap/sync?request=doQuery&lang=adq
 $stilts tjoin nin=2 in1=$ft ifmt1=ascii icmd1='keepcols sdbid' in2=$ft2 ifmt2=votable ocmd='random' omode=tosql protocol=mysql db=$sdb user=$user password=$password dbtable=tmp write=dropcreate
 
 # update simbad table with new results
-if [ $# -eq 2 ]
+existing=$(mysql $db -N -e "SELECT sdbid FROM simbad WHERE sdbid = '$sdbid';")
+if [ -z "$existing" ]
 then
 mysql $db -N -e "INSERT INTO simbad SELECT * from tmp;"
 else
