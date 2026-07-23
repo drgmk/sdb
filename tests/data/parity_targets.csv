@@ -1,0 +1,11 @@
+case,legacy_sdbid,name,ra_deg,dec_deg,pmra_masyr,pmdec_masyr,legacy_projects,reason
+extreme_pm,sdb-v2-175748.50+044136.1,NAME Barnard's star,269.452082497514,4.6933642650633,-802.803,10362.5,10pc_sample_;CDDS,Extreme proper motion; absent from the legacy Gaia DR3 and 2MASS tables
+bright_high_pm,sdb-v2-000524.43-372126.5,HD 225213,1.351784,-37.357361,5634.4,-2336.4,10pc_sample_;CDDS,Bright high-PM star with poor-quality legacy 2MASS H photometry
+resolved_primary,sdb-v2-041516.32-073910.3,* omi02 Eri,63.81799845,-7.65287232,-2240.12,-3420.27,binaries_bmy;10pc_sample_,Bright high-PM multiple-system primary
+resolved_component_c,sdb-v2-041521.54-073920.7,* omi02 Eri C,63.83974566,-7.65575504,-2250.12,-3408.28,10pc_sample_,Nearby resolved component with independent 2MASS photometry
+resolved_component_b,sdb-v2-041521.79-073929.2,* omi02 Eri B,63.840775,-7.65811667,-2228.3,-3377.1,10pc_sample_;white_dwarfs,Nearby white-dwarf component testing resolution-dependent associations
+binary_missing_2mass,sdb-v2-000208.74-681650.8,HD 224953,0.53640043,-68.28076443,209.95,-229.66,binaries_bmy,Legacy binary target with no legacy 2MASS row
+binary_high_pm,sdb-v2-001822.88+440122.6,V* GX And,4.59535403,44.0229548,2891.52,411.903,binaries_bmy;10pc_sample_,High-PM binary with low-quality bright 2MASS J and H photometry
+curated_submm,sdb-v2-073547.46-321214.0,HD 61005,113.94775982,-32.20390141,-55.05,74.319,arks_;mm_obs,Multiple curated detections plus a 870 micron upper limit
+curated_submm_rich,sdb-v2-121906.50+163253.9,HD 107146,184.777091,16.548296,-174.9,-148.7,arks_;alma_obs;mm_obs,Rich multi-instrument submillimetre history and ALMA linkage
+coordinate_only,sdb-v2-183137.39+092907.5,2MASS J18313739+0929074,277.9057916667,9.4853888889,,,none,Known 2MASS source absent from SIMBAD; add by coordinates

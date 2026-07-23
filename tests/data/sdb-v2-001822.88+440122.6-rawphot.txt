@@ -1,0 +1,50 @@
+\ photometry/spectra for sdb-v2-001822.88+440122.6
+\
+\main_id='V* GX And'
+\raj2000=4.59535403
+\dej2000=44.0229548
+\sp_type='M2V'
+\sp_bibcode='1989ApJS...71..245K'
+\plx_value=280.7068
+\plx_err=0.0203
+\plx_bibcode='2020yCat.1350....0G'
+\id='sdb-v2-001822.88+440122.6'
+|    Band|    Phot|     Err|      Sys| Lim|Unit|            bibcode|           Note1|          Note2|                  SourceID|private|exclude|
+|    char|   float|   float|    float| int|char|               char|            char|           char|                      char|    int|    int|
+|        |        |        |         |    |    |                   |                |               |                          |       |       |
+|    null|    null|    null|     null|null|null|               null|            null|           null|                      null|   null|   null|
+    UJ_BJ     1.39     0.01     0.028    0  mag 2006yCat.2168....0M           Comp:3         n_U_B:>                    HD 1326       0       1 
+    UJ_BJ    1.222    0.026     0.028    0  mag 2006yCat.2168....0M           Comp:D         n_U_B:>                    HD 1326       0       1 
+  STROMC1    0.204    0.127      0.01    0  mag 2015A&A...580A..23P       Vmag:8.086      beta:2.619             TYC 2794-157-1       0       0 
+       BT    10.09    0.029     0.006    0  mag 2000A&A...355L..27H         Prox:862        HIP:1475  sdb-v2-001822.88+440122.6       0       0 
+  STROMM1    0.357    0.169      0.01    0  mag 2015A&A...580A..23P       Vmag:8.086      beta:2.619             TYC 2794-157-1       0       0 
+    BJ_VJ    1.567    0.014      0.02    0  mag 2006yCat.2168....0M           Comp:D         n_B_V:>                    HD 1326       0       1 
+    BJ_VJ    1.791    0.012      0.02    0  mag 2006yCat.2168....0M           Comp:3         n_B_V:>                    HD 1326       0       1 
+    BS_YS    0.787    0.386      0.01    0  mag 2015A&A...580A..23P       Vmag:8.086      beta:2.619             TYC 2794-157-1       0       0 
+  GAIA.BP    8.355    0.001      0.01    0  mag 2018yCat.1345....0G        Teff:3988           Dup:0  sdb-v2-001822.88+440122.6       0       1 
+       VT    8.309    0.013     0.006    0  mag 2000A&A...355L..27H         Prox:862        HIP:1475  sdb-v2-001822.88+440122.6       0       0 
+       HP    8.145  0.01805     0.005    0  mag 1997HIP...C......0E        VarType:U           Mult:                   HIP 1475       0       1 
+       VJ    8.089    0.017      0.02    0  mag 2006yCat.2168....0M           Comp:D        n_Vmag:>                    HD 1326       0       1 
+       VJ    11.06     0.03      0.02    0  mag 2006yCat.2168....0M           Comp:3        n_Vmag:>                    HD 1326       0       1 
+   GAIA.G    7.216   0.0005      0.01    0  mag 2018yCat.1345....0G        Teff:3988           Dup:0  sdb-v2-001822.88+440122.6       0       1 
+  GAIA.RP    6.182   0.0012      0.01    0  mag 2018yCat.1345....0G        Teff:3988           Dup:0  sdb-v2-001822.88+440122.6       0       1 
+      2MJ    5.252    0.264      0.01    0  mag 2003tmc..book.....C           Qflg:D          Cflg:0  sdb-v2-001822.88+440122.6       0       0 
+      2MH    4.476      0.2      0.01    0  mag 2003tmc..book.....C           Qflg:C          Cflg:0  sdb-v2-001822.88+440122.6       0       0 
+   2MR1KS    4.018     0.02      0.01    0  mag 2003tmc..book.....C           Qflg:E          Cflg:0  sdb-v2-001822.88+440122.6       0       1 
+  WISE3P4    3.872    0.381     0.024    0  mag 2010AJ....140.1868W           qual:C        Var:0100  sdb-v2-001822.88+440122.6       0       1 
+  WISE4P6    3.437    0.282     0.028    0  mag 2010AJ....140.1868W           qual:B        Var:0100  sdb-v2-001822.88+440122.6       0       1 
+   AKARI9    1.838   0.0194   0.02757    0   Jy 2010A&A...514A...1I           ext?:0        N-near:1  sdb-v2-001822.88+440122.6       0       0 
+   WISE12    3.696    0.015     0.045    0  mag 2010AJ....140.1868W           qual:A        Var:0100  sdb-v2-001822.88+440122.6       0       1 
+  AKARI18   0.4314   0.0402  0.006471    0   Jy 2010A&A...514A...1I           ext?:0        N-near:0  sdb-v2-001822.88+440122.6       0       0 
+   WISE22    3.602    0.024     0.057    0  mag 2010AJ....140.1868W           qual:A        Var:0100  sdb-v2-001822.88+440122.6       0       0 
+   MIPS24    265.5   0.1438     7.965    0  mJy        2018.MIPS_DB   Name:V* GX And       Note:cat1                  V* GX And       0       0 
+   MIPS70     27.2      2.2     1.088    0  mJy 2007ApJ...667..527G        SpTy:M1.5     Name:GX And                    GJ 15 A       0       1 
+   MIPS70     30.5    2.154     1.525    0  mJy        2018.MIPS_DB   Name:V* GX And       Note:cat1                  V* GX And       0       0 
+  PACS100  0.01273 0.002999 0.0002547    0   Jy            2026.HSA ObsID:1342213942 Conf/Cirrus:0/0                    HD 1326       0       0 
+  PACS100    17.43    5.958    0.8716    0  mJy 2017arXiv170505693M     Elong:0.8726         Blend:0 HPPSC100A_J001825.8+440126       0       1 
+  PACS100  0.01474 0.002076 0.0007061    0   Jy         2018.DEBRIS    chisq:1.04578        Phot:PSF    2MASS J00182256+4401222       0       1 
+  PACS160  0.01293 0.003094 0.0006945    0   Jy         2018.DEBRIS    chisq:1.04578        Phot:PSF    2MASS J00182256+4401222       0       1 
+  PACS160 0.008315 0.005194 0.0003326    0   Jy            2026.HSA ObsID:1342213942 Conf/Cirrus:0/0                    HD 1326       0       0 
+ SPIRE250 0.008082 0.003725     0.007    0   Jy         2018.DEBRIS   chisq:0.655235          Cov:65    2MASS J00182256+4401222       0       0 
+ SPIRE350  0.01159 0.004686     0.007    0   Jy         2018.DEBRIS   chisq:0.655235         Cov:133    2MASS J00182256+4401222       0       0 
+ SPIRE500 0.009824 0.004191     0.007    0   Jy         2018.DEBRIS   chisq:0.655235          Cov:89    2MASS J00182256+4401222       0       0 

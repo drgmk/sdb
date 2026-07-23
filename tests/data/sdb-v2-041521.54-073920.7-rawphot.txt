@@ -1,0 +1,31 @@
+\ photometry/spectra for sdb-v2-041521.54-073920.7
+\
+\main_id='* omi02 Eri C'
+\raj2000=63.83974566
+\dej2000=-7.65575504
+\sp_type='M4.5V'
+\sp_bibcode='1991ApJS...77..417K'
+\plx_value=199.4516
+\plx_err=0.0692
+\plx_bibcode='2020yCat.1350....0G'
+\id='sdb-v2-041521.54-073920.7'
+|   Band|     Phot|     Err|       Sys| Lim|Unit|            bibcode|             Note1|        Note2|                 SourceID|private|exclude|
+|   char|    float|   float|     float| int|char|               char|              char|         char|                     char|    int|    int|
+|       |         |        |          |    |    |                   |                  |             |                         |       |       |
+|   null|     null|    null|      null|null|null|               null|              null|         null|                     null|   null|   null|
+ GAIA.BP     11.51   0.0031       0.01    0  mag 2018yCat.1345....0G       Teff:3566.78         Dup:1 sdb-v2-041521.54-073920.7       0       0 
+  GAIA.G     9.761   0.0013       0.01    0  mag 2018yCat.1345....0G       Teff:3566.78         Dup:1 sdb-v2-041521.54-073920.7       0       0 
+ GAIA.RP     8.519   0.0024       0.01    0  mag 2018yCat.1345....0G       Teff:3566.78         Dup:1 sdb-v2-041521.54-073920.7       0       0 
+   2MR1J     6.747     0.02       0.01    0  mag 2003tmc..book.....C             Qflg:A        Cflg:0 sdb-v2-041521.54-073920.7       0       0 
+   2MR1H     6.278     0.04       0.01    0  mag 2003tmc..book.....C             Qflg:A        Cflg:0 sdb-v2-041521.54-073920.7       0       0 
+  2MR1KS     5.962    0.026       0.01    0  mag 2003tmc..book.....C             Qflg:A        Cflg:0 sdb-v2-041521.54-073920.7       0       0 
+ WISE3P4     5.701    0.069      0.024    0  mag 2010AJ....140.1868W             qual:A      Var:nnn0 sdb-v2-041521.54-073920.7       0       1 
+ WISE4P6     5.325    0.037      0.028    0  mag 2010AJ....140.1868W             qual:A      Var:nnn0 sdb-v2-041521.54-073920.7       0       1 
+  AKARI9    0.3893  0.00369   0.005839    0   Jy 2010A&A...514A...1I             ext?:0      N-near:0 sdb-v2-041521.54-073920.7       0       0 
+  WISE12     5.443    0.025      0.045    0  mag 2010AJ....140.1868W             qual:A      Var:nnn0 sdb-v2-041521.54-073920.7       0       1 
+  WISE22     5.348    0.044      0.057    0  mag 2010AJ....140.1868W             qual:A      Var:nnn0 sdb-v2-041521.54-073920.7       0       1 
+  MIPS24     49.11   0.1787      1.473    0  mJy        2018.MIPS_DB Name:* omi02 Eri C     Note:cat2             * omi02 Eri C       0       0 
+  MIPS70     4.008    2.541     0.2004    0  mJy        2018.MIPS_DB Name:* omi02 Eri C     Note:cat2             * omi02 Eri C       0       0 
+  MIPS70         4        2       0.16    0  mJy 2007ApJ...667..527G          SpTy:M4.5 Name:DY Eri C                  GJ 166 C       0       1 
+ PACS100 0.0008476 0.001838   4.06e-05    0   Jy         2018.DEBRIS      chisq:1.79012      Phot:PSF   2MASS J04152173-0739173       0       0 
+ PACS160 -0.001271 0.004454 -6.829e-05    0   Jy         2018.DEBRIS      chisq:1.79012      Phot:PSF   2MASS J04152173-0739173       0       0 

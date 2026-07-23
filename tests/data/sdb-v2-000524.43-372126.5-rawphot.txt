@@ -1,0 +1,57 @@
+\ photometry/spectra for sdb-v2-000524.43-372126.5
+\
+\main_id='HD 225213'
+\raj2000=1.351784
+\dej2000=-37.357361
+\sp_type='M2V'
+\sp_bibcode='1982MSS...C03....0H'
+\plx_value=230.097
+\plx_err=0.0362
+\plx_bibcode='2020yCat.1350....0G'
+\id='sdb-v2-000524.43-372126.5'
+|    Band|    Phot|     Err|      Sys| Lim|Unit|            bibcode|           Note1|          Note2|                 SourceID|private|exclude|
+|    char|   float|   float|    float| int|char|               char|            char|           char|                     char|    int|    int|
+|        |        |        |         |    |    |                   |                |               |                         |       |       |
+|    null|    null|    null|     null|null|null|               null|            null|           null|                     null|   null|   null|
+   GALNUV     18.8    0.034      0.01    0  mag 2011Ap&SS.335..161B           Nafl:0          Nexf:3 sdb-v2-000524.43-372126.5       0       0 
+    UJ_BJ    1.052    0.008      0.02    0  mag 2010MNRAS.403.1949K         o_Vmag:7          Var:F                    HIP 439       0       0 
+    UJ_BJ    0.992    0.042     0.028    0  mag 2006yCat.2168....0M            Comp:         n_U_B:>                 HD 225213       0       1 
+    BJ_VJ    1.448    0.008      0.02    0  mag 2006yCat.2168....0M            Comp:         n_B_V:>                 HD 225213       0       1 
+    BJ_VJ     1.48        0      0.02    0  mag 1990A&AS...83..357B         Std?:STD       Vmag:8.54                      GJ 1       0       1 
+    BJ_VJ     1.45        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:8.53                      GJ 1       0       1 
+    BJ_VJ     1.46    0.003      0.02    0  mag 2010MNRAS.403.1949K         o_Vmag:7          Var:F                    HIP 439       0       0 
+  GAIA.BP    8.824   0.0021      0.01    0  mag 2018yCat.1345....0G     Teff:3910.01           Dup:1 sdb-v2-000524.43-372126.5       0       1 
+       HP    8.618  0.02006     0.005    0  mag 1997HIP...C......0E        VarType:C           Mult:                   HIP 439       0       0 
+       VJ    8.562    0.005      0.02    0  mag 2010MNRAS.403.1949K         o_Vmag:7          Var:F                    HIP 439       0       0 
+       VJ     8.54        0      0.02    0  mag 1990A&AS...83..357B         Std?:STD       Vmag:8.54                      GJ 1       0       1 
+       VJ     8.53        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:8.53                      GJ 1       0       1 
+       VJ    8.558    0.027      0.02    0  mag 2006yCat.2168....0M            Comp:        n_Vmag:>                 HD 225213       0       1 
+    VJ_RC    0.967        0      0.02    0  mag 1990A&AS...83..357B         Std?:STD       Vmag:8.54                      GJ 1       0       0 
+    VJ_RC     0.97        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:8.53                      GJ 1       0       0 
+   GAIA.G    7.682   0.0009      0.01    0  mag 2018yCat.1345....0G     Teff:3910.01           Dup:1 sdb-v2-000524.43-372126.5       0       1 
+    VJ_IC     2.12        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:8.53                      GJ 1       0       0 
+    VJ_IC    2.126        0      0.02    0  mag 1990A&AS...83..357B         Std?:STD       Vmag:8.54                      GJ 1       0       0 
+  GAIA.RP    6.627   0.0016      0.01    0  mag 2018yCat.1345....0G     Teff:3910.01           Dup:1 sdb-v2-000524.43-372126.5       0       1 
+    2MR1J    5.328    0.019      0.01    0  mag 2003tmc..book.....C           Qflg:A          Cflg:0 sdb-v2-000524.43-372126.5       0       0 
+    2MR1H    4.828    0.076      0.01    0  mag 2003tmc..book.....C           Qflg:E          Cflg:0 sdb-v2-000524.43-372126.5       0       1 
+   2MR1KS    4.523    0.017      0.01    0  mag 2003tmc..book.....C           Qflg:E          Cflg:0 sdb-v2-000524.43-372126.5       0       1 
+  WISE3P4    4.403    0.295     0.024    0  mag 2010AJ....140.1868W           qual:B        Var:1111 sdb-v2-000524.43-372126.5       0       1 
+  WISE4P6    4.038    0.173     0.028    0  mag 2010AJ....140.1868W           qual:B        Var:1111 sdb-v2-000524.43-372126.5       0       0 
+   AKARI9    1.165   0.0138   0.01747    0   Jy 2010A&A...514A...1I           ext?:0        N-near:0 sdb-v2-000524.43-372126.5       0       0 
+   IRAS12    0.856   0.0856         0    0   Jy 1988IRASP.C......0J           Qual:3          Conf:0           IRAS 00027-3737       0       0 
+   WISE12    4.223    0.015     0.045    0  mag 2010AJ....140.1868W           qual:A        Var:1111 sdb-v2-000524.43-372126.5       0       0 
+  AKARI18   0.3075    0.031  0.004612    0   Jy 2010A&A...514A...1I           ext?:0        N-near:0 sdb-v2-000524.43-372126.5       0       0 
+   WISE22    4.072    0.025     0.057    0  mag 2010AJ....140.1868W           qual:A        Var:1111 sdb-v2-000524.43-372126.5       0       0 
+   IRAS25     0.26        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0           IRAS 00027-3737       0       0 
+   MIPS24    166.9   0.1629     5.007    0  mJy        2018.MIPS_DB   Name:HD 225213       Note:cat1                 HD 225213       0       0 
+   IRAS60      0.4        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0           IRAS 00027-3737       0       0 
+   MIPS70     16.2      3.2     0.648    0  mJy 2007ApJ...667..527G          SpTy:M3      Name:LHS 1                      GJ 1       0       1 
+   MIPS70    15.52    4.293     0.776    0  mJy        2018.MIPS_DB   Name:HD 225213       Note:cat1                 HD 225213       0       0 
+  IRAS100        1        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0           IRAS 00027-3737       0       0 
+  PACS100  0.00961 0.002911 0.0001922    0   Jy            2026.HSA ObsID:1342221120 Conf/Cirrus:0/0                 HD 225213       0       0 
+  PACS100 0.009577 0.001613 0.0004587    0   Jy         2018.DEBRIS    chisq:1.02743        Phot:PSF   2MASS J00052423-3721257       0       1 
+  PACS160 0.004889 0.007161 0.0001955    0   Jy            2026.HSA ObsID:1342221120 Conf/Cirrus:0/0                 HD 225213       0       0 
+  PACS160  0.00962 0.004459 0.0005168    0   Jy         2018.DEBRIS    chisq:1.02743        Phot:PSF   2MASS J00052423-3721257       0       1 
+ SPIRE250  0.01875 0.002776     0.007    0   Jy         2018.DEBRIS    chisq:1.70745          Cov:69   2MASS J00052423-3721257       0       0 
+ SPIRE350  0.02388 0.003581     0.007    0   Jy         2018.DEBRIS    chisq:1.70745         Cov:122   2MASS J00052423-3721257       0       0 
+ SPIRE500  0.02473 0.003607     0.007    0   Jy         2018.DEBRIS    chisq:1.70745          Cov:88   2MASS J00052423-3721257       0       0 

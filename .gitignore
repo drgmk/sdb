@@ -1,5 +1,53 @@
 .DS_Store
 sdb.xcodeproj
-*.pyc
-.ipynb_checkpoints
 *.plist
+
+# things we don't want to check in just yet
+docs/
+scripts/
+plan.md
+
+# Python bytecode, test caches, and build products
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+build/
+dist/
+site/
+
+# Local Python environments and notebooks
+.venv/
+venv/
+.ipynb_checkpoints/
+sandbox.ipynb
+
+# Downloaded catalogs and local runtime databases
+databases/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
+
+# Generated logs and scratch output
+*.log
+*.err
+/tmp*
+
+# Rehearsal products are rebuildable. Keep the parity operator procedure.
+rehearsals/*
+# !rehearsals/parity_targets/
+# rehearsals/parity_targets/*
+# !rehearsals/parity_targets/README.md
+
+# test data
+/tests/data/binaries_bmy_targets.csv

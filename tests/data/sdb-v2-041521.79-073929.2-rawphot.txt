@@ -1,0 +1,30 @@
+\ photometry/spectra for sdb-v2-041521.79-073929.2
+\
+\main_id='* omi02 Eri B'
+\raj2000=63.840775
+\dej2000=-7.65811667
+\sp_type='DA2.9'
+\sp_bibcode='2011ApJ...743..138G'
+\plx_value=None
+\plx_err=None
+\plx_bibcode=None
+\id='sdb-v2-041521.79-073929.2'
+|   Band|  Phot|   Err|   Sys| Lim|Unit|            bibcode|       Note1|   Note2|                 SourceID|private|exclude|
+|   char| float| float| float| int|char|               char|        char|    char|                     char|    int|    int|
+|       |      |      |      |    |    |                   |            |        |                         |       |       |
+|   null|  null|  null|  null|null|null|               null|        null|    null|                     null|   null|   null|
+   UJ_BJ -0.685  0.008  0.028    0  mag 2006yCat.2168....0M       Comp:2  n_U_B:>                  HD 26976       0       1 
+   UJ_BJ   0.83      0  0.028    0  mag 2006yCat.2168....0M       Comp:3   n_U_B:                  HD 26976       0       1 
+   UJ_BJ  -0.66      0  0.028    0  mag 2006yCat.2168....0M       Comp:D  n_U_B:>                  HD 26976       0       1 
+   BJ_VJ  0.044  0.034   0.02    0  mag 2006yCat.2168....0M       Comp:2  n_B_V:>                  HD 26976       0       1 
+   BJ_VJ  1.583   0.08   0.02    0  mag 2006yCat.2168....0M       Comp:3   n_B_V:                  HD 26976       0       1 
+   BJ_VJ   0.17      0   0.02    0  mag 2006yCat.2168....0M       Comp:D  n_B_V:>                  HD 26976       0       1 
+ GAIA.BP  9.434 0.0054   0.01    0  mag 2018yCat.1345....0G Teff:8868.67    Dup:1 sdb-v2-041521.79-073929.2       0       0 
+      VJ  9.508  0.011   0.02    0  mag 2006yCat.2168....0M       Comp:2 n_Vmag:>                  HD 26976       0       1 
+      VJ  11.18  0.005   0.02    0  mag 2006yCat.2168....0M       Comp:3  n_Vmag:                  HD 26976       0       1 
+      VJ   9.32      0   0.02    0  mag 2006yCat.2168....0M       Comp:D n_Vmag:>                  HD 26976       0       1 
+  GAIA.G  9.481 0.0065   0.01    0  mag 2018yCat.1345....0G Teff:8868.67    Dup:1 sdb-v2-041521.79-073929.2       0       0 
+ GAIA.RP  9.729 0.0236   0.01    0  mag 2018yCat.1345....0G Teff:8868.67    Dup:1 sdb-v2-041521.79-073929.2       0       0 
+   2MR1J  9.849  0.029   0.01    0  mag 2003tmc..book.....C       Qflg:A   Cflg:c sdb-v2-041521.79-073929.2       0       1 
+   2MR2H  9.986  0.039   0.01    0  mag 2003tmc..book.....C       Qflg:A   Cflg:c sdb-v2-041521.79-073929.2       0       1 
+  2MR1KS  9.861  0.071   0.01    0  mag 2003tmc..book.....C       Qflg:A   Cflg:c sdb-v2-041521.79-073929.2       0       1 

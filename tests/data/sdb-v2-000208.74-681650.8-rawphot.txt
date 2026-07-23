@@ -1,0 +1,29 @@
+\ photometry/spectra for sdb-v2-000208.74-681650.8
+\
+\main_id='HD 224953'
+\raj2000=0.53640043
+\dej2000=-68.28076443
+\sp_type='K5/M0V'
+\sp_bibcode='1975MSS...C01....0H'
+\plx_value=65.24
+\plx_err=1.76
+\plx_bibcode='2007A&A...474..653V'
+\id='sdb-v2-000208.74-681650.8'
+|   Band|    Phot|     Err|      Sys| Lim|Unit|            bibcode|           Note1|          Note2|       SourceID|private|exclude|
+|   char|   float|   float|    float| int|char|               char|            char|           char|           char|    int|    int|
+|       |        |        |         |    |    |                   |                |               |               |       |       |
+|   null|    null|    null|     null|null|null|               null|            null|           null|           null|   null|   null|
+   UJ_BJ     1.18        0     0.028    0  mag 2006yCat.2168....0M           Comp:D          n_U_B:       HD 224953       0       1 
+   BJ_VJ     1.39        0      0.02    0  mag 2006yCat.2168....0M           Comp:D          n_B_V:       HD 224953       0       1 
+      HP    9.337  0.02512     0.005    0  mag 1997HIP...C......0E        VarType:D          Mult:C         HIP 169       0       0 
+      VJ      9.3        0      0.02    0  mag 2006yCat.2168....0M           Comp:D         n_Vmag:       HD 224953       0       1 
+  IRAS12    0.264    0.132         0    0   Jy 1988IRASP.C......0J           Qual:3          Conf:0 IRAS 23596-6833       0       0 
+  IRAS25     0.25        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0 IRAS 23596-6833       0       0 
+  MIPS24    31.91   0.1013    0.9573    0  mJy        2018.MIPS_DB   Name:HD 224953       Note:cat2       HD 224953       0       0 
+  IRAS60      0.4        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0 IRAS 23596-6833       0       0 
+  MIPS70    -1.39    4.931   -0.0695    0  mJy        2018.MIPS_DB   Name:HD 224953       Note:cat2       HD 224953       0       0 
+ IRAS100        1        0         0    1   Jy 1988IRASP.C......0J           Qual:1          Conf:0 IRAS 23596-6833       0       0 
+ PACS100 0.003264 0.002248 0.0001564    0   Jy         2018.DEBRIS   chisq:0.976447        Phot:PSF      CD-68 2373       0       1 
+ PACS100 0.004636 0.002643 9.273e-05    0   Jy            2026.HSA ObsID:1342212471 Conf/Cirrus:0/0       HD 224953       0       0 
+ PACS160 0.009214 0.005771  0.000495    0   Jy         2018.DEBRIS   chisq:0.976447        Phot:PSF      CD-68 2373       0       1 
+ PACS160  0.00366 0.007632 0.0001464    0   Jy            2026.HSA ObsID:1342212471 Conf/Cirrus:1/0       HD 224953       0       0 

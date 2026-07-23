@@ -1,0 +1,41 @@
+\ photometry/spectra for sdb-v2-041516.32-073910.3
+\
+\main_id='* omi02 Eri'
+\raj2000=63.81799845
+\dej2000=-7.65287232
+\sp_type='K0V'
+\sp_bibcode='1989ApJS...71..245K'
+\plx_value=199.608
+\plx_err=0.1208
+\plx_bibcode='2020yCat.1350....0G'
+\id='sdb-v2-041516.32-073910.3'
+|   Band|    Phot|     Err|      Sys| Lim|Unit|            bibcode|           Note1|          Note2|                 SourceID|private|exclude|
+|   char|   float|   float|    float| int|char|               char|            char|           char|                     char|    int|    int|
+|       |        |        |         |    |    |                   |                |               |                         |       |       |
+|   null|    null|    null|     null|null|null|               null|            null|           null|                     null|   null|   null|
+   UJ_BJ    0.446    0.009     0.028    0  mag 2006yCat.2168....0M            Comp:         n_U_B:>                  HD 26965       0       0 
+ STROMC1    0.302    0.011      0.01    0  mag 2015A&A...580A..23P       Vmag:4.415      beta:2.546           TYC 5312-2325-1       0       0 
+ STROMM1     0.33    0.007      0.01    0  mag 2015A&A...580A..23P       Vmag:4.415      beta:2.546           TYC 5312-2325-1       0       0 
+   BJ_VJ     0.82        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:4.43                  GJ 166 A       0       1 
+   BJ_VJ    0.816    0.005      0.02    0  mag 2006yCat.2168....0M            Comp:         n_B_V:>                  HD 26965       0       0 
+   BS_YS    0.485    0.005      0.01    0  mag 2015A&A...580A..23P       Vmag:4.415      beta:2.546           TYC 5312-2325-1       0       0 
+ GAIA.BP    4.633    0.003      0.01    0  mag 2018yCat.1345....0G        Teff:5196           Dup:1 sdb-v2-041516.32-073910.3       0       1 
+      HP    4.562 0.006067     0.005    0  mag 1997HIP...C......0E        VarType:U           Mult:                 HIP 19849       0       1 
+      VJ     4.43        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:4.43                  GJ 166 A       0       1 
+      VJ    4.424    0.012      0.02    0  mag 2006yCat.2168....0M            Comp:        n_Vmag:>                  HD 26965       0       0 
+   VJ_RC    0.465        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:4.43                  GJ 166 A       0       0 
+  GAIA.G    4.107   0.0037      0.01    0  mag 2018yCat.1345....0G        Teff:5196           Dup:1 sdb-v2-041516.32-073910.3       0       1 
+   VJ_IC    0.885        0      0.02    0  mag 1990A&AS...83..357B            Std?:       Vmag:4.43                  GJ 166 A       0       0 
+ GAIA.RP    3.602    0.003      0.01    0  mag 2018yCat.1345....0G        Teff:5196           Dup:1 sdb-v2-041516.32-073910.3       0       1 
+     2MJ    3.013    0.238      0.01    0  mag 2003tmc..book.....C           Qflg:D          Cflg:0 sdb-v2-041516.32-073910.3       0       0 
+     2MH    2.594    0.198      0.01    0  mag 2003tmc..book.....C           Qflg:C          Cflg:0 sdb-v2-041516.32-073910.3       0       0 
+    2MKS    2.498    0.236      0.01    0  mag 2003tmc..book.....C           Qflg:D          Cflg:0 sdb-v2-041516.32-073910.3       0       0 
+  AKARI9     6.19   0.0278   0.09285    0   Jy 2010A&A...514A...1I           ext?:0        N-near:0 sdb-v2-041516.32-073910.3       0       0 
+ AKARI18    1.355   0.0233   0.02032    0   Jy 2010A&A...514A...1I           ext?:0        N-near:0 sdb-v2-041516.32-073910.3       0       0 
+  MIPS24      791   0.1787     23.73    0  mJy        2018.MIPS_DB Name:* omi02 Eri       Note:cat1               * omi02 Eri       0       0 
+  MIPS70    86.58    2.541     4.329    0  mJy        2018.MIPS_DB Name:* omi02 Eri       Note:cat1               * omi02 Eri       0       0 
+  MIPS70     86.6     2.54      4.33    0  mJy 2013ApJ...768...25G             Xs:N        AgeFlg:3                 HIP 19849       0       1 
+ PACS100  0.04553 0.001939 0.0009107    0   Jy            2026.HSA ObsID:1342204321 Conf/Cirrus:0/0               * omi02 Eri       0       0 
+ PACS100  0.04294 0.001372  0.002057    0   Jy         2018.DEBRIS    chisq:1.79012        Phot:PSF   2MASS J04151651-0739068       0       1 
+ PACS160 0.004385 0.003783 0.0001754    0   Jy            2026.HSA ObsID:1342204321 Conf/Cirrus:0/0               * omi02 Eri       0       0 
+ PACS160 0.004555 0.002247 0.0002447    0   Jy         2018.DEBRIS    chisq:1.79012        Phot:PSF   2MASS J04151651-0739068       0       1 
