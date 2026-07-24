@@ -72,9 +72,9 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0036_canonical_catalog_detections"
+    assert version == "0039_drop_hierarchy_edge_tables"
     assert {
-        "photometry_overrides", "photometry_association_decisions",
+        "photometry_overrides",
         "dataset_revisions", "curated_records",
         "dataset_dirty_targets", "curated_association_actions",
         "curated_photometry_overrides",
@@ -90,11 +90,12 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "alma_sync_runs", "alma_sync_chunks", "alma_observations", "alma_members",
         "alma_member_positions",
         "hierarchy_sources", "hierarchy_records", "target_systems",
-        "target_system_members", "target_relationships",
+        "target_system_members",
         "measurement_target_associations", "hierarchy_match_candidates",
         "hierarchy_match_actions",
         "target_lifecycle_actions", "measurement_association_actions",
         "catalog_detections",
+        "structural_edges", "structural_edge_actions",
     } <= tables
     assert {
         "pm_ra_cosdec_masyr", "pm_dec_masyr", "proper_motion_available",
@@ -106,7 +107,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "pm_ra_cosdec_masyr", "pm_dec_masyr", "proper_motion_bibcode",
     } <= simbad_metadata_columns
     assert {
-        "photometry_override_history", "photometry_association_history",
+        "photometry_override_history",
         "unresolved_curated_records",
         "pending_dataset_exports", "curated_association_history",
         "curated_photometry_override_history",
@@ -153,5 +154,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0036_canonical_catalog_detections"
+    assert version == "0039_drop_hierarchy_edge_tables"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

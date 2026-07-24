@@ -27,8 +27,6 @@ from .dirty import find_target, mark_export_dirty
 from .models import (
     AstrometricSolution,
     ExternalIdentifier,
-    HierarchyGraphEdge,
-    HierarchyGraphOverride,
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
@@ -41,10 +39,11 @@ from .models import (
     RawCatalogRow,
     SimbadMetadata,
     SimbadRelationship,
+    StructuralEdge,
+    StructuralEdgeAction,
     Submission,
     Target,
     TargetLifecycleAction,
-    TargetRelationship,
     TargetSystem,
     TargetSystemMember,
     utcnow,
@@ -62,6 +61,18 @@ HIERARCHY_MAIN_TABLES = {
     "wds": {"b/wds/wds", "b_wds_wds", "wds"},
     "ccdm": {"i/274/ccdm", "i_274_ccdm", "ccdm"},
 }
+
+# Structural edges hold both provider-derived graph edges and target-resolved
+# relationships in one table. Graph readers see only re-derivable provider edges;
+# relationship readers see only accepted assertions.
+_GRAPH_EDGE_STATUSES = ("derived", "stale", "rejected")
+_RELATIONSHIP_STATUS = "accepted"
+
+
+def _relationship_status(status: str) -> str:
+    """Normalize a relationship status, mapping the legacy default to accepted."""
+    clean = status.strip()
+    return _RELATIONSHIP_STATUS if clean in ("", "current") else clean
 
 WDS_UNUSABLE_SEPARATION_ARCSEC = 999.8
 _COMPONENT_TOKEN_RE = re.compile(r"^(?:[A-Z]{1,3}|[A-Z][a-z0-9])$")
@@ -375,7 +386,7 @@ class HierarchyService:
         status: str = "current",
         actor: str | None = None,
         reason: str = "",
-    ) -> TargetRelationship:
+    ) -> StructuralEdge:
         if not relationship_type.strip():
             raise ValueError("relationship type is required")
         with self.session_factory.begin() as session:
@@ -386,20 +397,25 @@ class HierarchyService:
             child_target = _find_required_target(session, child) if child is not None else None
             if primary_target is None and secondary_target is None and parent_target is None and child_target is None:
                 raise ValueError("relationship must reference at least one target")
-            relationship = TargetRelationship(
-                system_id=None if system_row is None else system_row.id,
-                parent_target_id=None if parent_target is None else parent_target.id,
-                child_target_id=None if child_target is None else child_target.id,
-                primary_target_id=None if primary_target is None else primary_target.id,
-                secondary_target_id=None if secondary_target is None else secondary_target.id,
-                relationship_type=relationship_type.strip(),
-                component=component,
+            if parent_target is not None or child_target is not None:
+                direction = "a_parent_b"
+                endpoint_a, endpoint_b = parent_target, child_target
+            else:
+                direction = "pair"
+                endpoint_a, endpoint_b = primary_target, secondary_target
+            relationship = StructuralEdge(
                 source=source,
+                system_id=None if system_row is None else system_row.id,
+                endpoint_a_target_id=None if endpoint_a is None else endpoint_a.id,
+                endpoint_b_target_id=None if endpoint_b is None else endpoint_b.id,
+                direction=direction,
+                relation_type=relationship_type.strip(),
+                component_label=component,
                 separation_arcsec=separation_arcsec,
                 pa_deg=pa_deg,
                 relation_epoch=relation_epoch,
                 confidence=confidence,
-                status=status,
+                status=_relationship_status(status),
                 actor=actor,
                 reason=reason,
             )
@@ -453,16 +469,15 @@ class HierarchyService:
             relationships = tuple(
                 _relationship_summary(session, value)
                 for value in session.scalars(
-                    select(TargetRelationship)
+                    select(StructuralEdge)
+                    .where(StructuralEdge.status == _RELATIONSHIP_STATUS)
                     .where(
                         or_(
-                            TargetRelationship.parent_target_id == target.id,
-                            TargetRelationship.child_target_id == target.id,
-                            TargetRelationship.primary_target_id == target.id,
-                            TargetRelationship.secondary_target_id == target.id,
+                            StructuralEdge.endpoint_a_target_id == target.id,
+                            StructuralEdge.endpoint_b_target_id == target.id,
                         )
                     )
-                    .order_by(TargetRelationship.id)
+                    .order_by(StructuralEdge.id)
                 )
             )
             return HierarchyStatus(
@@ -1144,7 +1159,7 @@ class HierarchyService:
                 record_ids,
             )
             edge_ids = list(session.scalars(
-                select(HierarchyGraphEdge.id).where(HierarchyGraphEdge.source_id.in_(remove_source_ids))
+                select(StructuralEdge.id).where(StructuralEdge.source_id.in_(remove_source_ids))
             ))
             removed_match_actions = self._delete_by_chunks(
                 session, HierarchyMatchAction, HierarchyMatchAction.candidate_id, candidate_ids,
@@ -1152,15 +1167,11 @@ class HierarchyService:
             removed_candidates = self._delete_by_chunks(
                 session, HierarchyMatchCandidate, HierarchyMatchCandidate.id, candidate_ids,
             )
-            removed_graph_overrides = 0
-            removed_graph_overrides += self._delete_by_chunks(
-                session, HierarchyGraphOverride, HierarchyGraphOverride.edge_id, edge_ids,
-            )
-            removed_graph_overrides += self._delete_by_chunks(
-                session, HierarchyGraphOverride, HierarchyGraphOverride.source_id, remove_source_ids,
+            removed_graph_overrides = self._delete_by_chunks(
+                session, StructuralEdgeAction, StructuralEdgeAction.edge_id, edge_ids,
             )
             removed_graph_edges = self._delete_by_chunks(
-                session, HierarchyGraphEdge, HierarchyGraphEdge.id, edge_ids,
+                session, StructuralEdge, StructuralEdge.id, edge_ids,
             )
             removed_records = self._delete_by_chunks(
                 session, HierarchyRecord, HierarchyRecord.id, record_ids,
@@ -1230,39 +1241,43 @@ class HierarchyService:
             )
             graph_relation_query = (
                 select(
-                    HierarchyGraphEdge.provider,
-                    HierarchyGraphEdge.relation_type,
-                    func.count(HierarchyGraphEdge.id),
+                    StructuralEdge.source,
+                    StructuralEdge.relation_type,
+                    func.count(StructuralEdge.id),
                 )
-                .group_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.relation_type)
-                .order_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.relation_type)
+                .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
+                .group_by(StructuralEdge.source, StructuralEdge.relation_type)
+                .order_by(StructuralEdge.source, StructuralEdge.relation_type)
             )
             graph_status_query = (
                 select(
-                    HierarchyGraphEdge.provider,
-                    HierarchyGraphEdge.status,
-                    func.count(HierarchyGraphEdge.id),
+                    StructuralEdge.source,
+                    StructuralEdge.status,
+                    func.count(StructuralEdge.id),
                 )
-                .group_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.status)
-                .order_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.status)
+                .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
+                .group_by(StructuralEdge.source, StructuralEdge.status)
+                .order_by(StructuralEdge.source, StructuralEdge.status)
             )
             graph_geometry_query = (
                 select(
-                    HierarchyGraphEdge.provider,
-                    HierarchyGraphEdge.geometry_status,
-                    func.count(HierarchyGraphEdge.id),
+                    StructuralEdge.source,
+                    StructuralEdge.geometry_status,
+                    func.count(StructuralEdge.id),
                 )
-                .group_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.geometry_status)
-                .order_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.geometry_status)
+                .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
+                .group_by(StructuralEdge.source, StructuralEdge.geometry_status)
+                .order_by(StructuralEdge.source, StructuralEdge.geometry_status)
             )
             graph_role_query = (
                 select(
-                    HierarchyGraphEdge.provider,
-                    HierarchyGraphEdge.structural_role,
-                    func.count(HierarchyGraphEdge.id),
+                    StructuralEdge.source,
+                    StructuralEdge.structural_role,
+                    func.count(StructuralEdge.id),
                 )
-                .group_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.structural_role)
-                .order_by(HierarchyGraphEdge.provider, HierarchyGraphEdge.structural_role)
+                .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
+                .group_by(StructuralEdge.source, StructuralEdge.structural_role)
+                .order_by(StructuralEdge.source, StructuralEdge.structural_role)
             )
             matched_subquery = (
                 select(
@@ -1290,20 +1305,20 @@ class HierarchyService:
                 candidate_status_query = candidate_status_query.where(HierarchyMatchCandidate.provider == provider_value)
                 candidate_method_query = candidate_method_query.where(HierarchyMatchCandidate.provider == provider_value)
                 record_count_query = record_count_query.where(HierarchyRecord.provider == provider_value)
-                graph_relation_query = graph_relation_query.where(HierarchyGraphEdge.provider == provider_value)
-                graph_status_query = graph_status_query.where(HierarchyGraphEdge.provider == provider_value)
-                graph_geometry_query = graph_geometry_query.where(HierarchyGraphEdge.provider == provider_value)
-                graph_role_query = graph_role_query.where(HierarchyGraphEdge.provider == provider_value)
+                graph_relation_query = graph_relation_query.where(StructuralEdge.source == provider_value)
+                graph_status_query = graph_status_query.where(StructuralEdge.source == provider_value)
+                graph_geometry_query = graph_geometry_query.where(StructuralEdge.source == provider_value)
+                graph_role_query = graph_role_query.where(StructuralEdge.source == provider_value)
                 matched_query = matched_query.where(matched_subquery.c.provider == provider_value)
             if source_id is not None:
                 source_query = source_query.where(HierarchySource.id == source_id)
                 candidate_status_query = candidate_status_query.where(HierarchyRecord.source_id == source_id)
                 candidate_method_query = candidate_method_query.where(HierarchyRecord.source_id == source_id)
                 record_count_query = record_count_query.where(HierarchyRecord.source_id == source_id)
-                graph_relation_query = graph_relation_query.where(HierarchyGraphEdge.source_id == source_id)
-                graph_status_query = graph_status_query.where(HierarchyGraphEdge.source_id == source_id)
-                graph_geometry_query = graph_geometry_query.where(HierarchyGraphEdge.source_id == source_id)
-                graph_role_query = graph_role_query.where(HierarchyGraphEdge.source_id == source_id)
+                graph_relation_query = graph_relation_query.where(StructuralEdge.source_id == source_id)
+                graph_status_query = graph_status_query.where(StructuralEdge.source_id == source_id)
+                graph_geometry_query = graph_geometry_query.where(StructuralEdge.source_id == source_id)
+                graph_role_query = graph_role_query.where(StructuralEdge.source_id == source_id)
                 matched_subquery = (
                     select(
                         HierarchyMatchCandidate.provider.label("provider"),
@@ -1460,9 +1475,10 @@ class HierarchyService:
             existing_edges = {
                 _graph_edge_key(edge): edge
                 for edge in session.scalars(
-                    select(HierarchyGraphEdge).where(
-                        HierarchyGraphEdge.provider == provider,
-                        *([] if source_id is None else [HierarchyGraphEdge.source_id == source_id]),
+                    select(StructuralEdge).where(
+                        StructuralEdge.source == provider,
+                        StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES),
+                        *([] if source_id is None else [StructuralEdge.source_id == source_id]),
                     )
                 )
             }
@@ -1470,7 +1486,7 @@ class HierarchyService:
             edge_count = 0
             skipped_count = 0
             refreshed_edge_ids: set[int] = set()
-            derived_edges: list[HierarchyGraphEdge] = []
+            derived_edges: list[StructuralEdge] = []
             for record in records:
                 edge = _wds_graph_edge_for_record(record, record_index)
                 if edge is None:
@@ -1492,8 +1508,8 @@ class HierarchyService:
             stale_ids = sorted(existing_ids - refreshed_edge_ids)
             if stale_ids:
                 referenced_stale_ids = set(session.scalars(
-                    select(HierarchyGraphOverride.edge_id)
-                    .where(HierarchyGraphOverride.edge_id.in_(stale_ids))
+                    select(StructuralEdgeAction.edge_id)
+                    .where(StructuralEdgeAction.edge_id.in_(stale_ids))
                 ))
                 for edge in existing_edges.values():
                     if edge.id in referenced_stale_ids:
@@ -1505,8 +1521,8 @@ class HierarchyService:
                 deletable_stale_ids = []
             if deletable_stale_ids:
                 session.execute(
-                    delete(HierarchyGraphEdge)
-                    .where(HierarchyGraphEdge.id.in_(deletable_stale_ids))
+                    delete(StructuralEdge)
+                    .where(StructuralEdge.id.in_(deletable_stale_ids))
                 )
             return HierarchyGraphDeriveResult(
                 provider=provider,
@@ -1525,13 +1541,13 @@ class HierarchyService:
         source_id: int | None = None,
     ) -> tuple[HierarchyGraphEdgeRow, ...]:
         with self.session_factory() as session:
-            query = select(HierarchyGraphEdge)
+            query = select(StructuralEdge).where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
             if provider is not None:
-                query = query.where(HierarchyGraphEdge.provider == provider.lower().strip())
+                query = query.where(StructuralEdge.source == provider.lower().strip())
             if native_id is not None:
-                query = query.where(HierarchyGraphEdge.native_id == native_id.strip())
+                query = query.where(StructuralEdge.native_id == native_id.strip())
             if source_id is not None:
-                query = query.where(HierarchyGraphEdge.source_id == source_id)
+                query = query.where(StructuralEdge.source_id == source_id)
             if target is not None:
                 target_row = _find_required_target(session, target)
                 record_ids = tuple(session.scalars(
@@ -1541,13 +1557,13 @@ class HierarchyService:
                 ))
                 if not record_ids:
                     return ()
-                query = query.where(HierarchyGraphEdge.record_id.in_(record_ids))
+                query = query.where(StructuralEdge.record_id.in_(record_ids))
             edges = tuple(session.scalars(query.order_by(
-                HierarchyGraphEdge.provider,
-                HierarchyGraphEdge.native_id,
-                HierarchyGraphEdge.reference_label,
-                HierarchyGraphEdge.component_label,
-                HierarchyGraphEdge.id,
+                StructuralEdge.source,
+                StructuralEdge.native_id,
+                StructuralEdge.reference_label,
+                StructuralEdge.component_label,
+                StructuralEdge.id,
             )))
             overrides = _latest_graph_overrides(session, list(edges))
             return tuple(_graph_edge_row(edge, overrides.get(edge.id)) for edge in edges)
@@ -1567,19 +1583,19 @@ class HierarchyService:
         severity_value = None if severity is None else severity.lower().strip()
         issue_value = None if issue is None else issue.strip()
         with self.session_factory() as session:
-            query = select(HierarchyGraphEdge)
+            query = select(StructuralEdge).where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
             provider_value = None if provider is None else provider.lower().strip()
             if provider_value is not None:
-                query = query.where(HierarchyGraphEdge.provider == provider_value)
+                query = query.where(StructuralEdge.source == provider_value)
             if source_id is not None:
-                query = query.where(HierarchyGraphEdge.source_id == source_id)
+                query = query.where(StructuralEdge.source_id == source_id)
             if native_id is not None:
-                query = query.where(HierarchyGraphEdge.native_id == native_id.strip())
+                query = query.where(StructuralEdge.native_id == native_id.strip())
             edges = tuple(session.scalars(query.order_by(
-                HierarchyGraphEdge.provider,
-                HierarchyGraphEdge.source_id,
-                HierarchyGraphEdge.native_id,
-                HierarchyGraphEdge.id,
+                StructuralEdge.source,
+                StructuralEdge.source_id,
+                StructuralEdge.native_id,
+                StructuralEdge.id,
             )))
             overrides = _latest_graph_overrides(session, list(edges))
             rows = [_graph_edge_row(edge, overrides.get(edge.id)) for edge in edges]
@@ -1753,15 +1769,16 @@ class HierarchyService:
         if clean_status is None and clean_relation_type is None and clean_structural_role is None:
             raise ValueError("status, relation type, or structural role override is required")
         with self.session_factory.begin() as session:
-            query = select(HierarchyGraphEdge).where(
-                HierarchyGraphEdge.provider == clean_provider,
-                HierarchyGraphEdge.native_id == clean_native,
-                HierarchyGraphEdge.reference_label == clean_reference,
-                HierarchyGraphEdge.component_label == clean_component,
+            query = select(StructuralEdge).where(
+                StructuralEdge.source == clean_provider,
+                StructuralEdge.native_id == clean_native,
+                StructuralEdge.reference_label == clean_reference,
+                StructuralEdge.component_label == clean_component,
+                StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES),
             )
             if source_id is not None:
-                query = query.where(HierarchyGraphEdge.source_id == source_id)
-            matches = tuple(session.scalars(query.order_by(HierarchyGraphEdge.id)))
+                query = query.where(StructuralEdge.source_id == source_id)
+            matches = tuple(session.scalars(query.order_by(StructuralEdge.id)))
             if not matches:
                 raise KeyError(f"hierarchy graph edge not found: {clean_provider} {clean_native} {clean_reference}->{clean_component}")
             if len(matches) > 1 and source_id is None:
@@ -1779,10 +1796,9 @@ class HierarchyService:
                 if latest is not None and latest.new_structural_role is not None
                 else edge.structural_role
             )
-            override = HierarchyGraphOverride(
+            override = StructuralEdgeAction(
                 edge_id=edge.id,
-                source_id=edge.source_id,
-                provider=edge.provider,
+                source=edge.source,
                 native_id=edge.native_id,
                 reference_label=edge.reference_label,
                 component_label=edge.component_label,
@@ -1882,18 +1898,20 @@ class HierarchyService:
                     component_label if component_label is not None else record.component,
                     record.provider,
                 )
-            relationship = TargetRelationship(
-                system_id=None if system_row is None else system_row.id,
-                primary_target_id=target.id,
-                relationship_type=relationship_type.strip(),
-                component=record.component,
+            relationship = StructuralEdge(
                 source=record.provider,
-                source_record_id=record.id,
+                system_id=None if system_row is None else system_row.id,
+                record_id=record.id,
+                native_id=record.native_id,
+                endpoint_a_target_id=target.id,
+                direction="pair",
+                relation_type=relationship_type.strip(),
+                component_label=record.component,
                 separation_arcsec=record.separation_arcsec,
                 pa_deg=record.pa_deg,
                 relation_epoch=record.measure_epoch,
                 confidence="accepted_candidate",
-                status="current",
+                status=_RELATIONSHIP_STATUS,
                 actor=clean_actor,
                 reason=_join_notes(f"accepted hierarchy candidate {candidate.id}: {candidate.reason}", reason),
             )
@@ -3551,18 +3569,25 @@ def _target_sdbid(session: Session, target_id: int | None) -> str | None:
     return None if target is None else target.sdbid
 
 
-def _relationship_summary(session: Session, value: TargetRelationship) -> RelationshipSummary:
+def _relationship_summary(session: Session, value: StructuralEdge) -> RelationshipSummary:
+    parent_id = child_id = primary_id = secondary_id = None
+    if value.direction == "a_parent_b":
+        parent_id, child_id = value.endpoint_a_target_id, value.endpoint_b_target_id
+    elif value.direction == "b_parent_a":
+        parent_id, child_id = value.endpoint_b_target_id, value.endpoint_a_target_id
+    else:
+        primary_id, secondary_id = value.endpoint_a_target_id, value.endpoint_b_target_id
     return RelationshipSummary(
         id=value.id,
-        relationship_type=value.relationship_type,
+        relationship_type=value.relation_type,
         source=value.source,
         status=value.status,
         confidence=value.confidence,
-        component=value.component,
-        parent_sdbid=_target_sdbid(session, value.parent_target_id),
-        child_sdbid=_target_sdbid(session, value.child_target_id),
-        primary_sdbid=_target_sdbid(session, value.primary_target_id),
-        secondary_sdbid=_target_sdbid(session, value.secondary_target_id),
+        component=value.component_label,
+        parent_sdbid=_target_sdbid(session, parent_id),
+        child_sdbid=_target_sdbid(session, child_id),
+        primary_sdbid=_target_sdbid(session, primary_id),
+        secondary_sdbid=_target_sdbid(session, secondary_id),
         separation_arcsec=value.separation_arcsec,
         pa_deg=value.pa_deg,
         relation_epoch=value.relation_epoch,
@@ -4316,10 +4341,10 @@ def _build_wds_record_index(records: tuple[HierarchyRecord, ...]) -> dict[tuple[
     return index
 
 
-def _graph_edge_key(edge: HierarchyGraphEdge) -> tuple[int, str, str, str | None, str | None, str]:
+def _graph_edge_key(edge: StructuralEdge) -> tuple[int, str, str, str | None, str | None, str]:
     return (
         edge.source_id,
-        edge.provider,
+        edge.source,
         edge.native_id,
         edge.reference_label,
         edge.component_label,
@@ -4327,7 +4352,7 @@ def _graph_edge_key(edge: HierarchyGraphEdge) -> tuple[int, str, str, str | None
     )
 
 
-def _copy_graph_edge_values(existing: HierarchyGraphEdge, replacement: HierarchyGraphEdge) -> None:
+def _copy_graph_edge_values(existing: StructuralEdge, replacement: StructuralEdge) -> None:
     existing.record_id = replacement.record_id
     existing.source_component = replacement.source_component
     existing.structural_role = replacement.structural_role
@@ -4346,7 +4371,7 @@ def _copy_graph_edge_values(existing: HierarchyGraphEdge, replacement: Hierarchy
 def _wds_graph_edge_for_record(
     record: HierarchyRecord,
     record_index: dict[tuple[int, str, str], HierarchyRecord],
-) -> HierarchyGraphEdge | None:
+) -> StructuralEdge | None:
     if record.provider != "wds":
         return None
     raw_payload = _record_raw_payload(record)
@@ -4370,10 +4395,10 @@ def _wds_graph_edge_for_record(
     elif record.ra_deg is not None and record.dec_deg is not None:
         geometry_status = "base_only"
     relation_type = _wds_graph_relation_type(reference, component, source_component)
-    return HierarchyGraphEdge(
+    return StructuralEdge(
+        source=record.provider,
         source_id=record.source_id,
         record_id=record.id,
-        provider=record.provider,
         native_id=record.native_id,
         source_component=source_component,
         reference_label=reference,
@@ -4493,7 +4518,7 @@ def _wds_structural_group_reference(reference: str, component: str, original_com
     )
 
 
-def _demote_ambiguous_structural_edges(edges: list[HierarchyGraphEdge]) -> None:
+def _demote_ambiguous_structural_edges(edges: list[StructuralEdge]) -> None:
     parents_by_child: dict[tuple[int, str, str, str], set[str]] = {}
     for edge in edges:
         if edge.structural_role != "structural" or edge.relation_type != "group":
@@ -4503,7 +4528,7 @@ def _demote_ambiguous_structural_edges(edges: list[HierarchyGraphEdge]) -> None:
         if not child or not parent or child == parent:
             continue
         parents_by_child.setdefault(
-            (edge.source_id, edge.provider, edge.native_id, child),
+            (edge.source_id, edge.source, edge.native_id, child),
             set(),
         ).add(parent)
     ambiguous_children = {
@@ -4514,7 +4539,7 @@ def _demote_ambiguous_structural_edges(edges: list[HierarchyGraphEdge]) -> None:
         return
     for edge in edges:
         child = _graph_conceptual_component(edge.component_label)
-        key = (edge.source_id, edge.provider, edge.native_id, child)
+        key = (edge.source_id, edge.source, edge.native_id, child)
         if key in ambiguous_children and edge.relation_type == "group":
             edge.structural_role = "non_structural"
             edge.note = _join_notes(edge.note, "ambiguous structural parent; demoted to non-structural") or ""
@@ -4522,26 +4547,29 @@ def _demote_ambiguous_structural_edges(edges: list[HierarchyGraphEdge]) -> None:
 
 def _latest_graph_overrides(
     session: Session,
-    edges: list[HierarchyGraphEdge],
-) -> dict[int, HierarchyGraphOverride]:
+    edges: list[StructuralEdge],
+) -> dict[int, StructuralEdgeAction]:
     if not edges:
         return {}
-    source_ids = sorted({edge.source_id for edge in edges})
-    providers = sorted({edge.provider for edge in edges})
-    native_ids = sorted({edge.native_id for edge in edges})
+    edge_ids = sorted({edge.id for edge in edges if edge.id is not None})
+    sources = sorted({edge.source for edge in edges})
+    native_ids = sorted({edge.native_id for edge in edges if edge.native_id is not None})
     rows = tuple(session.scalars(
-        select(HierarchyGraphOverride)
-        .where(HierarchyGraphOverride.source_id.in_(source_ids))
-        .where(HierarchyGraphOverride.provider.in_(providers))
-        .where(HierarchyGraphOverride.native_id.in_(native_ids))
-        .order_by(HierarchyGraphOverride.created_at, HierarchyGraphOverride.id)
+        select(StructuralEdgeAction)
+        .where(StructuralEdgeAction.source.in_(sources))
+        .where(
+            or_(
+                StructuralEdgeAction.edge_id.in_(edge_ids),
+                StructuralEdgeAction.native_id.in_(native_ids),
+            )
+        )
+        .order_by(StructuralEdgeAction.created_at, StructuralEdgeAction.id)
     ))
-    latest: dict[int, HierarchyGraphOverride] = {}
+    latest: dict[int, StructuralEdgeAction] = {}
     for edge in edges:
         for row in rows:
             if row.edge_id == edge.id or (
-                row.source_id == edge.source_id
-                and row.provider == edge.provider
+                row.source == edge.source
                 and row.native_id == edge.native_id
                 and row.reference_label == edge.reference_label
                 and row.component_label == edge.component_label
@@ -4563,23 +4591,24 @@ def _graph_edges_for_system(
     avoid opening nested sessions for every candidate system.
     """
     edges = tuple(session.scalars(
-        select(HierarchyGraphEdge)
-        .where(HierarchyGraphEdge.provider == provider.lower().strip())
-        .where(HierarchyGraphEdge.native_id == native_id.strip())
-        .where(HierarchyGraphEdge.source_id == source_id)
+        select(StructuralEdge)
+        .where(StructuralEdge.source == provider.lower().strip())
+        .where(StructuralEdge.native_id == native_id.strip())
+        .where(StructuralEdge.source_id == source_id)
+        .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
         .order_by(
-            HierarchyGraphEdge.provider,
-            HierarchyGraphEdge.native_id,
-            HierarchyGraphEdge.reference_label,
-            HierarchyGraphEdge.component_label,
-            HierarchyGraphEdge.id,
+            StructuralEdge.source,
+            StructuralEdge.native_id,
+            StructuralEdge.reference_label,
+            StructuralEdge.component_label,
+            StructuralEdge.id,
         )
     ))
     overrides = _latest_graph_overrides(session, list(edges))
     return tuple(_graph_edge_row(edge, overrides.get(edge.id)) for edge in edges)
 
 
-def _graph_edge_row(edge: HierarchyGraphEdge, override: HierarchyGraphOverride | None) -> HierarchyGraphEdgeRow:
+def _graph_edge_row(edge: StructuralEdge, override: StructuralEdgeAction | None) -> HierarchyGraphEdgeRow:
     relation_type = override.new_relation_type if override is not None and override.new_relation_type else edge.relation_type
     structural_role = (
         override.new_structural_role
@@ -4591,7 +4620,7 @@ def _graph_edge_row(edge: HierarchyGraphEdge, override: HierarchyGraphOverride |
         edge_id=edge.id,
         source_id=edge.source_id,
         record_id=edge.record_id,
-        provider=edge.provider,
+        provider=edge.source,
         native_id=edge.native_id,
         source_component=edge.source_component,
         reference_label=edge.reference_label,

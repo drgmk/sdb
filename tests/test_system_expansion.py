@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sdb_identity.hierarchy import HierarchyService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService, RelationshipValue
 from sdb_identity.models import (
+    StructuralEdge,
     Target,
     TargetLifecycleAction,
-    TargetRelationship,
     TargetSystem,
     TargetSystemMember,
 )
@@ -136,7 +136,9 @@ def test_import_relatives_is_bounded_reconciles_system_and_is_idempotent(
         members = list(session.scalars(
             select(TargetSystemMember).order_by(TargetSystemMember.id)
         ))
-        relationships = list(session.scalars(select(TargetRelationship)))
+        relationships = list(session.scalars(
+            select(StructuralEdge).where(StructuralEdge.status == "accepted")
+        ))
         lifecycle = list(session.scalars(
             select(TargetLifecycleAction).order_by(TargetLifecycleAction.id)
         ))
@@ -147,9 +149,10 @@ def test_import_relatives_is_bounded_reconciles_system_and_is_idempotent(
         (component.id, "B"),
     }
     assert len(relationships) == 1
-    assert relationships[0].parent_target_id == root.target_id
-    assert relationships[0].child_target_id == component.id
-    assert relationships[0].relationship_type == "simbad_parent_child"
+    assert relationships[0].direction == "a_parent_b"
+    assert relationships[0].endpoint_a_target_id == root.target_id
+    assert relationships[0].endpoint_b_target_id == component.id
+    assert relationships[0].relation_type == "simbad_parent_child"
     assert [(row.target_id, row.role, row.state) for row in lifecycle] == [
         (root.target_id, "composite", "system_only"),
         (component.id, "physical", "active"),

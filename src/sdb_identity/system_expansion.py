@@ -18,8 +18,8 @@ from .models import (
     MetadataRun,
     SimbadMetadata,
     SimbadRelationship,
+    StructuralEdge,
     Target,
-    TargetRelationship,
     TargetSystem,
     TargetSystemMember,
 )
@@ -396,25 +396,27 @@ def _ensure_simbad_relationship(
             parent_id, child_id = requested.id, related.id
         else:
             parent_id, child_id = related.id, requested.id
-        existing = session.scalar(select(TargetRelationship.id).where(
-            TargetRelationship.system_id == system.id,
-            TargetRelationship.parent_target_id == parent_id,
-            TargetRelationship.child_target_id == child_id,
-            TargetRelationship.relationship_type == "simbad_parent_child",
-            TargetRelationship.status == "current",
+        existing = session.scalar(select(StructuralEdge.id).where(
+            StructuralEdge.system_id == system.id,
+            StructuralEdge.endpoint_a_target_id == parent_id,
+            StructuralEdge.endpoint_b_target_id == child_id,
+            StructuralEdge.direction == "a_parent_b",
+            StructuralEdge.relation_type == "simbad_parent_child",
+            StructuralEdge.status == "accepted",
         ).limit(1))
         if existing is not None:
             return
-        relationship = TargetRelationship(
-            system_id=system.id,
-            parent_target_id=parent_id,
-            child_target_id=child_id,
-            relationship_type="simbad_parent_child",
-            component=relative.get("component_label"),
+        relationship = StructuralEdge(
             source="simbad",
+            system_id=system.id,
+            endpoint_a_target_id=parent_id,
+            endpoint_b_target_id=child_id,
+            direction="a_parent_b",
+            relation_type="simbad_parent_child",
+            component_label=relative.get("component_label"),
             separation_arcsec=relative.get("separation_arcsec"),
             confidence="provider",
-            status="current",
+            status="accepted",
             actor=actor.strip(),
             reason=reason.strip(),
         )

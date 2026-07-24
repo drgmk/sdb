@@ -18,7 +18,6 @@ from .models import (
     IrasDetectionFamily,
     MetadataRun,
     NormalizedMeasurement,
-    PhotometryAssociationDecision,
     PhotometryOverride,
     RawCatalogRow,
     ReferenceDirtyTarget,
@@ -42,23 +41,6 @@ def _target(session: Session, reference: str | int) -> Target | None:
         ).limit(1)
     )
     return None if identifier is None else session.get(Target, identifier.target_id)
-
-
-def _latest_association_decision(
-    decisions: dict[tuple[str, str, str | None, int | None, int | None], PhotometryAssociationDecision],
-    measurement: NormalizedMeasurement,
-    raw_row_id: int,
-) -> PhotometryAssociationDecision | None:
-    keys = (
-        (measurement.provider, measurement.source_id, measurement.band, measurement.id, raw_row_id),
-        (measurement.provider, measurement.source_id, measurement.band, None, raw_row_id),
-        (measurement.provider, measurement.source_id, measurement.band, None, None),
-    )
-    for key in keys:
-        decision = decisions.get(key)
-        if decision is not None:
-            return decision
-    return None
 
 
 def export_ipac(
@@ -99,11 +81,6 @@ def export_ipac(
                 .order_by(PhotometryOverride.id)
             )
         )
-        association_decisions = list(session.scalars(
-            select(PhotometryAssociationDecision)
-            .where(PhotometryAssociationDecision.target_id == target.id)
-            .order_by(PhotometryAssociationDecision.id)
-        ))
         curated_overrides = list(session.scalars(
             select(CuratedPhotometryOverride).order_by(CuratedPhotometryOverride.id)
         ))
@@ -152,10 +129,6 @@ def export_ipac(
         (value.dataset, value.record_no): value
         for value in curated_overrides
     }
-    latest_association_decisions = {
-        (value.provider, value.source_id, value.band, value.measurement_id, value.raw_row_id): value
-        for value in association_decisions
-    }
     tdsc_preferred_bands = set()
     for value in measurements:
         if value.provider != "tdsc":
@@ -177,13 +150,8 @@ def export_ipac(
             if record_no is not None:
                 curated_override = latest_curated_overrides.get((value.provider, record_no))
         effective_override = curated_override or override
-        association_decision = _latest_association_decision(
-            latest_association_decisions, value, raw.id if raw is not None else value.raw_row_id
-        )
         shared_source = (value.provider, value.source_id) in shared_source_keys
         excluded = value.excluded if effective_override is None else effective_override.excluded
-        if association_decision is not None and association_decision.scope == "reject":
-            excluded = True
         if shared_source and effective_override is None:
             excluded = True
         iras_alternate = value.id in iras_alternate_ids
@@ -203,9 +171,6 @@ def export_ipac(
             note2 = f"{note2}; {suffix}" if note2 else suffix
         if optical_alternate:
             suffix = "Optical duplicate:TDSC component photometry preferred"
-            note2 = f"{note2}; {suffix}" if note2 else suffix
-        if association_decision is not None and association_decision.scope == "reject":
-            suffix = f"Association reject:{association_decision.reason}"
             note2 = f"{note2}; {suffix}" if note2 else suffix
         if effective_override is not None:
             suffix = f"Override:{effective_override.reason}"

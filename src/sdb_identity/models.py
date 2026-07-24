@@ -516,59 +516,7 @@ class HierarchyMatchAction(Base):
     actor: Mapped[str] = mapped_column(String(100), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     system_id: Mapped[int | None] = mapped_column(ForeignKey("target_systems.id"))
-    relationship_id: Mapped[int | None] = mapped_column(ForeignKey("target_relationships.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class HierarchyGraphEdge(Base):
-    __tablename__ = "hierarchy_graph_edges"
-    __table_args__ = (
-        Index("ix_hierarchy_graph_edges_source_provider_native", "source_id", "provider", "native_id"),
-    )
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    source_id: Mapped[int] = mapped_column(ForeignKey("hierarchy_sources.id"), nullable=False, index=True)
-    record_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_records.id"), index=True)
-    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    native_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    source_component: Mapped[str | None] = mapped_column(String(80), index=True)
-    reference_label: Mapped[str | None] = mapped_column(String(80), index=True)
-    component_label: Mapped[str | None] = mapped_column(String(80), index=True)
-    relation_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    structural_role: Mapped[str] = mapped_column(String(40), nullable=False, default="non_structural", index=True)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="derived", index=True)
-    geometry_status: Mapped[str] = mapped_column(String(30), nullable=False, default="usable", index=True)
-    start_ra_deg: Mapped[float | None] = mapped_column(Float)
-    start_dec_deg: Mapped[float | None] = mapped_column(Float)
-    end_ra_deg: Mapped[float | None] = mapped_column(Float)
-    end_dec_deg: Mapped[float | None] = mapped_column(Float)
-    separation_arcsec: Mapped[float | None] = mapped_column(Float)
-    pa_deg: Mapped[float | None] = mapped_column(Float)
-    relation_epoch: Mapped[float | None] = mapped_column(Float)
-    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class HierarchyGraphOverride(Base):
-    __tablename__ = "hierarchy_graph_overrides"
-    __table_args__ = (
-        Index("ix_hierarchy_graph_overrides_source_provider_native", "source_id", "provider", "native_id"),
-    )
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    edge_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_graph_edges.id"), index=True)
-    source_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_sources.id"), index=True)
-    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    native_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    reference_label: Mapped[str | None] = mapped_column(String(80), index=True)
-    component_label: Mapped[str | None] = mapped_column(String(80), index=True)
-    action: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    previous_status: Mapped[str | None] = mapped_column(String(30))
-    new_status: Mapped[str | None] = mapped_column(String(30))
-    previous_relation_type: Mapped[str | None] = mapped_column(String(40))
-    new_relation_type: Mapped[str | None] = mapped_column(String(40))
-    previous_structural_role: Mapped[str | None] = mapped_column(String(40))
-    new_structural_role: Mapped[str | None] = mapped_column(String(40))
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    relationship_id: Mapped[int | None] = mapped_column(ForeignKey("structural_edges.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -605,25 +553,76 @@ class TargetSystemMember(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class TargetRelationship(Base):
-    __tablename__ = "target_relationships"
+class StructuralEdge(Base):
+    """Unified current-state structural relationship between two components/targets.
+
+    Replaces HierarchyGraphEdge (provider-derived, re-derivable WDS geometry) and
+    TargetRelationship (target-resolved accepted/manual assertions). Endpoints carry
+    both a resolved target FK and a provider component label, because a provider-derived
+    edge exists (keyed by native_id + component) before its targets are matched.
+    Derived WDS rows (status derived/stale) are re-derivable; accepted/manual rows
+    survive re-derivation. Decision history lives in StructuralEdgeAction.
+    """
+    __tablename__ = "structural_edges"
+    __table_args__ = (
+        Index("ix_structural_edges_source_native", "source", "native_id"),
+        Index("ix_structural_edges_source_id", "source_id"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # provenance
+    source: Mapped[str] = mapped_column(String(40), nullable=False, index=True)  # wds|ccdm|simbad|manual
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_sources.id"), index=True)
+    record_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_records.id"), index=True)
+    native_id: Mapped[str | None] = mapped_column(String(200), index=True)
     system_id: Mapped[int | None] = mapped_column(ForeignKey("target_systems.id"), index=True)
-    parent_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    child_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    primary_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    secondary_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    relationship_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    component: Mapped[str | None] = mapped_column(String(40))
-    source: Mapped[str] = mapped_column(String(40), nullable=False)
-    source_record_id: Mapped[int | None] = mapped_column(ForeignKey("hierarchy_records.id"))
+    # endpoints: resolved target FK and/or provider component label
+    endpoint_a_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
+    endpoint_b_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
+    reference_label: Mapped[str | None] = mapped_column(String(80), index=True)   # endpoint A label
+    component_label: Mapped[str | None] = mapped_column(String(80), index=True)   # endpoint B label
+    source_component: Mapped[str | None] = mapped_column(String(80), index=True)  # raw provider component
+    # semantics
+    direction: Mapped[str] = mapped_column(String(20), nullable=False, default="pair")  # pair|a_parent_b|b_parent_a
+    relation_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    structural_role: Mapped[str] = mapped_column(String(40), nullable=False, default="non_structural", index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="derived", index=True)  # derived|accepted|rejected|stale
+    confidence: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    # geometry (provider-derived, nullable)
+    geometry_status: Mapped[str | None] = mapped_column(String(30), index=True)
+    start_ra_deg: Mapped[float | None] = mapped_column(Float)
+    start_dec_deg: Mapped[float | None] = mapped_column(Float)
+    end_ra_deg: Mapped[float | None] = mapped_column(Float)
+    end_dec_deg: Mapped[float | None] = mapped_column(Float)
     separation_arcsec: Mapped[float | None] = mapped_column(Float)
     pa_deg: Mapped[float | None] = mapped_column(Float)
     relation_epoch: Mapped[float | None] = mapped_column(Float)
-    confidence: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="current", index=True)
-    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     actor: Mapped[str | None] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class StructuralEdgeAction(Base):
+    """Append-only decision/audit log for structural edges (replaces HierarchyGraphOverride)."""
+    __tablename__ = "structural_edge_actions"
+    __table_args__ = (
+        Index("ix_structural_edge_actions_source_native", "source", "native_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    edge_id: Mapped[int | None] = mapped_column(ForeignKey("structural_edges.id"), index=True)
+    source: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    native_id: Mapped[str | None] = mapped_column(String(200), index=True)
+    reference_label: Mapped[str | None] = mapped_column(String(80), index=True)
+    component_label: Mapped[str | None] = mapped_column(String(80), index=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False, index=True)  # accept|reject|amend|manual_add|derive_refresh
+    previous_status: Mapped[str | None] = mapped_column(String(30))
+    new_status: Mapped[str | None] = mapped_column(String(30))
+    previous_relation_type: Mapped[str | None] = mapped_column(String(40))
+    new_relation_type: Mapped[str | None] = mapped_column(String(40))
+    previous_structural_role: Mapped[str | None] = mapped_column(String(40))
+    new_structural_role: Mapped[str | None] = mapped_column(String(40))
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -706,21 +705,6 @@ class ImportJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class PhotometryAssociationDecision(Base):
-    __tablename__ = "photometry_association_decisions"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
-    measurement_id: Mapped[int | None] = mapped_column(ForeignKey("normalized_measurements.id"), index=True)
-    raw_row_id: Mapped[int | None] = mapped_column(ForeignKey("raw_catalog_rows.id"), index=True)
-    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    source_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    band: Mapped[str | None] = mapped_column(String(30), index=True)
-    scope: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class PhotometryOverride(Base):

@@ -5,7 +5,6 @@ from astropy.table import Table
 from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
 from sdb_identity.export import export_ipac
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
-from sdb_identity.photometry import set_photometry_association_decision
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.test_metadata import FakeMetadataProvider, snapshot
@@ -54,78 +53,6 @@ def test_export_uses_only_current_successful_run(session_factory, tmp_path):
     assert list(table["Phot"]) == [7.2]
 
 
-
-def test_export_excludes_measurement_rejected_by_association_decision(session_factory, tmp_path):
-    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
-        "allwise": FakeCatalog([
-            candidate("wise-a", measurements=[measurement("WISE3P4", 8.1)])
-        ], name="allwise", release="fake-allwise"),
-    }).refresh(target.sdbid, "allwise")
-    set_photometry_association_decision(
-        session_factory,
-        target.sdbid,
-        provider="allwise",
-        source_id="wise-a",
-        band="WISE3P4",
-        scope="reject",
-        actor="grant",
-        reason="belongs to nearby component",
-    )
-
-    output = export_ipac(session_factory, target.sdbid, tmp_path / "reject.txt")
-    table = Table.read(output, format="ascii.ipac")
-
-    assert list(table["exclude"]) == [1]
-    assert "Association reject:belongs to nearby component" in table["Note2"][0]
-
-
-def test_export_ignores_non_reject_association_decision_for_now(session_factory, tmp_path):
-    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
-        "allwise": FakeCatalog([
-            candidate("wise-a", measurements=[measurement("WISE3P4", 8.1)])
-        ], name="allwise", release="fake-allwise"),
-    }).refresh(target.sdbid, "allwise")
-    set_photometry_association_decision(
-        session_factory,
-        target.sdbid,
-        provider="allwise",
-        source_id="wise-a",
-        band="WISE3P4",
-        scope="blended",
-        actor="grant",
-        reason="not export-active yet",
-    )
-
-    output = export_ipac(session_factory, target.sdbid, tmp_path / "blended.txt")
-    table = Table.read(output, format="ascii.ipac")
-
-    assert list(table["exclude"]) == [0]
-    assert "Association reject" not in table["Note2"][0]
-
-
-def test_export_uses_latest_association_decision(session_factory, tmp_path):
-    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
-        "allwise": FakeCatalog([
-            candidate("wise-a", measurements=[measurement("WISE3P4", 8.1)])
-        ], name="allwise", release="fake-allwise"),
-    }).refresh(target.sdbid, "allwise")
-    set_photometry_association_decision(
-        session_factory, target.sdbid, provider="allwise", source_id="wise-a",
-        band="WISE3P4", scope="reject", actor="grant", reason="initial reject",
-    )
-    set_photometry_association_decision(
-        session_factory, target.sdbid, provider="allwise", source_id="wise-a",
-        band="WISE3P4", scope="component", actor="grant", reason="later accepted",
-    )
-
-    output = export_ipac(session_factory, target.sdbid, tmp_path / "latest.txt")
-    table = Table.read(output, format="ascii.ipac")
-
-    assert list(table["exclude"]) == [0]
-    assert "initial reject" not in table["Note2"][0]
 
 def test_shared_catalog_source_is_excluded_from_component_exports(session_factory, tmp_path):
     first = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))

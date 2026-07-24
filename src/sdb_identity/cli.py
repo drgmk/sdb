@@ -384,9 +384,9 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--reason", required=True)
     photometry_list = _add_parser(photometry_commands, "list", "List current photometry and override state for a target.", "Shows normalized measurements, providers, and inclusion/exclusion status. Use this before applying manual photometry overrides.")
     photometry_list.add_argument("target")
-    photometry_review = _add_parser(photometry_commands, "review", "Review current photometry association context for a target.", "Lists current normalized measurements plus unaccepted current raw catalog rows, including the latest association decision if one has been recorded. This is read-only and intended to precede set-scope decisions.")
+    photometry_review = _add_parser(photometry_commands, "review", "Review current photometry association context for a target.", "Lists current normalized measurements plus unaccepted current raw catalog rows. This is read-only and intended to precede assign (ownership) and include/exclude (fit eligibility) decisions.")
     photometry_review.add_argument("target")
-    photometry_queue = _add_parser(photometry_commands, "review-queue", "Prioritize photometry association rows needing review.", "Combines current photometry, unaccepted catalog neighbours, hierarchy/resolution predictions, and existing association decisions. Select exactly one target set with TARGET, --sample, or --all.")
+    photometry_queue = _add_parser(photometry_commands, "review-queue", "Prioritize photometry association rows needing review.", "Combines current photometry, unaccepted catalog neighbours, and hierarchy/resolution predictions. Select exactly one target set with TARGET, --sample, or --all.")
     photometry_queue.add_argument("target", nargs="?")
     photometry_queue.add_argument("--sample")
     photometry_queue.add_argument("--all", action="store_true", dest="review_all")
@@ -411,18 +411,6 @@ def parser() -> argparse.ArgumentParser:
         help="worker processes used to render independent target pages",
     )
     photometry_html.add_argument("--open", action="store_true", help="open index.html in the default browser")
-    photometry_decisions = _add_parser(photometry_commands, "decisions", "List audited photometry association decisions for a target.", "Shows append-only component/system/blended/neighbour/reject decisions recorded during review. Later decisions supersede earlier interpretation but previous rows are preserved.")
-    photometry_decisions.add_argument("target")
-    photometry_scope = _add_parser(photometry_commands, "set-scope", "Record a photometry association decision.", "Append an audited decision describing whether a provider/source row is component, system, blended, neighbour context, or rejected for this target. Use --raw-row-id for review-neighbour rows and --measurement-id or --band for normalized measurements.")
-    photometry_scope.add_argument("target")
-    photometry_scope.add_argument("provider")
-    photometry_scope.add_argument("source_id")
-    photometry_scope.add_argument("--scope", choices=["component", "system", "blended", "neighbour_context", "reject"], required=True)
-    photometry_scope.add_argument("--band")
-    photometry_scope.add_argument("--measurement-id", type=int)
-    photometry_scope.add_argument("--raw-row-id", type=int)
-    photometry_scope.add_argument("--actor", required=True)
-    photometry_scope.add_argument("--reason", required=True)
     photometry_assign = _add_parser(photometry_commands, "assign", "Assign one measurement to a contributing target or composite scope.", "Creates or updates the current many-to-many assignment and appends an audit action. This records ownership for future joint fitting but does not yet change legacy exports.")
     photometry_assign.add_argument("measurement_id", type=int)
     photometry_assign.add_argument("target")
@@ -722,11 +710,6 @@ def _render_photometry_review_index(
         signal_count = sum(1 for row in rows if row.get("priority") != "none")
         signals = sorted({str(row.get("signal") or "") for row in rows if row.get("signal")})
         providers = sorted({str(row.get("provider") or "") for row in rows if row.get("provider")})
-        decisions = sorted({
-            str(row.get("current_decision") or "")
-            for row in rows
-            if row.get("current_decision")
-        })
         actions = sorted({
             str(row.get("action") or "")
             for row in rows
@@ -739,7 +722,6 @@ def _render_photometry_review_index(
             <td>{signal_count}</td>
             <td>{esc(", ".join(providers))}</td>
             <td>{esc("; ".join(signals))}</td>
-            <td>{esc(", ".join(decisions))}</td>
             <td>{esc("; ".join(actions))}</td>
           </tr>
         """)
@@ -765,7 +747,7 @@ def _render_photometry_review_index(
   <h1>{esc(title)}</h1>
   <p class="muted">Static review bundle. Individual target pages show full sky/context views; this index highlights photometry review queue signals only.</p>
   <table>
-    <thead><tr><th>target</th><th>priority</th><th>signals</th><th>providers</th><th>signal summary</th><th>decisions</th><th>suggested action</th></tr></thead>
+    <thead><tr><th>target</th><th>priority</th><th>signals</th><th>providers</th><th>signal summary</th><th>suggested action</th></tr></thead>
     <tbody>{''.join(table_rows)}</tbody>
   </table>
 </body>
@@ -778,7 +760,7 @@ def _format_photometry_review_queue_table(rows: list[dict[str, object]]) -> str:
         return "No photometry review queue rows."
     headers = (
         "priority", "sdbid", "provider", "band", "signal",
-        "predicted", "decision", "action",
+        "predicted", "action",
     )
     rendered = ["  ".join(headers)]
     for row in rows:
@@ -790,7 +772,6 @@ def _format_photometry_review_queue_table(rows: list[dict[str, object]]) -> str:
             str(row.get("band") or ""),
             str(row.get("signal") or ""),
             str(predicted),
-            str(row.get("current_decision") or ""),
             str(row.get("action") or ""),
         ]))
     return "\n".join(rendered)
@@ -1325,14 +1306,23 @@ def main(argv: list[str] | None = None) -> int:
                     actor=args.actor,
                     reason=args.reason,
                 )
+                if value.direction == "a_parent_b":
+                    parent_id, child_id = value.endpoint_a_target_id, value.endpoint_b_target_id
+                    primary_id = secondary_id = None
+                elif value.direction == "b_parent_a":
+                    parent_id, child_id = value.endpoint_b_target_id, value.endpoint_a_target_id
+                    primary_id = secondary_id = None
+                else:
+                    primary_id, secondary_id = value.endpoint_a_target_id, value.endpoint_b_target_id
+                    parent_id = child_id = None
                 print(_format_json(args, {
                     "relationship_id": value.id,
-                    "relationship_type": value.relationship_type,
+                    "relationship_type": value.relation_type,
                     "system_id": value.system_id,
-                    "parent_target_id": value.parent_target_id,
-                    "child_target_id": value.child_target_id,
-                    "primary_target_id": value.primary_target_id,
-                    "secondary_target_id": value.secondary_target_id,
+                    "parent_target_id": parent_id,
+                    "child_target_id": child_id,
+                    "primary_target_id": primary_id,
+                    "secondary_target_id": secondary_id,
                     "source": value.source,
                     "status": value.status,
                 }, sort_keys=True))
@@ -1951,10 +1941,8 @@ def main(argv: list[str] | None = None) -> int:
             assign_measurement_target,
             list_measurement_assignment_history,
             list_measurement_target_assignments,
-            list_photometry_association_decisions,
             list_photometry_overrides,
             review_photometry_associations,
-            set_photometry_association_decision,
             set_photometry_override,
             unassign_measurement_target,
         )
@@ -2114,20 +2102,6 @@ def main(argv: list[str] | None = None) -> int:
                         1 for value in values if value.get("priority") != "none"
                     ),
                 }, sort_keys=True))
-            elif args.photometry_command == "decisions":
-                print(_format_json(args, [{
-                    "id": value.id,
-                    "target_id": value.target_id,
-                    "measurement_id": value.measurement_id,
-                    "raw_row_id": value.raw_row_id,
-                    "provider": value.provider,
-                    "source_id": value.source_id,
-                    "band": value.band,
-                    "scope": value.scope,
-                    "actor": value.actor,
-                    "reason": value.reason,
-                    "created_at": value.created_at.isoformat(),
-                } for value in list_photometry_association_decisions(sessions, args.target)], sort_keys=True))
             elif args.photometry_command == "assign":
                 value = assign_measurement_target(
                     sessions,
@@ -2238,32 +2212,6 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     for value in report["rows"]:
                         print(_format_json(args, value, sort_keys=True))
-            else:
-                value = set_photometry_association_decision(
-                    sessions,
-                    args.target,
-                    provider=args.provider,
-                    source_id=args.source_id,
-                    scope=args.scope,
-                    band=args.band,
-                    measurement_id=args.measurement_id,
-                    raw_row_id=args.raw_row_id,
-                    actor=args.actor,
-                    reason=args.reason,
-                )
-                print(_format_json(args, {
-                    "id": value.id,
-                    "target_id": value.target_id,
-                    "measurement_id": value.measurement_id,
-                    "raw_row_id": value.raw_row_id,
-                    "provider": value.provider,
-                    "source_id": value.source_id,
-                    "band": value.band,
-                    "scope": value.scope,
-                    "actor": value.actor,
-                    "reason": value.reason,
-                    "created_at": value.created_at.isoformat(),
-                }, sort_keys=True))
         except (KeyError, ValueError) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -2516,81 +2464,84 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     with sessions() as session:
         if args.command == "status":
-            target = session.scalar(select(Target).where((Target.sdbid == args.target) | (Target.id == int(args.target) if args.target.isdigit() else False)))
-            if target is None:
-                print("target not found", file=sys.stderr)
+            from .dirty import resolve_targets
+            targets = resolve_targets(session, args.target)
+            if not targets:
+                print(f"target not found: {args.target}", file=sys.stderr)
                 return 1
-            solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
-            status_payload = {
-                "id": target.id,
-                "sdbid": target.sdbid,
-                "ra2000_deg": target.ra2000_deg,
-                "dec2000_deg": target.dec2000_deg,
-                "astrometry": None if solution is None else {
-                    "solution_id": solution.id,
-                    "source": solution.source,
-                    "source_id": solution.source_id,
-                    "position_bibcode": solution.position_bibcode,
-                    "proper_motion_bibcode": solution.proper_motion_bibcode,
-                    "parallax_bibcode": solution.parallax_bibcode,
-                    "radial_velocity_bibcode": solution.radial_velocity_bibcode,
-                },
-            }
             from .target_lifecycle import target_lifecycle_status
-
-            status_payload["lifecycle"] = asdict(
-                target_lifecycle_status(sessions, target.sdbid)
-            )
             from .hierarchy import HierarchyService
-            status_payload["hierarchy"] = HierarchyService(sessions).target_context_summary(target.sdbid)
-            print(_format_json(args, status_payload, sort_keys=True))
+            for target in targets:
+                solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
+                status_payload = {
+                    "id": target.id,
+                    "sdbid": target.sdbid,
+                    "ra2000_deg": target.ra2000_deg,
+                    "dec2000_deg": target.dec2000_deg,
+                    "astrometry": None if solution is None else {
+                        "solution_id": solution.id,
+                        "source": solution.source,
+                        "source_id": solution.source_id,
+                        "position_bibcode": solution.position_bibcode,
+                        "proper_motion_bibcode": solution.proper_motion_bibcode,
+                        "parallax_bibcode": solution.parallax_bibcode,
+                        "radial_velocity_bibcode": solution.radial_velocity_bibcode,
+                    },
+                }
+                status_payload["lifecycle"] = asdict(
+                    target_lifecycle_status(sessions, target.sdbid)
+                )
+                status_payload["hierarchy"] = HierarchyService(sessions).target_context_summary(target.sdbid)
+                print(_format_json(args, status_payload, sort_keys=True))
             return 0
         if args.command == "catalog-status":
-            target = session.scalar(select(Target).where(Target.sdbid == args.target))
-            if target is None and args.target.isdigit():
-                target = session.get(Target, int(args.target))
-            if target is None:
-                print("target not found", file=sys.stderr)
+            from .dirty import resolve_targets
+            targets = resolve_targets(session, args.target)
+            if not targets:
+                print(f"target not found: {args.target}", file=sys.stderr)
                 return 1
-            query = select(CatalogRun).where(CatalogRun.target_id == target.id)
-            if args.provider:
-                query = query.where(CatalogRun.provider == args.provider)
-            runs = session.scalars(query.order_by(CatalogRun.id.desc()))
-            for run in runs:
-                print(_format_json(args, {
-                    "run_id": run.id,
-                    "provider": run.provider,
-                    "release": run.release,
-                    "status": run.status,
-                    "is_current": run.is_current,
-                    "candidate_count": run.candidate_count,
-                    "selected_source_id": run.selected_source_id,
-                    "error": run.error,
-                }, sort_keys=True))
+            for target in targets:
+                query = select(CatalogRun).where(CatalogRun.target_id == target.id)
+                if args.provider:
+                    query = query.where(CatalogRun.provider == args.provider)
+                runs = session.scalars(query.order_by(CatalogRun.id.desc()))
+                for run in runs:
+                    print(_format_json(args, {
+                        "sdbid": target.sdbid,
+                        "run_id": run.id,
+                        "provider": run.provider,
+                        "release": run.release,
+                        "status": run.status,
+                        "is_current": run.is_current,
+                        "candidate_count": run.candidate_count,
+                        "selected_source_id": run.selected_source_id,
+                        "error": run.error,
+                    }, sort_keys=True))
             return 0
         if args.command == "metadata-status":
             from .models import MetadataRun
+            from .dirty import resolve_targets
 
-            target = session.scalar(select(Target).where(Target.sdbid == args.target))
-            if target is None and args.target.isdigit():
-                target = session.get(Target, int(args.target))
-            if target is None:
-                print("target not found", file=sys.stderr)
+            targets = resolve_targets(session, args.target)
+            if not targets:
+                print(f"target not found: {args.target}", file=sys.stderr)
                 return 1
-            query = select(MetadataRun).where(MetadataRun.target_id == target.id)
-            if args.provider:
-                query = query.where(MetadataRun.provider == args.provider)
-            for run in session.scalars(query.order_by(MetadataRun.id.desc())):
-                print(_format_json(args, {
-                    "run_id": run.id,
-                    "provider": run.provider,
-                    "release": run.release,
-                    "status": run.status,
-                    "is_current": run.is_current,
-                    "query_identifier": run.query_identifier,
-                    "candidate_count": run.candidate_count,
-                    "error": run.error,
-                }, sort_keys=True))
+            for target in targets:
+                query = select(MetadataRun).where(MetadataRun.target_id == target.id)
+                if args.provider:
+                    query = query.where(MetadataRun.provider == args.provider)
+                for run in session.scalars(query.order_by(MetadataRun.id.desc())):
+                    print(_format_json(args, {
+                        "sdbid": target.sdbid,
+                        "run_id": run.id,
+                        "provider": run.provider,
+                        "release": run.release,
+                        "status": run.status,
+                        "is_current": run.is_current,
+                        "query_identifier": run.query_identifier,
+                        "candidate_count": run.candidate_count,
+                        "error": run.error,
+                    }, sort_keys=True))
             return 0
         if args.kind == "iras-families":
             from .models import IrasBandSelection, IrasDetectionFamily
@@ -2647,9 +2598,37 @@ def main(argv: list[str] | None = None) -> int:
                     "score": candidate.score,
                 }, sort_keys=True))
         else:
-            candidates = session.scalars(select(MatchCandidate).where(MatchCandidate.accepted.is_(False)).order_by(MatchCandidate.submission_id, MatchCandidate.score.desc()))
-            for candidate in candidates:
-                print(_format_json(args, {"id": candidate.id, "submission_id": candidate.submission_id, "source_id": candidate.source_id, "separation_arcsec": candidate.separation_arcsec, "score": candidate.score}, sort_keys=True))
+            from sqlalchemy import case, func
+            from .models import Submission
+
+            ambiguous = session.scalars(
+                select(Submission)
+                .join(MatchCandidate, MatchCandidate.submission_id == Submission.id)
+                .group_by(Submission.id)
+                .having(func.sum(case((MatchCandidate.accepted, 1), else_=0)) == 0)
+                .order_by(Submission.id)
+            )
+            for submission in ambiguous:
+                candidates = session.scalars(
+                    select(MatchCandidate)
+                    .where(MatchCandidate.submission_id == submission.id)
+                    .order_by(MatchCandidate.score.desc())
+                )
+                print(_format_json(args, {
+                    "submission_id": submission.id,
+                    "submitted_name": submission.input_name,
+                    "submitted_ra_deg": submission.input_ra_deg,
+                    "submitted_dec_deg": submission.input_dec_deg,
+                    "status": submission.status,
+                    "reason": "identity candidates found but none accepted automatically",
+                    "candidates": [{
+                        "candidate_id": candidate.id,
+                        "provider": candidate.provider,
+                        "source_id": candidate.source_id,
+                        "separation_arcsec": candidate.separation_arcsec,
+                        "score": candidate.score,
+                    } for candidate in candidates],
+                }, sort_keys=True))
     return 0
 
 

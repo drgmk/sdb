@@ -10,7 +10,7 @@ from .catalog_measurements import current_measurement_encounters
 from .models import (
     CatalogRun, ExternalIdentifier, MeasurementAssociationAction,
     MeasurementTargetAssociation, NormalizedMeasurement,
-    PhotometryAssociationDecision, PhotometryOverride, RawCatalogRow, Target,
+    PhotometryOverride, RawCatalogRow, Target,
 )
 from .service import normalize_identifier
 
@@ -84,7 +84,6 @@ def list_photometry_overrides(
         )
 
 
-ASSOCIATION_SCOPES = {"component", "system", "blended", "neighbour_context", "reject"}
 MEASUREMENT_TARGET_ROLES = {"contributor", "composite_scope"}
 
 
@@ -101,9 +100,6 @@ class PhotometryReviewRow:
     excluded: bool | None
     association_scope: str | None
     blend_status: str | None
-    current_decision_scope: str | None
-    current_decision_id: int | None
-    current_decision_reason: str | None
 
 
 def assign_measurement_target(
@@ -272,155 +268,6 @@ def list_measurement_assignment_history(
         ).order_by(MeasurementAssociationAction.id)))
 
 
-def _current_decisions(session: Session, target_id: int) -> dict[tuple[str, str, str | None, int | None, int | None], PhotometryAssociationDecision]:
-    rows = session.scalars(
-        select(PhotometryAssociationDecision)
-        .where(PhotometryAssociationDecision.target_id == target_id)
-        .order_by(PhotometryAssociationDecision.id)
-    )
-    current = {}
-    for row in rows:
-        current[(row.provider, row.source_id, row.band, row.measurement_id, row.raw_row_id)] = row
-    return current
-
-
-def _measurement_for_decision(
-    session: Session,
-    target: Target,
-    *,
-    provider: str,
-    source_id: str,
-    band: str | None,
-    measurement_id: int | None,
-    raw_row_id: int | None,
-) -> tuple[NormalizedMeasurement | None, RawCatalogRow | None]:
-    measurement = None
-    raw_row = None
-    if measurement_id is not None:
-        measurement = session.get(NormalizedMeasurement, measurement_id)
-        encounter = next((
-            row for row in current_measurement_encounters(
-                session, [target.id], require_match=False,
-            )
-            if row.measurement.id == measurement_id
-        ), None)
-        if measurement is None or encounter is None:
-            raise KeyError(f"measurement not found for target: {measurement_id}")
-        raw_row = encounter.raw_row
-    elif raw_row_id is not None:
-        raw_row = session.get(RawCatalogRow, raw_row_id)
-        if raw_row is None:
-            raise KeyError(f"raw catalog row not found: {raw_row_id}")
-        run = session.get(CatalogRun, raw_row.run_id)
-        if run is None or run.target_id != target.id:
-            raise KeyError(f"raw catalog row not found for target: {raw_row_id}")
-        if band is not None:
-            measurement = session.scalar(
-                select(NormalizedMeasurement)
-                .where(NormalizedMeasurement.detection_id == raw_row.detection_id)
-                .where(NormalizedMeasurement.band == band.strip().upper())
-            )
-    else:
-        encounters = [
-            row for row in current_measurement_encounters(
-                session, [target.id], require_match=False,
-            )
-            if row.measurement.provider == provider
-            and row.measurement.source_id == source_id
-            and (band is None or row.measurement.band == band.strip().upper())
-        ]
-        matches = [row.measurement for row in encounters]
-        if len(matches) > 1 and band is None:
-            raise ValueError("multiple measurements match; specify --band or --measurement-id")
-        if matches:
-            measurement = matches[0]
-            raw_row = encounters[0].raw_row
-    return measurement, raw_row
-
-
-def set_photometry_association_decision(
-    session_factory: sessionmaker[Session],
-    target_reference: str | int,
-    *,
-    provider: str,
-    source_id: str,
-    scope: str,
-    actor: str,
-    reason: str,
-    band: str | None = None,
-    measurement_id: int | None = None,
-    raw_row_id: int | None = None,
-) -> PhotometryAssociationDecision:
-    provider = provider.strip().lower()
-    source_id = source_id.strip()
-    scope = scope.strip()
-    band = None if band is None else band.strip().upper()
-    if scope not in ASSOCIATION_SCOPES:
-        raise ValueError(f"scope must be one of {sorted(ASSOCIATION_SCOPES)}")
-    if not provider or not source_id:
-        raise ValueError("provider and source_id are required")
-    if not actor.strip() or not reason.strip():
-        raise ValueError("actor and reason are required")
-    with session_factory.begin() as session:
-        target = _target(session, target_reference)
-        if target is None:
-            raise KeyError(f"target not found: {target_reference}")
-        measurement, raw_row = _measurement_for_decision(
-            session,
-            target,
-            provider=provider,
-            source_id=source_id,
-            band=band,
-            measurement_id=measurement_id,
-            raw_row_id=raw_row_id,
-        )
-        if measurement is not None:
-            provider = measurement.provider
-            source_id = measurement.source_id
-            band = measurement.band
-            measurement_id = measurement.id
-            raw_row_id = measurement.raw_row_id
-        elif raw_row is not None:
-            source_id = raw_row.source_id
-            raw_row_id = raw_row.id
-        value = PhotometryAssociationDecision(
-            target_id=target.id,
-            measurement_id=measurement_id,
-            raw_row_id=raw_row_id,
-            provider=provider,
-            source_id=source_id,
-            band=band,
-            scope=scope,
-            actor=actor.strip(),
-            reason=reason.strip(),
-        )
-        session.add(value)
-        session.flush()
-        mark_export_dirty(
-            session,
-            target.id,
-            source_type="photometry_association_decision",
-            source_id=value.id,
-            reason=f"{provider} {source_id} association decision",
-        )
-    return value
-
-
-def list_photometry_association_decisions(
-    session_factory: sessionmaker[Session],
-    target_reference: str | int,
-) -> list[PhotometryAssociationDecision]:
-    with session_factory() as session:
-        target = _target(session, target_reference)
-        if target is None:
-            raise KeyError(f"target not found: {target_reference}")
-        return list(session.scalars(
-            select(PhotometryAssociationDecision)
-            .where(PhotometryAssociationDecision.target_id == target.id)
-            .order_by(PhotometryAssociationDecision.id)
-        ))
-
-
 def review_photometry_associations(
     session_factory: sessionmaker[Session],
     target_reference: str | int,
@@ -429,7 +276,6 @@ def review_photometry_associations(
         target = _target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
-        decisions = _current_decisions(session, target.id)
         rows: list[PhotometryReviewRow] = []
         encounters = current_measurement_encounters(
             session, [target.id], require_match=False,
@@ -437,17 +283,6 @@ def review_photometry_associations(
         for encounter in encounters:
             measurement = encounter.measurement
             raw_row_id = encounter.raw_row.id
-            key = (
-                measurement.provider, measurement.source_id, measurement.band,
-                measurement.id, raw_row_id,
-            )
-            decision = decisions.get(key) or decisions.get((
-                measurement.provider, measurement.source_id, measurement.band, None, raw_row_id,
-            )) or decisions.get((
-                measurement.provider, measurement.source_id, None, None, raw_row_id,
-            )) or decisions.get((
-                measurement.provider, measurement.source_id, measurement.band, None, None,
-            ))
             rows.append(PhotometryReviewRow(
                 target_id=target.id,
                 provider=measurement.provider,
@@ -460,9 +295,6 @@ def review_photometry_associations(
                 excluded=measurement.excluded,
                 association_scope=measurement.association_scope,
                 blend_status=measurement.blend_status,
-                current_decision_scope=None if decision is None else decision.scope,
-                current_decision_id=None if decision is None else decision.id,
-                current_decision_reason=None if decision is None else decision.reason,
             ))
         raw_rows = session.scalars(
             select(RawCatalogRow)
@@ -474,7 +306,6 @@ def review_photometry_associations(
         )
         for raw in raw_rows:
             run = session.get(CatalogRun, raw.run_id)
-            decision = decisions.get((run.provider, raw.source_id, None, None, raw.id)) if run else None
             rows.append(PhotometryReviewRow(
                 target_id=target.id,
                 provider="" if run is None else run.provider,
@@ -487,9 +318,6 @@ def review_photometry_associations(
                 excluded=None,
                 association_scope=None,
                 blend_status=None,
-                current_decision_scope=None if decision is None else decision.scope,
-                current_decision_id=None if decision is None else decision.id,
-                current_decision_reason=None if decision is None else decision.reason,
             ))
         return rows
 
@@ -506,25 +334,6 @@ def _review_photometry_associations_many(
         target_id: [] for target_id in target_ids
     }
     with session_factory() as session:
-        decisions_by_target: dict[
-            int,
-            dict[tuple[str, str, str | None, int | None, int | None], PhotometryAssociationDecision],
-        ] = {target_id: {} for target_id in target_ids}
-        for target_id_chunk in _chunks(target_ids):
-            decisions = session.scalars(
-                select(PhotometryAssociationDecision)
-                .where(PhotometryAssociationDecision.target_id.in_(target_id_chunk))
-                .order_by(PhotometryAssociationDecision.id)
-            )
-            for decision in decisions:
-                decisions_by_target[decision.target_id][(
-                    decision.provider,
-                    decision.source_id,
-                    decision.band,
-                    decision.measurement_id,
-                    decision.raw_row_id,
-                )] = decision
-
         for target_id_chunk in _chunks(target_ids):
             encounters = current_measurement_encounters(
                 session, target_id_chunk, require_match=False,
@@ -533,20 +342,6 @@ def _review_photometry_associations_many(
                 measurement = encounter.measurement
                 target_id = encounter.target_id
                 raw_row_id = encounter.raw_row.id
-                decisions = decisions_by_target[target_id]
-                decision = decisions.get((
-                    measurement.provider, measurement.source_id, measurement.band,
-                    measurement.id, raw_row_id,
-                )) or decisions.get((
-                    measurement.provider, measurement.source_id, measurement.band,
-                    None, raw_row_id,
-                )) or decisions.get((
-                    measurement.provider, measurement.source_id, None,
-                    None, raw_row_id,
-                )) or decisions.get((
-                    measurement.provider, measurement.source_id, measurement.band,
-                    None, None,
-                ))
                 rows_by_target[target_id].append(PhotometryReviewRow(
                     target_id=target_id,
                     provider=measurement.provider,
@@ -559,9 +354,6 @@ def _review_photometry_associations_many(
                     excluded=measurement.excluded,
                     association_scope=measurement.association_scope,
                     blend_status=measurement.blend_status,
-                    current_decision_scope=None if decision is None else decision.scope,
-                    current_decision_id=None if decision is None else decision.id,
-                    current_decision_reason=None if decision is None else decision.reason,
                 ))
 
         for target_id_chunk in _chunks(target_ids):
@@ -579,9 +371,6 @@ def _review_photometry_associations_many(
                 )
             )
             for raw, run_provider, target_id in raw_rows:
-                decision = decisions_by_target[target_id].get((
-                    run_provider, raw.source_id, None, None, raw.id,
-                ))
                 rows_by_target[target_id].append(PhotometryReviewRow(
                     target_id=target_id,
                     provider=run_provider,
@@ -594,9 +383,6 @@ def _review_photometry_associations_many(
                     excluded=None,
                     association_scope=None,
                     blend_status=None,
-                    current_decision_scope=None if decision is None else decision.scope,
-                    current_decision_id=None if decision is None else decision.id,
-                    current_decision_reason=None if decision is None else decision.reason,
                 ))
     return rows_by_target
 
@@ -658,8 +444,6 @@ def photometry_review_queue(
                 "predicted_blend_status": None if context is None else context.get("predicted_scope_blend_status"),
                 "stored_scope": row.association_scope,
                 "stored_blend_status": row.blend_status,
-                "current_decision": row.current_decision_scope,
-                "current_decision_id": row.current_decision_id,
                 "action": action,
             })
         if not target_rows:
@@ -677,8 +461,6 @@ def photometry_review_queue(
                 "predicted_blend_status": None,
                 "stored_scope": None,
                 "stored_blend_status": None,
-                "current_decision": None,
-                "current_decision_id": None,
                 "action": "none",
             })
         rows.extend(target_rows)
@@ -695,21 +477,17 @@ def _photometry_queue_signal(
     row: PhotometryReviewRow,
     context: dict[str, object] | None,
 ) -> tuple[str, str, str]:
-    if row.current_decision_scope == "reject":
-        return "association rejected; export excludes", "medium", "confirm export exclusion remains intended"
-    if row.current_decision_scope is not None:
-        return "association decision recorded", "low", "none"
     if row.measurement_id is None and row.raw_row_id is not None:
-        return "unaccepted catalog neighbour", "medium", "inspect or record neighbour_context/reject"
+        return "unaccepted catalog neighbour", "medium", "review; exclude the band if it is not this target's light"
     if row.association_scope == "shared" or row.blend_status == "duplicate_source":
         return "shared catalog source", "high", "inspect shared-source export exclusion"
     if context is not None:
         predicted_scope = str(context.get("predicted_association_scope") or "")
         predicted_blend = str(context.get("predicted_scope_blend_status") or "")
         if predicted_scope in {"blended", "system", "ambiguous"}:
-            return f"predicted {predicted_scope}", "high", "record set-scope decision after review"
+            return f"predicted {predicted_scope}", "high", "assign contributing targets after review"
         if predicted_blend == "likely_blended_at_catalog_resolution":
-            return "likely blended at catalog resolution", "high", "record set-scope decision after review"
+            return "likely blended at catalog resolution", "high", "assign contributing targets after review"
     return "clean automatic association", "none", "none"
 
 

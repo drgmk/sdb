@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from sqlalchemy import select
+
 from sdb_identity.catalogs import CatalogService
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.cli import main
@@ -276,7 +278,7 @@ def test_cli_photometry_override_history(tmp_path, capsys):
 
 
 
-def test_cli_photometry_association_decision_review(tmp_path, capsys):
+def test_cli_photometry_review_lists_measurements(tmp_path, capsys):
     database = tmp_path / "cli.sqlite"
     main(["--database", str(database), "init"])
     capsys.readouterr()
@@ -293,21 +295,7 @@ def test_cli_photometry_association_decision_review(tmp_path, capsys):
     ]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["provider"] == "allwise"
-    assert rows[0]["current_decision_scope"] is None
-
-    assert main([
-        "--database", str(database), "photometry", "set-scope", target.sdbid,
-        "allwise", "wise-a", "--band", "WISE3P4", "--scope", "blended",
-        "--actor", "grant", "--reason", "binary beam",
-    ]) == 0
-    decision = json.loads(capsys.readouterr().out)
-    assert decision["scope"] == "blended"
-
-    assert main([
-        "--database", str(database), "photometry", "decisions", target.sdbid,
-    ]) == 0
-    decisions = json.loads(capsys.readouterr().out)
-    assert decisions[0]["reason"] == "binary beam"
+    assert rows[0]["band"] == "WISE3P4"
 
 
 def test_cli_photometry_review_queue_lists_sample_targets(tmp_path, capsys):
@@ -330,12 +318,6 @@ def test_cli_photometry_review_queue_lists_sample_targets(tmp_path, capsys):
         "--actor", "grant", "--reason", "unit test",
     ]) == 0
     capsys.readouterr()
-    assert main([
-        "--database", str(database), "photometry", "set-scope", target.sdbid,
-        "allwise", "wise-a", "--band", "WISE3P4", "--scope", "reject",
-        "--actor", "grant", "--reason", "wrong component",
-    ]) == 0
-    capsys.readouterr()
 
     assert main([
         "--database", str(database), "photometry", "review-queue",
@@ -344,15 +326,14 @@ def test_cli_photometry_review_queue_lists_sample_targets(tmp_path, capsys):
     table = capsys.readouterr().out
     assert "priority" in table
     assert target.sdbid in table
-    assert "association rejected" in table
 
     assert main([
         "--database", str(database), "photometry", "review-queue",
         "--sample", "science", "--format", "jsonl",
     ]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert rows[0]["current_decision"] == "reject"
-    assert rows[0]["action"] == "confirm export exclusion remains intended"
+    assert rows[0]["sdbid"] == target.sdbid
+    assert "current_decision" not in rows[0]
 
     assert main([
         "--database", str(database), "photometry", "review-queue",
@@ -380,12 +361,6 @@ def test_cli_photometry_review_html_writes_bundle(tmp_path, capsys):
         "--actor", "grant", "--reason", "unit test",
     ]) == 0
     capsys.readouterr()
-    assert main([
-        "--database", str(database), "photometry", "set-scope", target.sdbid,
-        "allwise", "wise-a", "--band", "WISE3P4", "--scope", "reject",
-        "--actor", "grant", "--reason", "wrong component",
-    ]) == 0
-    capsys.readouterr()
 
     output_dir = tmp_path / "reviews"
     assert main([
@@ -396,7 +371,6 @@ def test_cli_photometry_review_html_writes_bundle(tmp_path, capsys):
 
     assert result["targets"] == 1
     assert result["queue_rows"] >= 1
-    assert result["signal_rows"] >= 1
     assert Path(result["index"]).exists()
     assert len(result["review_pages"]) == 1
     page = Path(result["review_pages"][0])
@@ -404,7 +378,6 @@ def test_cli_photometry_review_html_writes_bundle(tmp_path, capsys):
     assert "Plotly.newPlot" in page.read_text()
     index = (output_dir / "index.html").read_text()
     assert target.sdbid in index
-    assert "association rejected" in index
 
 def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
     database = tmp_path / "cli.sqlite"
@@ -432,3 +405,116 @@ def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
     replaced = json.loads(capsys.readouterr().out)
     assert replaced["status"] == "match"
     assert replaced["selected_source_id"] == "two"
+
+
+def _add_alias(sessions, sdbid, value):
+    from sdb_identity.models import ExternalIdentifier, Target
+    from sdb_identity.service import normalize_identifier
+
+    with sessions() as session:
+        target_id = session.scalar(select(Target.id).where(Target.sdbid == sdbid))
+        session.add(ExternalIdentifier(
+            target_id=target_id, value=value,
+            normalized_value=normalize_identifier(value), source="simbad",
+        ))
+        session.commit()
+
+
+def _decode_json_objects(text):
+    """Decode one or more concatenated (indented) JSON objects."""
+    decoder = json.JSONDecoder()
+    index = 0
+    objects = []
+    while index < len(text):
+        while index < len(text) and text[index] in " \n\t\r":
+            index += 1
+        if index >= len(text):
+            break
+        obj, index = decoder.raw_decode(text, index)
+        objects.append(obj)
+    return objects
+
+
+def test_cli_inspection_commands_resolve_by_alias(tmp_path, capsys):
+    database = tmp_path / "cli.sqlite"
+    main(["--database", str(database), "init"])
+    capsys.readouterr()
+    sessions = make_session_factory(database)
+    target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
+    CatalogService(
+        sessions,
+        {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
+    ).refresh(target.sdbid, "2mass")
+    MetadataService(
+        sessions,
+        FakeMetadataProvider(MetadataQueryResult("match", (snapshot(),))),
+    ).refresh(target.sdbid)
+    _add_alias(sessions, target.sdbid, "TESTALIAS 77")
+
+    assert main(["--database", str(database), "--offline", "status", "TESTALIAS 77"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["sdbid"] == target.sdbid
+
+    assert main(["--database", str(database), "catalog-status", "TESTALIAS 77"]) == 0
+    row = json.loads(capsys.readouterr().out)
+    assert row["sdbid"] == target.sdbid
+    assert row["provider"] == "2mass"
+
+    assert main(["--database", str(database), "metadata-status", "TESTALIAS 77"]) == 0
+    metadata = json.loads(capsys.readouterr().out)
+    assert metadata["sdbid"] == target.sdbid
+    assert metadata["provider"] == "simbad"
+
+    assert main(["--database", str(database), "--offline", "status", "NOT A TARGET"]) == 1
+    assert "target not found: NOT A TARGET" in capsys.readouterr().err
+
+
+def test_cli_status_prints_every_target_sharing_an_alias(tmp_path, capsys):
+    database = tmp_path / "cli.sqlite"
+    main(["--database", str(database), "init"])
+    capsys.readouterr()
+    sessions = make_session_factory(database)
+    first = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
+    second = IdentityService(sessions).add(AddRequest(ra_deg=10.5, dec_deg=-20))
+    assert first.sdbid != second.sdbid
+    _add_alias(sessions, first.sdbid, "SHARED SYSTEM")
+    _add_alias(sessions, second.sdbid, "SHARED SYSTEM")
+
+    assert main(["--database", str(database), "--offline", "status", "SHARED SYSTEM"]) == 0
+    objects = _decode_json_objects(capsys.readouterr().out)
+    assert sorted(obj["sdbid"] for obj in objects) == sorted([first.sdbid, second.sdbid])
+
+
+def test_cli_review_matches_lists_only_ambiguous_submissions(tmp_path, capsys):
+    database = tmp_path / "cli.sqlite"
+    main(["--database", str(database), "init"])
+    capsys.readouterr()
+    sessions = make_session_factory(database)
+    from sdb_identity.models import MatchCandidate, Submission
+
+    with sessions() as session:
+        ambiguous = Submission(input_name="AMBIG NAME", status="ambiguous")
+        resolved = Submission(input_name="RESOLVED NAME", status="completed")
+        session.add_all([ambiguous, resolved])
+        session.flush()
+        for source_id in ("gaia-a", "gaia-b"):
+            session.add(MatchCandidate(
+                submission_id=ambiguous.id, provider="gaia_dr3", source_id=source_id,
+                ra_deg=10.0, dec_deg=-20.0, epoch=2000.0, separation_arcsec=1.0,
+                score=0.5, score_details="{}", accepted=False,
+            ))
+        session.add(MatchCandidate(
+            submission_id=resolved.id, provider="gaia_dr3", source_id="gaia-c",
+            ra_deg=10.0, dec_deg=-20.0, epoch=2000.0, separation_arcsec=0.1,
+            score=0.9, score_details="{}", accepted=True,
+        ))
+        session.commit()
+
+    assert main(["--database", str(database), "review", "matches"]) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["submitted_name"] == "AMBIG NAME"
+    assert row["reason"]
+    assert {candidate["source_id"] for candidate in row["candidates"]} == {"gaia-a", "gaia-b"}
+    assert all("candidate_id" in candidate for candidate in row["candidates"])

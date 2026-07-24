@@ -5,11 +5,9 @@ from astropy.table import Table
 from sdb_identity.catalogs import CatalogService
 from sdb_identity.export import export_ipac
 from sdb_identity.photometry import (
-    list_photometry_association_decisions,
     list_photometry_overrides,
     photometry_review_queue,
     review_photometry_associations,
-    set_photometry_association_decision,
     set_photometry_override,
 )
 from sdb_identity.service import AddRequest, IdentityService
@@ -65,70 +63,17 @@ def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_fact
 
 
 
-def test_photometry_association_decision_is_append_only_and_reviewable(session_factory):
-    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    service = CatalogService(session_factory, {"allwise": allwise_catalog()})
-    service.refresh(target.sdbid, "allwise")
-
-    review = review_photometry_associations(session_factory, target.sdbid)
-    assert len(review) == 1
-    assert review[0].provider == "allwise"
-    assert review[0].band == "WISE3P4"
-    assert review[0].current_decision_scope is None
-
-    first = set_photometry_association_decision(
-        session_factory,
-        target.sdbid,
-        provider="allwise",
-        source_id="J004000.00-200000.0",
-        band="WISE3P4",
-        scope="blended",
-        actor="grant",
-        reason="WISE beam includes both components",
-    )
-    second = set_photometry_association_decision(
-        session_factory,
-        target.sdbid,
-        provider="allwise",
-        source_id="J004000.00-200000.0",
-        band="WISE3P4",
-        scope="component",
-        actor="grant",
-        reason="resolved on inspection",
-    )
-
-    decisions = list_photometry_association_decisions(session_factory, target.sdbid)
-    review = review_photometry_associations(session_factory, target.sdbid)
-
-    assert [value.id for value in decisions] == [first.id, second.id]
-    assert review[0].current_decision_scope == "component"
-    assert review[0].current_decision_id == second.id
-    assert review[0].current_decision_reason == "resolved on inspection"
-
-
-def test_photometry_review_queue_reports_only_rows_needing_attention(session_factory):
+def test_photometry_review_queue_reports_placeholder_for_clean_targets(session_factory):
     clean = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    risky = IdentityService(session_factory).add(AddRequest(ra_deg=11, dec_deg=-20))
     CatalogService(session_factory, {
         "allwise": FakeCatalog([candidate(
             "clean-wise", measurements=[measurement("WISE3P4", 8.1)]
         )], name="allwise", release="fake-allwise"),
     }).refresh(clean.sdbid, "allwise")
-    CatalogService(session_factory, {
-        "allwise": FakeCatalog([candidate(
-            "risky-wise", ra=11, dec=-20, measurements=[measurement("WISE3P4", 8.2)]
-        )], name="allwise", release="fake-allwise"),
-    }).refresh(risky.sdbid, "allwise")
-    set_photometry_association_decision(
-        session_factory, risky.sdbid, provider="allwise", source_id="risky-wise",
-        band="WISE3P4", scope="reject", actor="grant", reason="wrong component",
-    )
 
-    rows = photometry_review_queue(session_factory, [clean.sdbid, risky.sdbid])
+    rows = photometry_review_queue(session_factory, [clean.sdbid])
 
-    assert [row["sdbid"] for row in rows] == [risky.sdbid, clean.sdbid]
-    assert rows[0]["signal"] == "association rejected; export excludes"
-    assert rows[0]["priority"] == "medium"
-    assert rows[0]["current_decision"] == "reject"
-    assert rows[1]["signal"] == "no photometry review item"
-    assert rows[1]["priority"] == "none"
+    assert [row["sdbid"] for row in rows] == [clean.sdbid]
+    assert rows[0]["signal"] == "no photometry review item"
+    assert rows[0]["priority"] == "none"
+    assert "current_decision" not in rows[0]

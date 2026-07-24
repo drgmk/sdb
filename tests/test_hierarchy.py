@@ -7,7 +7,7 @@ import math
 
 import pytest
 from astropy.table import Table
-from sqlalchemy import inspect, select
+from sqlalchemy import func, inspect, select
 
 from sdb_identity.database import make_engine
 from sdb_identity.dirty import pending_export_targets
@@ -18,8 +18,6 @@ from sdb_identity.models import (
     CatalogDetection,
     CatalogRun,
     ExternalIdentifier,
-    HierarchyGraphEdge,
-    HierarchyGraphOverride,
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
@@ -27,8 +25,9 @@ from sdb_identity.models import (
     MatchCandidate,
     NormalizedMeasurement,
     RawCatalogRow,
+    StructuralEdge,
+    StructuralEdgeAction,
     Submission,
-    TargetRelationship,
     TargetSystem,
     utcnow,
 )
@@ -59,13 +58,12 @@ def test_hierarchy_schema_created(db_path):
     for table in (
         "hierarchy_sources",
         "hierarchy_records",
-        "hierarchy_graph_edges",
-        "hierarchy_graph_overrides",
+        "structural_edges",
+        "structural_edge_actions",
         "hierarchy_match_candidates",
         "hierarchy_match_actions",
         "target_systems",
         "target_system_members",
-        "target_relationships",
         "measurement_target_associations",
     ):
         assert table in inspector.get_table_names()
@@ -772,10 +770,10 @@ def test_hierarchy_prunes_duplicate_sources_and_dependent_rows(session_factory, 
             reason="test duplicate",
         )
         session.add(duplicate_candidate)
-        duplicate_edge = HierarchyGraphEdge(
+        duplicate_edge = StructuralEdge(
             source_id=duplicate.id,
             record_id=duplicate_record.id,
-            provider="wds",
+            source="wds",
             native_id="00057+4549",
             relation_type="component",
             structural_role="structural",
@@ -792,10 +790,9 @@ def test_hierarchy_prunes_duplicate_sources_and_dependent_rows(session_factory, 
             actor="test",
             reason="test duplicate action",
         ))
-        session.add(HierarchyGraphOverride(
+        session.add(StructuralEdgeAction(
             edge_id=duplicate_edge.id,
-            source_id=duplicate.id,
-            provider="wds",
+            source="wds",
             native_id="00057+4549",
             action="deactivate",
             actor="test",
@@ -1147,7 +1144,7 @@ def test_hierarchy_derives_wds_graph_edges(session_factory, tmp_path):
     assert group_edge.start_ra_deg != pytest.approx(ab_edge.start_ra_deg)
     assert group_edge.geometry_status == "usable"
     with session_factory() as session:
-        assert session.query(HierarchyGraphEdge).count() == 4
+        assert session.query(StructuralEdge).count() == 4
 
 
 def test_hierarchy_graph_overrides_are_append_only_and_effective(session_factory, tmp_path):
@@ -1188,7 +1185,7 @@ def test_hierarchy_graph_overrides_are_append_only_and_effective(session_factory
     assert rebuilt.structural_role == "structural"
     assert rebuilt.override_id == result.override_id
     with session_factory() as session:
-        assert session.query(HierarchyGraphOverride).count() == 1
+        assert session.query(StructuralEdgeAction).count() == 1
 
 
 def test_hierarchy_wds_non_a_pairs_are_structural_when_unambiguous(session_factory, tmp_path):
@@ -2267,7 +2264,7 @@ def test_hierarchy_accepts_candidate_with_system_and_relationship(session_factor
     with session_factory() as session:
         accepted = session.get(HierarchyMatchCandidate, candidate.id)
         action = session.scalar(select(HierarchyMatchAction))
-        relationship = session.get(TargetRelationship, result.relationship_id)
+        relationship = session.get(StructuralEdge, result.relationship_id)
         system = session.get(TargetSystem, result.system_id)
 
     assert result.new_status == "accepted"
@@ -2276,8 +2273,9 @@ def test_hierarchy_accepts_candidate_with_system_and_relationship(session_factor
     assert action.previous_status == "candidate"
     assert action.relationship_id == relationship.id
     assert relationship.source == "wds"
-    assert relationship.source_record_id is not None
-    assert relationship.primary_target_id == target.target_id
+    assert relationship.status == "accepted"
+    assert relationship.record_id is not None
+    assert relationship.endpoint_a_target_id == target.target_id
     assert relationship.separation_arcsec == 2.345
     assert relationship.pa_deg == 134
     assert relationship.relation_epoch == 2024
@@ -2285,6 +2283,65 @@ def test_hierarchy_accepts_candidate_with_system_and_relationship(session_factor
     assert {item.sdbid for item, _count, _created in pending_export_targets(session_factory)} == {
         target.sdbid,
     }
+
+
+def test_structural_edges_discriminate_derived_from_accepted(session_factory, tmp_path):
+    """One structural_edges table holds both derived graph edges and accepted
+    relationships; graph readers must see only the former and relationship
+    readers only the latter, and re-deriving must leave accepted rows alone."""
+    target = IdentityService(session_factory).add(AddRequest(ra_deg=1.425, dec_deg=45.8166667))
+    path = tmp_path / "wds.csv"
+    path.write_text(
+        "WDS,Discov,Comp,RAJ2000,DEJ2000,Obs2,PA2,Sep2\n"
+        "00057+4549,STF3050,AB,1.425,45.8166667,2024,134,2.345\n",
+        encoding="utf-8",
+    )
+    service = HierarchyService(session_factory)
+    imported = service.import_snapshot("wds", path, release="test-release")
+    service.match_records("wds", source_id=imported.source_id, radius_arcsec=10.0)
+    service.derive_graph("wds", source_id=imported.source_id)
+    with session_factory() as session:
+        candidate = session.scalar(select(HierarchyMatchCandidate))
+
+    derived_before = service.graph_edges(
+        provider="wds", native_id="00057+4549", source_id=imported.source_id
+    )
+    assert derived_before
+    assert all(row.status in ("derived", "stale", "rejected") for row in derived_before)
+
+    result = service.accept_match(
+        candidate.id, actor="tester", reason="physical", relationship_type="pair"
+    )
+
+    # Graph readers ignore the accepted relationship even though it shares the
+    # same source/record; the derived rows are unchanged.
+    derived_after = service.graph_edges(
+        provider="wds", native_id="00057+4549", source_id=imported.source_id
+    )
+    assert {row.edge_id for row in derived_after} == {row.edge_id for row in derived_before}
+    assert result.relationship_id not in {row.edge_id for row in derived_after}
+
+    # Relationship readers see only the accepted row, none of the derived edges.
+    relationships = service.status(target.sdbid).relationships
+    assert len(relationships) == 1
+    assert relationships[0].id == result.relationship_id
+    assert relationships[0].status == "accepted"
+
+    # Re-deriving must not touch the accepted row.
+    with session_factory() as session:
+        accepted_before = session.get(StructuralEdge, result.relationship_id)
+        accepted_status_before = accepted_before.status
+    service.derive_graph("wds", source_id=imported.source_id)
+    with session_factory() as session:
+        accepted_after = session.get(StructuralEdge, result.relationship_id)
+        graph_count = session.scalar(
+            select(func.count(StructuralEdge.id)).where(
+                StructuralEdge.status.in_(("derived", "stale", "rejected"))
+            )
+        )
+    assert accepted_after is not None
+    assert accepted_after.status == accepted_status_before == "accepted"
+    assert graph_count == len(derived_before)
 
 
 def test_hierarchy_rejects_candidate_with_audit(session_factory, tmp_path):

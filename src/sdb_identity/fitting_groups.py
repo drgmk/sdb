@@ -11,7 +11,6 @@ from .dirty import find_target
 from .models import (
     MeasurementTargetAssociation,
     NormalizedMeasurement,
-    PhotometryAssociationDecision,
     PhotometryOverride,
     Target,
     TargetLifecycleAction,
@@ -63,9 +62,6 @@ def fitting_group_report(
         overrides = _overrides(
             session, {row.target_id for row in measurements.values()}
         )
-        decisions = _decisions(
-            session, {row.target_id for row in measurements.values()}
-        )
 
     target_rows = {}
     model_target_ids = set()
@@ -111,7 +107,6 @@ def fitting_group_report(
         excluded, exclusion_basis = _effective_exclusion(
             measurement,
             overrides=overrides,
-            decisions=decisions,
         )
         fit_enabled = not excluded and bool(active_contributor_ids)
         flags = []
@@ -499,26 +494,10 @@ def _overrides(
     return result
 
 
-def _decisions(
-    session: Session, target_ids: set[int]
-) -> dict[int, PhotometryAssociationDecision]:
-    result = {}
-    for chunk in _chunks(target_ids):
-        for row in session.scalars(
-            select(PhotometryAssociationDecision)
-            .where(PhotometryAssociationDecision.target_id.in_(chunk))
-            .where(PhotometryAssociationDecision.measurement_id.is_not(None))
-            .order_by(PhotometryAssociationDecision.id)
-        ):
-            result[int(row.measurement_id)] = row
-    return result
-
-
 def _effective_exclusion(
     measurement: NormalizedMeasurement,
     *,
     overrides: dict[tuple[int, str, str], PhotometryOverride],
-    decisions: dict[int, PhotometryAssociationDecision],
 ) -> tuple[bool, str]:
     override = overrides.get((
         measurement.target_id, measurement.provider.lower(), measurement.band.upper()
@@ -527,9 +506,6 @@ def _effective_exclusion(
     basis = "provider_excluded" if measurement.excluded else "included"
     if override is not None:
         basis = "manual_exclude_override" if override.excluded else "manual_include_override"
-    decision = decisions.get(measurement.id)
-    if decision is not None and decision.scope == "reject":
-        return True, "association_reject"
     return excluded, basis
 
 

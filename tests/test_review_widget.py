@@ -11,7 +11,6 @@ from sdb_identity.catalogs import CatalogAttributeValue
 from sdb_identity.catalogs import CatalogCandidate
 from sdb_identity.catalogs import MeasurementValue
 from sdb_identity.hierarchy import HierarchyService
-from sdb_identity.photometry import set_photometry_association_decision
 from sdb_identity.models import (
     AstrometricSolution,
     ExternalIdentifier,
@@ -489,22 +488,10 @@ def test_review_sky_view_includes_photometry_for_accepted_catalog_row(session_fa
         ]),
     }).refresh(target.sdbid, "2mass")
 
-    set_photometry_association_decision(
-        session_factory,
-        target.sdbid,
-        provider="2mass",
-        source_id="2mass-a",
-        band="2MJ",
-        scope="blended",
-        actor="tester",
-        reason="nearby binary component",
-    )
-
     view = build_review_sky_view(session_factory, target.sdbid)
     point = next(point for point in view.points if point.provider == "2mass" and point.source_id == "2mass-a")
 
     assert any(value.startswith("2MJ=") for value in point.photometry)
-    assert "association decision (2MJ)=blended; nearby binary component" in point.attributes
     assert "nearest catalog source (prox)=1.70 arcsec" in point.attributes
     assert not any("(_r)" in value for value in point.attributes)
     html = render_review_sky_html(view)

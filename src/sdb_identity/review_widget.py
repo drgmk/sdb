@@ -17,6 +17,7 @@ from .dirty import find_target
 from .hierarchy import (
     HierarchyService,
     WDS_UNUSABLE_SEPARATION_ARCSEC,
+    _GRAPH_EDGE_STATUSES,
     _graph_edge_row,
     _latest_graph_overrides,
     hierarchy_record_positions,
@@ -25,14 +26,13 @@ from .models import (
     AstrometricSolution,
     CatalogAttribute,
     CatalogRun,
-    HierarchyGraphEdge,
     HierarchyMatchCandidate,
     HierarchyRecord,
     MatchCandidate,
     NormalizedMeasurement,
-    PhotometryAssociationDecision,
     RawCatalogRow,
     SimbadMetadata,
+    StructuralEdge,
     Submission,
     Target,
 )
@@ -1410,7 +1410,6 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
             beams = _measurement_beams(session, row.id)
             attributes = (
                 *_catalog_payload_summaries(run.provider, row.payload_json),
-                *_photometry_decision_summaries(session, target.id, run.provider, row),
                 *_attribute_summaries(session, row.id),
             )
             native_pm = _attribute_pm(session, row.id, provider=run.provider)
@@ -1493,14 +1492,15 @@ def _hierarchy_points(
     graph_edges_by_record: dict[int, list] = {}
     if record_ids:
         graph_edges = tuple(session.scalars(
-            select(HierarchyGraphEdge)
-            .where(HierarchyGraphEdge.record_id.in_(record_ids))
+            select(StructuralEdge)
+            .where(StructuralEdge.record_id.in_(record_ids))
+            .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
             .order_by(
-                HierarchyGraphEdge.provider,
-                HierarchyGraphEdge.native_id,
-                HierarchyGraphEdge.reference_label,
-                HierarchyGraphEdge.component_label,
-                HierarchyGraphEdge.id,
+                StructuralEdge.source,
+                StructuralEdge.native_id,
+                StructuralEdge.reference_label,
+                StructuralEdge.component_label,
+                StructuralEdge.id,
             )
         ))
         graph_overrides = _latest_graph_overrides(session, list(graph_edges))
@@ -2183,37 +2183,6 @@ def _catalog_payload_summaries(
     return tuple(values)
 
 
-def _photometry_decision_summaries(
-    session: Session,
-    target_id: int,
-    provider: str,
-    raw_row: RawCatalogRow,
-    *,
-    limit: int = 4,
-) -> tuple[str, ...]:
-    decisions = list(session.scalars(
-        select(PhotometryAssociationDecision)
-        .where(PhotometryAssociationDecision.target_id == target_id)
-        .where(PhotometryAssociationDecision.provider == provider)
-        .where(PhotometryAssociationDecision.source_id == raw_row.source_id)
-        .order_by(PhotometryAssociationDecision.id)
-    ))
-    current: dict[tuple[str | None, int | None], PhotometryAssociationDecision] = {}
-    for decision in decisions:
-        if decision.raw_row_id not in {None, raw_row.id}:
-            continue
-        current[(decision.band, decision.measurement_id)] = decision
-    if not current:
-        return ()
-    summaries = []
-    for decision in current.values():
-        label = decision.band or f"raw row {raw_row.id}"
-        summaries.append(
-            f"association decision ({label})={decision.scope}; {decision.reason}"
-        )
-        if len(summaries) >= limit:
-            break
-    return tuple(summaries)
 
 
 def _attribute_summaries(session: Session, raw_row_id: int, *, limit: int = 8) -> tuple[str, ...]:

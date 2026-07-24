@@ -90,13 +90,29 @@ def pending_export_targets(
         return list(grouped.values())
 
 
-def find_target(session: Session, reference: str | int) -> Target | None:
+def resolve_targets(session: Session, reference: str | int) -> list[Target]:
+    """Resolve a reference to every matching target.
+
+    A numeric id or an sdbid resolves to at most one target. A name/alias is
+    matched against external_identifiers by normalized value and may resolve to
+    several targets (e.g. a shared system alias such as "HD 26965" carried by a
+    primary and its components). Callers decide how to handle more than one.
+    """
     if isinstance(reference, int) or str(reference).isdigit():
-        return session.get(Target, int(reference))
+        target = session.get(Target, int(reference))
+        return [target] if target is not None else []
     target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
     if target is not None:
-        return target
-    identifier = session.scalar(select(ExternalIdentifier).where(
-        ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-    ).limit(1))
-    return None if identifier is None else session.get(Target, identifier.target_id)
+        return [target]
+    target_ids = session.scalars(
+        select(ExternalIdentifier.target_id)
+        .where(ExternalIdentifier.normalized_value == normalize_identifier(str(reference)))
+        .distinct()
+    ).all()
+    targets = (session.get(Target, tid) for tid in target_ids)
+    return sorted((t for t in targets if t is not None), key=lambda t: t.sdbid)
+
+
+def find_target(session: Session, reference: str | int) -> Target | None:
+    targets = resolve_targets(session, reference)
+    return targets[0] if targets else None
