@@ -30,7 +30,7 @@ def test_cli_init_add_and_status(tmp_path, capsys):
     assert status["hierarchy"]["classification"] == "single_or_no_known_hierarchy"
     assert status["hierarchy"]["matched_systems"] == 0
 
-    assert main(["--database", str(database), "--offline", "hierarchy", "target", added["sdbid"]]) == 0
+    assert main(["--database", str(database), "--offline", "hierarchy", "status", added["sdbid"], "--scope", "provider"]) == 0
     hierarchy = json.loads(capsys.readouterr().out)
     assert hierarchy["target"]["sdbid"] == added["sdbid"]
     assert hierarchy["classification"] == "single_or_no_known_hierarchy"
@@ -46,7 +46,7 @@ def test_cli_hierarchy_photometry_review_lists_targets(tmp_path, capsys):
     added = json.loads(capsys.readouterr().out)
 
     assert main([
-        "--database", str(database), "hierarchy", "photometry-review", "--all"
+        "--database", str(database), "hierarchy", "review-queue", "--view", "blend", "--all"
     ]) == 0
     table = capsys.readouterr().out
 
@@ -57,7 +57,7 @@ def test_cli_hierarchy_photometry_review_lists_targets(tmp_path, capsys):
     assert "single_or_unknown" in table
 
     assert main([
-        "--database", str(database), "hierarchy", "photometry-review",
+        "--database", str(database), "hierarchy", "review-queue", "--view", "blend",
         "--all", "--format", "jsonl",
     ]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -67,7 +67,7 @@ def test_cli_hierarchy_photometry_review_lists_targets(tmp_path, capsys):
     assert rows[0]["measurement_count"] == 0
 
     assert main([
-        "--database", str(database), "hierarchy", "photometry-review",
+        "--database", str(database), "hierarchy", "review-queue", "--view", "blend",
     ]) == 2
     assert "provide exactly one" in capsys.readouterr().err
 

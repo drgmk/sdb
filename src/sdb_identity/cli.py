@@ -202,12 +202,9 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_relation.add_argument("--status", default="current")
     hierarchy_relation.add_argument("--actor")
     hierarchy_relation.add_argument("--reason", default="")
-    hierarchy_status = _add_parser(hierarchy_commands, "status", "Show hierarchy context for a target.", "Reports systems, memberships, and relationships involving the target. Use this before deciding whether low-resolution photometry is component-level, blended, or system-level.")
+    hierarchy_status = _add_parser(hierarchy_commands, "status", "Show hierarchy context for a target.", "Reports hierarchy context for one target. --scope basic (default) reports systems, memberships, and relationships; --scope provider adds matched WDS/CCDM systems, derived component geometry, and graph diagnostics; --scope system adds nearby SDB targets, identity cross-candidates, and current photometry for a full read-only review report.")
     hierarchy_status.add_argument("target")
-    hierarchy_target = _add_parser(hierarchy_commands, "target", "Show provider-derived hierarchy context for a target.", "Reports matched WDS/CCDM systems, nearest derived component geometry, nearby components, and relevant graph diagnostics for one target. This is more detailed than the compact hierarchy section in `sdb status`.")
-    hierarchy_target.add_argument("target")
-    hierarchy_system_context = _add_parser(hierarchy_commands, "system-context", "Show system-level review context for a target.", "Collects the target, nearby SDB targets, provider hierarchy components, identity cross-candidates, and current photometry into one read-only report. Use this before deciding whether components or a blended system should be exported.")
-    hierarchy_system_context.add_argument("target")
+    hierarchy_status.add_argument("--scope", choices=["basic", "provider", "system"], default="basic")
     hierarchy_relatives = _add_parser(hierarchy_commands, "relatives", "Preview immediate SIMBAD relatives and whether they should become targets.", "Classifies current parent/child rows as already imported, importable stellar/substellar structure, contextual-only, or review-required. This is read-only and never follows relationships recursively.")
     hierarchy_relatives.add_argument("target")
     hierarchy_import_relatives = _add_parser(hierarchy_commands, "import-relatives", "Import immediate stellar SIMBAD relatives and reconcile one target system.", "Imports only current immediate stellar/substellar parents and children, then records component membership, lifecycle roles, and SIMBAD parent/child evidence. Clusters, moving groups, planets, disks, unknown types, and relatives of newly added targets are not expanded.")
@@ -223,46 +220,21 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_set_target_state.add_argument("--superseded-by")
     hierarchy_set_target_state.add_argument("--actor", required=True)
     hierarchy_set_target_state.add_argument("--reason", required=True)
-    hierarchy_photometry_review = _add_parser(hierarchy_commands, "photometry-review", "List hierarchy/blend photometry context for targets.", "Prints a compact review table by default, with JSON/JSONL available for scripts. Select exactly one target set with TARGET, --sample, or --all.")
-    hierarchy_photometry_review.add_argument("target", nargs="?")
-    hierarchy_photometry_review.add_argument("--sample")
-    hierarchy_photometry_review.add_argument("--all", action="store_true", dest="review_all")
-    hierarchy_photometry_review.add_argument("--provider")
-    hierarchy_photometry_review.add_argument("--blended-only", action="store_true")
-    hierarchy_photometry_review.add_argument("--review-required", action="store_true")
-    hierarchy_photometry_review.add_argument(
-        "--format",
-        choices=["table", "jsonl", "json"],
-        default="table",
-        help="output format; table is intended for interactive review",
-    )
-    hierarchy_review_queue = _add_parser(hierarchy_commands, "review-queue", "Prioritize hierarchy targets needing review.", "Combines hierarchy candidates, accepted decisions, diagnostics, and photometry blend context into a conservative review queue. Select exactly one target set with TARGET, --sample, or --all.")
+    hierarchy_review_queue = _add_parser(hierarchy_commands, "review-queue", "Prioritize hierarchy targets needing review.", "Combines hierarchy candidates, accepted decisions, diagnostics, and photometry blend context for a target set. --view priority (default) ranks targets by review priority; --view blend lists hierarchy/blend photometry context per band. Select exactly one target set with TARGET, --sample, or --all.")
     hierarchy_review_queue.add_argument("target", nargs="?")
+    hierarchy_review_queue.add_argument("--view", choices=["priority", "blend"], default="priority")
     hierarchy_review_queue.add_argument("--sample")
     hierarchy_review_queue.add_argument("--all", action="store_true", dest="review_all")
     hierarchy_review_queue.add_argument("--provider")
-    hierarchy_review_queue.add_argument("--min-priority", choices=["none", "low", "medium", "high", "highest"])
+    hierarchy_review_queue.add_argument("--min-priority", choices=["none", "low", "medium", "high", "highest"], help="priority view only")
+    hierarchy_review_queue.add_argument("--blended-only", action="store_true", help="blend view only")
+    hierarchy_review_queue.add_argument("--review-required", action="store_true", help="blend view only")
     hierarchy_review_queue.add_argument(
         "--format",
         choices=["table", "jsonl", "json"],
         default="table",
         help="output format; table is intended for interactive review",
     )
-    hierarchy_import = _add_parser(hierarchy_commands, "import", "Import a WDS or CCDM hierarchy snapshot file.", "Loads a local full-catalog snapshot into hierarchy source/record tables. Fixed-width WDS-like rows and delimited files with recognizable column names are supported; matching to targets is a later review step.")
-    hierarchy_import.add_argument("provider", choices=["wds", "ccdm"])
-    hierarchy_import.add_argument("file")
-    hierarchy_import.add_argument("--release", required=True)
-    hierarchy_import.add_argument("--note")
-    hierarchy_fetch = _add_parser(hierarchy_commands, "fetch", "Fetch WDS or CCDM from VizieR into hierarchy records.", "Downloads or reuses the cached full VizieR catalog (WDS B/wds or CCDM I/274), stores source/version metadata, and imports parseable rows. Matching to targets remains a separate review step.")
-    hierarchy_fetch.add_argument("provider", choices=["wds", "ccdm"])
-    hierarchy_fetch.add_argument("--release")
-    hierarchy_fetch.add_argument("--note")
-    hierarchy_fetch.add_argument("--refresh-cache", action="store_true", help="force a fresh VizieR download and replace the current cache entry")
-    hierarchy_fetch.add_argument("--no-cache", action="store_true", help="download directly without reading or writing the snapshot cache")
-    hierarchy_sources = _add_parser(hierarchy_commands, "sources", "List imported hierarchy source snapshots.", "Shows WDS, CCDM, SIMBAD-derived, or manual hierarchy source snapshots currently stored in the main database.")
-    hierarchy_sources.add_argument("--provider", choices=["wds", "ccdm", "simbad", "manual"])
-    hierarchy_prune_sources = _add_parser(hierarchy_commands, "prune-duplicate-sources", "Remove duplicate imported hierarchy snapshots.", "Keeps the earliest source for each provider/checksum pair and deletes duplicate source copies plus their derived candidates and graph edges. Use this after interrupted or repeated rehearsal imports.")
-    hierarchy_prune_sources.add_argument("--provider", choices=["wds", "ccdm", "simbad", "manual"])
     hierarchy_summary = _add_parser(hierarchy_commands, "summary", "Summarize hierarchy sources and match candidates.", "Reports source record counts, candidate counts by status and method, and matched/ambiguous record counts. Use this after WDS/CCDM fetch and match to assess review workload.")
     hierarchy_summary.add_argument("--provider", choices=["wds", "ccdm", "simbad", "manual"])
     hierarchy_summary.add_argument("--source-id", type=int)
@@ -270,34 +242,51 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_match.add_argument("provider", choices=["wds", "ccdm"])
     hierarchy_match.add_argument("--source-id", type=int)
     hierarchy_match.add_argument("--radius", type=float, default=30.0)
-    hierarchy_review = _add_parser(hierarchy_commands, "review", "List hierarchy match candidates.", "Prints one JSON row per candidate, ordered for review by catalog record and score. Candidate rows explain whether the evidence came from SIMBAD-style identifiers, position, or both.")
-    hierarchy_review.add_argument("--provider", choices=["wds", "ccdm"])
-    hierarchy_derive_graph = _add_parser(hierarchy_commands, "derive-graph", "Derive provider component graph edges.", "Builds reviewable hierarchy graph edges from imported provider rows. For WDS this normalizes pair labels such as AB, Aa,Ab, and AB,C while keeping the result separate from target-level relationships.")
-    hierarchy_derive_graph.add_argument("provider", choices=["wds"])
-    hierarchy_derive_graph.add_argument("--source-id", type=int)
-    hierarchy_graph = _add_parser(hierarchy_commands, "graph", "List derived hierarchy graph edges.", "Shows effective provider graph edges after applying append-only manual overrides. The argument may be a WDS native ID or, with --target, an SDB target reference.")
-    hierarchy_graph.add_argument("reference")
-    hierarchy_graph.add_argument("--provider", choices=["wds"])
-    hierarchy_graph.add_argument("--source-id", type=int)
-    hierarchy_graph.add_argument("--target", action="store_true", help="interpret reference as a target rather than a provider native id")
-    hierarchy_graph_diagnostics = _add_parser(hierarchy_commands, "graph-diagnostics", "List hierarchy graph diagnostics.", "Groups effective graph edges by provider native ID and reports review-level issues such as missing structural edges, duplicate parents, and structural edges without usable geometry. Disconnected but usable structural groups, such as AB plus CD, are retained as informational diagnostics.")
+    hierarchy_candidates = _add_parser(hierarchy_commands, "candidates", "List hierarchy match candidates.", "Prints one JSON row per candidate, ordered for review by catalog record and score. Candidate rows explain whether the evidence came from SIMBAD-style identifiers, position, or both.")
+    hierarchy_candidates.add_argument("--provider", choices=["wds", "ccdm"])
+
+    hierarchy_source = _add_parser(hierarchy_commands, "source", "Manage imported hierarchy snapshots.", "Fetch/import full WDS or CCDM catalog snapshots, list stored sources, and prune duplicates.")
+    hierarchy_source_commands = hierarchy_source.add_subparsers(dest="source_command", required=True)
+    hierarchy_source_fetch = _add_parser(hierarchy_source_commands, "fetch", "Fetch WDS or CCDM into hierarchy records.", "By default downloads or reuses the cached full VizieR catalog (WDS B/wds or CCDM I/274). With --file, loads a local full-catalog snapshot instead (fixed-width WDS-like rows and delimited files with recognizable column names are supported). Either way stores source/version metadata; matching to targets remains a separate review step.")
+    hierarchy_source_fetch.add_argument("provider", choices=["wds", "ccdm"])
+    hierarchy_source_fetch.add_argument("--file", help="load a local snapshot file instead of fetching from VizieR (requires --release)")
+    hierarchy_source_fetch.add_argument("--release")
+    hierarchy_source_fetch.add_argument("--note")
+    hierarchy_source_fetch.add_argument("--refresh-cache", action="store_true", help="force a fresh VizieR download and replace the current cache entry")
+    hierarchy_source_fetch.add_argument("--no-cache", action="store_true", help="download directly without reading or writing the snapshot cache")
+    hierarchy_source_list = _add_parser(hierarchy_source_commands, "list", "List imported hierarchy source snapshots.", "Shows WDS, CCDM, SIMBAD-derived, or manual hierarchy source snapshots currently stored in the main database.")
+    hierarchy_source_list.add_argument("--provider", choices=["wds", "ccdm", "simbad", "manual"])
+    hierarchy_source_prune = _add_parser(hierarchy_source_commands, "prune", "Remove duplicate imported hierarchy snapshots.", "Keeps the earliest source for each provider/checksum pair and deletes duplicate source copies plus their derived candidates and graph edges. Use this after interrupted or repeated rehearsal imports.")
+    hierarchy_source_prune.add_argument("--provider", choices=["wds", "ccdm", "simbad", "manual"])
+
+    hierarchy_graph = _add_parser(hierarchy_commands, "graph", "Derive, list, diagnose, and override provider graph edges.", "The WDS/CCDM component graph is a reviewable structural layer kept separate from target-level relationships.")
+    hierarchy_graph_commands = hierarchy_graph.add_subparsers(dest="graph_command", required=True)
+    hierarchy_graph_derive = _add_parser(hierarchy_graph_commands, "derive", "Derive provider component graph edges.", "Builds reviewable hierarchy graph edges from imported provider rows. For WDS this normalizes pair labels such as AB, Aa,Ab, and AB,C while keeping the result separate from target-level relationships.")
+    hierarchy_graph_derive.add_argument("provider", choices=["wds"])
+    hierarchy_graph_derive.add_argument("--source-id", type=int)
+    hierarchy_graph_list = _add_parser(hierarchy_graph_commands, "list", "List derived hierarchy graph edges.", "Shows effective provider graph edges after applying append-only manual overrides. The argument may be a WDS native ID or, with --target, an SDB target reference.")
+    hierarchy_graph_list.add_argument("reference")
+    hierarchy_graph_list.add_argument("--provider", choices=["wds"])
+    hierarchy_graph_list.add_argument("--source-id", type=int)
+    hierarchy_graph_list.add_argument("--target", action="store_true", help="interpret reference as a target rather than a provider native id")
+    hierarchy_graph_diagnostics = _add_parser(hierarchy_graph_commands, "diagnostics", "List hierarchy graph diagnostics.", "Groups effective graph edges by provider native ID and reports review-level issues such as missing structural edges, duplicate parents, and structural edges without usable geometry. Disconnected but usable structural groups, such as AB plus CD, are retained as informational diagnostics.")
     hierarchy_graph_diagnostics.add_argument("--provider", choices=["wds"])
     hierarchy_graph_diagnostics.add_argument("--source-id", type=int)
     hierarchy_graph_diagnostics.add_argument("--limit", type=int, default=100, help="maximum rows to print; 0 prints all rows")
     hierarchy_graph_diagnostics.add_argument("--severity", choices=["review", "info"])
     hierarchy_graph_diagnostics.add_argument("--issue")
     hierarchy_graph_diagnostics.add_argument("--summary", action="store_true", help="print counts grouped by severity and issue")
-    hierarchy_override = _add_parser(hierarchy_commands, "override-edge", "Override one derived hierarchy graph edge.", "Adds an append-only audit record changing the effective status or relation type of a provider graph edge. This does not edit imported provider rows.")
-    hierarchy_override.add_argument("provider", choices=["wds"])
-    hierarchy_override.add_argument("native_id")
-    hierarchy_override.add_argument("--from", required=True, dest="reference_label")
-    hierarchy_override.add_argument("--to", required=True, dest="component_label")
-    hierarchy_override.add_argument("--source-id", type=int)
-    hierarchy_override.add_argument("--status")
-    hierarchy_override.add_argument("--type", dest="relation_type")
-    hierarchy_override.add_argument("--role", choices=["structural", "non_structural"], dest="structural_role")
-    hierarchy_override.add_argument("--actor", required=True)
-    hierarchy_override.add_argument("--reason", required=True)
+    hierarchy_graph_override = _add_parser(hierarchy_graph_commands, "override", "Override one derived hierarchy graph edge.", "Adds an append-only audit record changing the effective status or relation type of a provider graph edge. This does not edit imported provider rows.")
+    hierarchy_graph_override.add_argument("provider", choices=["wds"])
+    hierarchy_graph_override.add_argument("native_id")
+    hierarchy_graph_override.add_argument("--from", required=True, dest="reference_label")
+    hierarchy_graph_override.add_argument("--to", required=True, dest="component_label")
+    hierarchy_graph_override.add_argument("--source-id", type=int)
+    hierarchy_graph_override.add_argument("--status")
+    hierarchy_graph_override.add_argument("--type", dest="relation_type")
+    hierarchy_graph_override.add_argument("--role", choices=["structural", "non_structural"], dest="structural_role")
+    hierarchy_graph_override.add_argument("--actor", required=True)
+    hierarchy_graph_override.add_argument("--reason", required=True)
     hierarchy_accept = _add_parser(hierarchy_commands, "accept-candidate", "Accept a hierarchy match candidate.", "Marks one WDS/CCDM candidate as accepted, writes an audit action, and creates a source-backed relationship evidence row. If --system is supplied, the target is also added to that system.")
     hierarchy_accept.add_argument("candidate_id", type=int)
     hierarchy_accept.add_argument("--actor", required=True)
@@ -1353,38 +1342,41 @@ def main(argv: list[str] | None = None) -> int:
                     reason=args.reason,
                 )
                 print(_format_json(args, value.as_dict(), sort_keys=True))
-            elif args.hierarchy_command == "import":
-                value = service.import_snapshot(
-                    args.provider,
-                    args.file,
-                    release=args.release,
-                    note=args.note,
-                )
-                print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "fetch":
-                value = service.fetch_snapshot(
-                    args.provider,
-                    cache_path=None if args.no_cache else args.cache_database,
-                    refresh_cache=args.refresh_cache,
-                    release=args.release,
-                    note=args.note,
-                )
-                print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "sources":
-                for value in service.sources(args.provider):
-                    print(_format_json(args, {
-                        "source_id": value.id,
-                        "provider": value.provider,
-                        "release": value.release,
-                        "source_file": value.source_file,
-                        "checksum": value.checksum,
-                        "fetched_at": None if value.fetched_at is None else value.fetched_at.isoformat(),
-                        "imported_at": value.imported_at.isoformat(),
-                        "note": value.note,
-                    }, sort_keys=True))
-            elif args.hierarchy_command == "prune-duplicate-sources":
-                value = service.prune_duplicate_sources(args.provider)
-                print(_format_json(args, asdict(value), sort_keys=True))
+            elif args.hierarchy_command == "source":
+                if args.source_command == "fetch":
+                    if args.file is not None:
+                        if args.release is None:
+                            raise ValueError("--release is required when importing from --file")
+                        value = service.import_snapshot(
+                            args.provider,
+                            args.file,
+                            release=args.release,
+                            note=args.note,
+                        )
+                    else:
+                        value = service.fetch_snapshot(
+                            args.provider,
+                            cache_path=None if args.no_cache else args.cache_database,
+                            refresh_cache=args.refresh_cache,
+                            release=args.release,
+                            note=args.note,
+                        )
+                    print(_format_json(args, asdict(value), sort_keys=True))
+                elif args.source_command == "list":
+                    for value in service.sources(args.provider):
+                        print(_format_json(args, {
+                            "source_id": value.id,
+                            "provider": value.provider,
+                            "release": value.release,
+                            "source_file": value.source_file,
+                            "checksum": value.checksum,
+                            "fetched_at": None if value.fetched_at is None else value.fetched_at.isoformat(),
+                            "imported_at": value.imported_at.isoformat(),
+                            "note": value.note,
+                        }, sort_keys=True))
+                else:  # prune
+                    value = service.prune_duplicate_sources(args.provider)
+                    print(_format_json(args, asdict(value), sort_keys=True))
             elif args.hierarchy_command == "summary":
                 print(_format_json(args, service.summary(args.provider, source_id=args.source_id), sort_keys=True))
             elif args.hierarchy_command == "match":
@@ -1394,44 +1386,9 @@ def main(argv: list[str] | None = None) -> int:
                     radius_arcsec=args.radius,
                 )
                 print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "review":
+            elif args.hierarchy_command == "candidates":
                 for value in service.review_matches(args.provider):
                     print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "photometry-review":
-                selectors = sum((
-                    args.target is not None,
-                    args.sample is not None,
-                    args.review_all,
-                ))
-                if selectors != 1:
-                    raise ValueError("provide exactly one of TARGET, --sample, or --all")
-                if args.review_all:
-                    with sessions() as session:
-                        references = list(session.scalars(
-                            select(Target.sdbid).order_by(Target.sdbid)
-                        ))
-                elif args.sample is not None:
-                    from .samples import SampleService
-
-                    references = [
-                        target.sdbid
-                        for target in SampleService(sessions).members(args.sample)
-                    ]
-                else:
-                    references = [args.target]
-                rows = service.photometry_review(
-                    references,
-                    provider=args.provider,
-                    blended_only=args.blended_only,
-                    review_required=args.review_required,
-                )
-                if args.format == "table":
-                    print(_format_hierarchy_photometry_review_table(rows))
-                elif args.format == "json":
-                    print(_format_json(args, rows, sort_keys=True))
-                else:
-                    for value in rows:
-                        print(_format_json(args, value, sort_keys=True))
             elif args.hierarchy_command == "review-queue":
                 selectors = sum((
                     args.target is not None,
@@ -1454,69 +1411,80 @@ def main(argv: list[str] | None = None) -> int:
                     ]
                 else:
                     references = [args.target]
-                rows = service.review_queue(
-                    references,
-                    provider=args.provider,
-                    min_priority=args.min_priority,
-                )
+                if args.view == "blend":
+                    rows = service.photometry_review(
+                        references,
+                        provider=args.provider,
+                        blended_only=args.blended_only,
+                        review_required=args.review_required,
+                    )
+                    table_formatter = _format_hierarchy_photometry_review_table
+                else:
+                    rows = service.review_queue(
+                        references,
+                        provider=args.provider,
+                        min_priority=args.min_priority,
+                    )
+                    table_formatter = _format_hierarchy_review_queue_table
                 if args.format == "table":
-                    print(_format_hierarchy_review_queue_table(rows))
+                    print(table_formatter(rows))
                 elif args.format == "json":
                     print(_format_json(args, rows, sort_keys=True))
                 else:
                     for value in rows:
                         print(_format_json(args, value, sort_keys=True))
-            elif args.hierarchy_command == "derive-graph":
-                value = service.derive_graph(
-                    args.provider,
-                    source_id=args.source_id,
-                )
-                print(_format_json(args, asdict(value), sort_keys=True))
             elif args.hierarchy_command == "graph":
-                rows = service.graph_edges(
-                    provider=args.provider,
-                    native_id=None if args.target else args.reference,
-                    target=args.reference if args.target else None,
-                    source_id=args.source_id,
-                )
-                for value in rows:
+                if args.graph_command == "derive":
+                    value = service.derive_graph(
+                        args.provider,
+                        source_id=args.source_id,
+                    )
                     print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "graph-diagnostics":
-                rows = service.graph_diagnostics(
-                    provider=args.provider,
-                    source_id=args.source_id,
-                    limit=0 if args.summary else args.limit,
-                    severity=args.severity,
-                    issue=args.issue,
-                )
-                if args.summary:
-                    counts = Counter((row.severity, row.issue) for row in rows)
-                    for (severity, issue), count in sorted(
-                        counts.items(),
-                        key=lambda item: (0 if item[0][0] == "review" else 1, item[0][1]),
-                    ):
-                        print(_format_json(args, {
-                            "count": count,
-                            "issue": issue,
-                            "severity": severity,
-                        }, sort_keys=True))
-                else:
+                elif args.graph_command == "list":
+                    rows = service.graph_edges(
+                        provider=args.provider,
+                        native_id=None if args.target else args.reference,
+                        target=args.reference if args.target else None,
+                        source_id=args.source_id,
+                    )
                     for value in rows:
                         print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.hierarchy_command == "override-edge":
-                value = service.override_graph_edge(
-                    provider=args.provider,
-                    native_id=args.native_id,
-                    reference_label=args.reference_label,
-                    component_label=args.component_label,
-                    source_id=args.source_id,
-                    status=args.status,
-                    relation_type=args.relation_type,
-                    structural_role=args.structural_role,
-                    actor=args.actor,
-                    reason=args.reason,
-                )
-                print(_format_json(args, asdict(value), sort_keys=True))
+                elif args.graph_command == "diagnostics":
+                    rows = service.graph_diagnostics(
+                        provider=args.provider,
+                        source_id=args.source_id,
+                        limit=0 if args.summary else args.limit,
+                        severity=args.severity,
+                        issue=args.issue,
+                    )
+                    if args.summary:
+                        counts = Counter((row.severity, row.issue) for row in rows)
+                        for (severity, issue), count in sorted(
+                            counts.items(),
+                            key=lambda item: (0 if item[0][0] == "review" else 1, item[0][1]),
+                        ):
+                            print(_format_json(args, {
+                                "count": count,
+                                "issue": issue,
+                                "severity": severity,
+                            }, sort_keys=True))
+                    else:
+                        for value in rows:
+                            print(_format_json(args, asdict(value), sort_keys=True))
+                else:  # override
+                    value = service.override_graph_edge(
+                        provider=args.provider,
+                        native_id=args.native_id,
+                        reference_label=args.reference_label,
+                        component_label=args.component_label,
+                        source_id=args.source_id,
+                        status=args.status,
+                        relation_type=args.relation_type,
+                        structural_role=args.structural_role,
+                        actor=args.actor,
+                        reason=args.reason,
+                    )
+                    print(_format_json(args, asdict(value), sort_keys=True))
             elif args.hierarchy_command == "accept-candidate":
                 value = service.accept_match(
                     args.candidate_id,
@@ -1559,12 +1527,13 @@ def main(argv: list[str] | None = None) -> int:
                     asdict(target_lifecycle_status(sessions, args.target)),
                     sort_keys=True,
                 ))
-            elif args.hierarchy_command == "target":
-                print(_format_json(args, service.target_context(args.target), sort_keys=True))
-            elif args.hierarchy_command == "system-context":
-                print(_format_json(args, service.system_context(args.target), sort_keys=True))
-            else:
-                print(_format_json(args, service.status(args.target).as_dict(), sort_keys=True))
+            else:  # status
+                if args.scope == "provider":
+                    print(_format_json(args, service.target_context(args.target), sort_keys=True))
+                elif args.scope == "system":
+                    print(_format_json(args, service.system_context(args.target), sort_keys=True))
+                else:
+                    print(_format_json(args, service.status(args.target).as_dict(), sort_keys=True))
         except (KeyError, ValueError) as error:
             print(str(error), file=sys.stderr)
             return 2

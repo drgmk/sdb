@@ -4551,20 +4551,20 @@ def _latest_graph_overrides(
 ) -> dict[int, StructuralEdgeAction]:
     if not edges:
         return {}
-    edge_ids = sorted({edge.id for edge in edges if edge.id is not None})
     sources = sorted({edge.source for edge in edges})
-    native_ids = sorted({edge.native_id for edge in edges if edge.native_id is not None})
-    rows = tuple(session.scalars(
-        select(StructuralEdgeAction)
-        .where(StructuralEdgeAction.source.in_(sources))
-        .where(
-            or_(
-                StructuralEdgeAction.edge_id.in_(edge_ids),
-                StructuralEdgeAction.native_id.in_(native_ids),
-            )
+    native_ids = {edge.native_id for edge in edges if edge.native_id is not None}
+    # Actions are rare (manual overrides), so fetch them by source only and match
+    # in Python — an edge_id/native_id IN clause over a full provider's edges would
+    # blow past SQLite's bound-variable limit.
+    rows = tuple(
+        row
+        for row in session.scalars(
+            select(StructuralEdgeAction)
+            .where(StructuralEdgeAction.source.in_(sources))
+            .order_by(StructuralEdgeAction.created_at, StructuralEdgeAction.id)
         )
-        .order_by(StructuralEdgeAction.created_at, StructuralEdgeAction.id)
-    ))
+        if row.native_id is None or row.native_id in native_ids
+    )
     latest: dict[int, StructuralEdgeAction] = {}
     for edge in edges:
         for row in rows:

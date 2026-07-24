@@ -1619,36 +1619,36 @@ def test_hierarchy_cli_derives_lists_and_overrides_graph(tmp_path, capsys):
     assert main(["--database", str(database), "init"]) == 0
     capsys.readouterr()
     assert main([
-        "--database", str(database), "hierarchy", "import",
-        "wds", str(path), "--release", "test-release",
+        "--database", str(database), "hierarchy", "source", "fetch",
+        "wds", "--file", str(path), "--release", "test-release",
     ]) == 0
     imported = json.loads(capsys.readouterr().out)
     assert main([
-        "--database", str(database), "hierarchy", "derive-graph",
+        "--database", str(database), "hierarchy", "graph", "derive",
         "wds", "--source-id", str(imported["source_id"]),
     ]) == 0
     derived = json.loads(capsys.readouterr().out)
     assert derived["edge_count"] == 1
     assert main([
-        "--database", str(database), "hierarchy", "graph-diagnostics",
+        "--database", str(database), "hierarchy", "graph", "diagnostics",
         "--provider", "wds", "--source-id", str(imported["source_id"]),
     ]) == 0
     assert capsys.readouterr().out == ""
     assert main([
-        "--database", str(database), "hierarchy", "graph",
+        "--database", str(database), "hierarchy", "graph", "list",
         "05287-6527", "--provider", "wds",
     ]) == 0
     edge = json.loads(capsys.readouterr().out)
     assert edge["reference_label"] == "A"
     assert edge["component_label"] == "B"
     assert main([
-        "--database", str(database), "hierarchy", "override-edge",
+        "--database", str(database), "hierarchy", "graph", "override",
         "wds", "05287-6527", "--from", "A", "--to", "B",
         "--status", "rejected", "--role", "non_structural", "--actor", "tester", "--reason", "bad row",
     ]) == 0
     capsys.readouterr()
     assert main([
-        "--database", str(database), "hierarchy", "graph",
+        "--database", str(database), "hierarchy", "graph", "list",
         "05287-6527", "--provider", "wds",
     ]) == 0
     edge = json.loads(capsys.readouterr().out)
@@ -1656,7 +1656,7 @@ def test_hierarchy_cli_derives_lists_and_overrides_graph(tmp_path, capsys):
     assert edge["structural_role"] == "non_structural"
     assert edge["override_reason"] == "bad row"
     assert main([
-        "--database", str(database), "hierarchy", "graph-diagnostics",
+        "--database", str(database), "hierarchy", "graph", "diagnostics",
         "--provider", "wds", "--summary", "--severity", "info",
     ]) == 0
     summary = json.loads(capsys.readouterr().out)
@@ -1738,14 +1738,14 @@ def test_hierarchy_cli_imports_snapshot_and_lists_sources(tmp_path, capsys):
     capsys.readouterr()
 
     assert main([
-        "--database", str(database), "hierarchy", "import",
-        "wds", str(snapshot), "--release", "test-release",
+        "--database", str(database), "hierarchy", "source", "fetch",
+        "wds", "--file", str(snapshot), "--release", "test-release",
     ]) == 0
     imported = json.loads(capsys.readouterr().out)
     assert imported["provider"] == "wds"
     assert imported["row_count"] == 1
 
-    assert main(["--database", str(database), "hierarchy", "sources", "--provider", "wds"]) == 0
+    assert main(["--database", str(database), "hierarchy", "source", "list", "--provider", "wds"]) == 0
     source = json.loads(capsys.readouterr().out)
     assert source["release"] == "test-release"
 
@@ -2127,8 +2127,8 @@ def test_hierarchy_cli_matches_and_reviews_snapshot(tmp_path, capsys):
     ]) == 0
     target = json.loads(capsys.readouterr().out)
     assert main([
-        "--database", str(database), "hierarchy", "import",
-        "wds", str(snapshot), "--release", "test-release",
+        "--database", str(database), "hierarchy", "source", "fetch",
+        "wds", "--file", str(snapshot), "--release", "test-release",
     ]) == 0
     imported = json.loads(capsys.readouterr().out)
 
@@ -2139,7 +2139,7 @@ def test_hierarchy_cli_matches_and_reviews_snapshot(tmp_path, capsys):
     matched = json.loads(capsys.readouterr().out)
     assert matched["candidate_count"] == 1
 
-    assert main(["--database", str(database), "hierarchy", "review", "--provider", "wds"]) == 0
+    assert main(["--database", str(database), "hierarchy", "candidates", "--provider", "wds"]) == 0
     reviewed = json.loads(capsys.readouterr().out)
     assert reviewed["sdbid"] == target["sdbid"]
     assert reviewed["match_method"] == "position"
@@ -2211,8 +2211,8 @@ def test_hierarchy_cli_summary_reports_match_workload(tmp_path, capsys):
     ]) == 0
     capsys.readouterr()
     assert main([
-        "--database", str(database), "hierarchy", "import",
-        "wds", str(snapshot), "--release", "test-release",
+        "--database", str(database), "hierarchy", "source", "fetch",
+        "wds", "--file", str(snapshot), "--release", "test-release",
     ]) == 0
     imported = json.loads(capsys.readouterr().out)
     assert main([
@@ -2221,7 +2221,7 @@ def test_hierarchy_cli_summary_reports_match_workload(tmp_path, capsys):
     ]) == 0
     capsys.readouterr()
     assert main([
-        "--database", str(database), "hierarchy", "derive-graph",
+        "--database", str(database), "hierarchy", "graph", "derive",
         "wds", "--source-id", str(imported["source_id"]),
     ]) == 0
     capsys.readouterr()
@@ -2391,8 +2391,8 @@ def test_hierarchy_cli_accepts_and_rejects_candidates(tmp_path, capsys):
     ]) == 0
     capsys.readouterr()
     assert main([
-        "--database", str(database), "hierarchy", "import",
-        "wds", str(snapshot), "--release", "test-release",
+        "--database", str(database), "hierarchy", "source", "fetch",
+        "wds", "--file", str(snapshot), "--release", "test-release",
     ]) == 0
     imported = json.loads(capsys.readouterr().out)
     assert main([
@@ -2400,7 +2400,7 @@ def test_hierarchy_cli_accepts_and_rejects_candidates(tmp_path, capsys):
         "wds", "--source-id", str(imported["source_id"]), "--radius", "10",
     ]) == 0
     capsys.readouterr()
-    assert main(["--database", str(database), "hierarchy", "review", "--provider", "wds"]) == 0
+    assert main(["--database", str(database), "hierarchy", "candidates", "--provider", "wds"]) == 0
     candidate = json.loads(capsys.readouterr().out)
 
     assert main([
