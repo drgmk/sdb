@@ -81,7 +81,8 @@ def test_gaia_row_preserves_fluxes_and_normalizes_native_magnitudes():
     assert candidate.payload["FBP"] == 65432.0
     assert "flux:65432 e-/s" in candidate.measurements[1].note1
     assert candidate.measurements[1].quality == "n_obs=24;n_cont=1;n_blend=2"
-    assert candidate.measurements[1].blend_status == "provider_flagged"
+    assert candidate.measurements[1].blend_state == "blended"
+    assert candidate.measurements[1].blend_reason == "provider_flagged"
     assert candidate.measurements[1].excluded is False
     review = candidate.payload["_sdb_review"]
     assert review["fields"] == [{

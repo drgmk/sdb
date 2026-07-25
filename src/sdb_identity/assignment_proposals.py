@@ -156,8 +156,8 @@ def measurement_assignment_proposals(
             "resolution_major_arcsec": measurement.resolution_major_arcsec,
             "resolution_minor_arcsec": measurement.resolution_minor_arcsec,
             "excluded": measurement.excluded,
-            "predicted_scope": prediction["predicted_association_scope"],
-            "predicted_blend_status": prediction["predicted_scope_blend_status"],
+            "predicted_scope": prediction["predicted_ownership_scope"],
+            "predicted_blend_state": prediction["predicted_blend_state"],
             "scope_reason": prediction["scope_reason"],
             "proposal_confidence": confidence,
             "proposal_reason": proposal_reason,
@@ -384,7 +384,7 @@ def measurement_assignment_matrix(
         else:
             comparison = "mixed_duplicate_state"
         scopes = sorted({str(proposal["predicted_scope"]) for proposal in group})
-        blend_statuses = sorted({str(proposal["predicted_blend_status"]) for proposal in group})
+        blend_statees = sorted({str(proposal["predicted_blend_state"]) for proposal in group})
         reasons = list(dict.fromkeys(str(proposal["proposal_reason"]) for proposal in group))
         rows.append({
             "measurement_id": first["measurement_id"],
@@ -409,8 +409,8 @@ def measurement_assignment_matrix(
             "excluded": any(bool(proposal.get("excluded")) for proposal in group),
             "predicted_scope": scopes[0] if len(scopes) == 1 else "mixed",
             "predicted_scopes": scopes,
-            "predicted_blend_status": blend_statuses[0] if len(blend_statuses) == 1 else "mixed",
-            "predicted_blend_statuses": blend_statuses,
+            "predicted_blend_state": blend_statees[0] if len(blend_statees) == 1 else "mixed",
+            "predicted_blend_statees": blend_statees,
             "proposal_confidence": min(
                 (str(proposal["proposal_confidence"]) for proposal in group),
                 key=lambda value: {"low": 0, "medium": 1, "high": 2}.get(value, 0),
@@ -531,7 +531,7 @@ def _proposal_origin(
         )[0]
         for target in encountered
     }
-    if measurement.association_scope in {"system", "shared", "blended"}:
+    if measurement.ownership_scope in {"system", "shared"}:
         composites = [target for target in encountered if roles[target.id] == "composite"]
         if len(composites) == 1:
             return composites[0]
@@ -645,13 +645,13 @@ def _measurement_prediction(
     for row in bands:
         if row.get("provider") == measurement.provider and row.get("band") == measurement.band:
             return {
-                "predicted_association_scope": str(row.get("predicted_association_scope") or "component"),
-                "predicted_scope_blend_status": str(row.get("predicted_scope_blend_status") or "unknown"),
+                "predicted_ownership_scope": str(row.get("predicted_ownership_scope") or "component"),
+                "predicted_blend_state": str(row.get("predicted_blend_state") or "unknown"),
                 "scope_reason": str(row.get("scope_reason") or ""),
             }
     return {
-        "predicted_association_scope": measurement.association_scope,
-        "predicted_scope_blend_status": measurement.blend_status,
+        "predicted_ownership_scope": measurement.ownership_scope,
+        "predicted_blend_state": measurement.blend_state,
         "scope_reason": "no hierarchy band prediction was available; retained stored catalog scope",
     }
 
@@ -718,7 +718,7 @@ def _effective_prediction(
     candidates: list[dict[str, object]],
 ) -> dict[str, str]:
     """Add explicit-system lifecycle evidence absent from provider hierarchy."""
-    if prediction["predicted_association_scope"] != "component":
+    if prediction["predicted_ownership_scope"] != "component":
         return prediction
     origin_row = next((row for row in candidates if row["target_id"] == origin.id), None)
     resolution = measurement.resolution_major_arcsec
@@ -733,8 +733,9 @@ def _effective_prediction(
     if len(physical_in_beam) < 2:
         return prediction
     return {
-        "predicted_association_scope": "system",
-        "predicted_scope_blend_status": "likely_blended_at_catalog_resolution",
+        "predicted_ownership_scope": "system",
+        "predicted_blend_state": "blended",
+        "predicted_blend_reason": "unresolved_at_catalog_resolution",
         "scope_reason": (
             "the origin is an audited composite target and at least two physical "
             "system members lie within one stored full-width resolution"
@@ -769,7 +770,7 @@ def _propose_assignments(
     prediction: dict[str, str],
     candidates: list[dict[str, object]],
 ) -> tuple[list[dict[str, object]], str, str]:
-    scope = prediction["predicted_association_scope"]
+    scope = prediction["predicted_ownership_scope"]
     eligible = [row for row in candidates if row["eligible"]]
     physical = [row for row in eligible if row["target_role"] == "physical"]
     composites = [row for row in eligible if row["target_role"] == "composite"]
@@ -825,7 +826,7 @@ def _propose_assignments(
             ), "low"
         return [], "resolved measurement has no imported physical target at its catalog position", "low"
 
-    if scope in {"system", "blended", "shared"}:
+    if scope in {"system", "shared"}:
         beam = measurement.resolution_major_arcsec
         composite_scopes = identifier_composite or [
             row for row in composites if row["target_id"] == origin.id

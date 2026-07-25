@@ -98,8 +98,9 @@ class PhotometryReviewRow:
     value: float | None
     unit: str | None
     excluded: bool | None
-    association_scope: str | None
-    blend_status: str | None
+    ownership_scope: str | None
+    blend_state: str | None
+    blend_reason: str | None
 
 
 def assign_measurement_target(
@@ -288,8 +289,9 @@ def review_photometry_associations(
                 value=measurement.value,
                 unit=measurement.unit,
                 excluded=measurement.excluded,
-                association_scope=measurement.association_scope,
-                blend_status=measurement.blend_status,
+                ownership_scope=measurement.ownership_scope,
+                blend_state=measurement.blend_state,
+                blend_reason=measurement.blend_reason,
             ))
         raw_rows = session.scalars(
             select(RawCatalogRow)
@@ -311,8 +313,9 @@ def review_photometry_associations(
                 value=None,
                 unit=None,
                 excluded=None,
-                association_scope=None,
-                blend_status=None,
+                ownership_scope=None,
+                blend_state=None,
+                blend_reason=None,
             ))
         return rows
 
@@ -347,8 +350,9 @@ def _review_photometry_associations_many(
                     value=measurement.value,
                     unit=measurement.unit,
                     excluded=measurement.excluded,
-                    association_scope=measurement.association_scope,
-                    blend_status=measurement.blend_status,
+                    ownership_scope=measurement.ownership_scope,
+                    blend_state=measurement.blend_state,
+                    blend_reason=measurement.blend_reason,
                 ))
 
         for target_id_chunk in _chunks(target_ids):
@@ -376,8 +380,9 @@ def _review_photometry_associations_many(
                     value=None,
                     unit=None,
                     excluded=None,
-                    association_scope=None,
-                    blend_status=None,
+                    ownership_scope=None,
+                    blend_state=None,
+                    blend_reason=None,
                 ))
     return rows_by_target
 
@@ -435,10 +440,11 @@ def photometry_review_queue(
                 "raw_row_id": row.raw_row_id,
                 "signal": signal,
                 "priority": priority,
-                "predicted_scope": None if context is None else context.get("predicted_association_scope"),
-                "predicted_blend_status": None if context is None else context.get("predicted_scope_blend_status"),
-                "stored_scope": row.association_scope,
-                "stored_blend_status": row.blend_status,
+                "predicted_scope": None if context is None else context.get("predicted_ownership_scope"),
+                "predicted_blend_state": None if context is None else context.get("predicted_blend_state"),
+                "stored_scope": row.ownership_scope,
+                "stored_blend_state": row.blend_state,
+                "stored_blend_reason": row.blend_reason,
                 "action": action,
             })
         if not target_rows:
@@ -453,9 +459,10 @@ def photometry_review_queue(
                 "signal": "no photometry review item",
                 "priority": "none",
                 "predicted_scope": None,
-                "predicted_blend_status": None,
+                "predicted_blend_state": None,
                 "stored_scope": None,
-                "stored_blend_status": None,
+                "stored_blend_state": None,
+                "stored_blend_reason": None,
                 "action": "none",
             })
         rows.extend(target_rows)
@@ -474,14 +481,14 @@ def _photometry_queue_signal(
 ) -> tuple[str, str, str]:
     if row.measurement_id is None and row.raw_row_id is not None:
         return "unaccepted catalog neighbour", "medium", "review; exclude the band if it is not this target's light"
-    if row.association_scope == "shared" or row.blend_status == "duplicate_source":
+    if row.ownership_scope == "shared":
         return "shared catalog source", "high", "inspect shared-source export exclusion"
     if context is not None:
-        predicted_scope = str(context.get("predicted_association_scope") or "")
-        predicted_blend = str(context.get("predicted_scope_blend_status") or "")
-        if predicted_scope in {"blended", "system", "ambiguous"}:
+        predicted_scope = str(context.get("predicted_ownership_scope") or "")
+        predicted_blend = str(context.get("predicted_blend_state") or "")
+        if predicted_scope in {"shared", "system", "ambiguous"}:
             return f"predicted {predicted_scope}", "high", "assign contributing targets after review"
-        if predicted_blend == "likely_blended_at_catalog_resolution":
+        if predicted_blend == "blended":
             return "likely blended at catalog resolution", "high", "assign contributing targets after review"
     return "clean automatic association", "none", "none"
 

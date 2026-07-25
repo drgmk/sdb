@@ -26,6 +26,7 @@ from .models import (
     RawCatalogRow,
     Target,
 )
+from .photometry_semantics import validate_photometry_semantics
 from .providers import Astrometry, ProviderError
 from .service import normalize_identifier
 
@@ -49,8 +50,9 @@ class MeasurementValue:
     resolution_minor_arcsec: float | None = None
     resolution_kind: str | None = None
     resolution_reference: str | None = None
-    association_scope: str = "component"
-    blend_status: str = "clear"
+    ownership_scope: str = "component"
+    blend_state: str = "clear"
+    blend_reason: str | None = None
     measurement_key: str | None = None
 
 
@@ -582,6 +584,9 @@ class CatalogService:
         target_id: int,
         raw_row_id: int,
     ) -> NormalizedMeasurement:
+        ownership_scope, blend_state = validate_photometry_semantics(
+            value.ownership_scope, value.blend_state
+        )
         measurement_key_factory = getattr(adapter, "measurement_key", None)
         if callable(measurement_key_factory):
             measurement_key = str(measurement_key_factory(candidate, value, value_index))
@@ -628,8 +633,9 @@ class CatalogService:
             "resolution_reference": value.resolution_reference or (
                 None if resolution is None else resolution.reference
             ),
-            "association_scope": value.association_scope,
-            "blend_status": value.blend_status,
+            "ownership_scope": ownership_scope,
+            "blend_state": blend_state,
+            "blend_reason": value.blend_reason,
         }
         # Provider-native values may be corrected without a release-label
         # change. Refresh those fields in place so every target encounter sees
@@ -819,8 +825,9 @@ class CatalogService:
         for measurement in session.scalars(select(NormalizedMeasurement).where(
             NormalizedMeasurement.detection_id == detection_id,
         )):
-            measurement.association_scope = "shared"
-            measurement.blend_status = "duplicate_source"
+            measurement.ownership_scope = "shared"
+            measurement.blend_state = "blended"
+            measurement.blend_reason = "duplicate_source"
         return affected
 
     @staticmethod
@@ -839,8 +846,8 @@ class CatalogService:
             NormalizedMeasurement.upper_limit,
             NormalizedMeasurement.excluded,
             NormalizedMeasurement.quality,
-            NormalizedMeasurement.blend_status,
-            NormalizedMeasurement.association_scope,
+            NormalizedMeasurement.blend_state,
+            NormalizedMeasurement.ownership_scope,
         )
         .join(
             RawCatalogRow,

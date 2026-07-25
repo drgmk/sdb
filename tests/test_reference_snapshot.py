@@ -315,7 +315,8 @@ def test_iras_psc_full_snapshot_normalizes_resolution_quality_and_ellipse(tmp_pa
     assert values["IRAS100"].resolution_major_arcsec == 120.0
     assert values["IRAS25"].error == 0.4
     assert values["IRAS60"].upper_limit is True
-    assert values["IRAS12"].blend_status == "provider_flagged"
+    assert values["IRAS12"].blend_state == "blended"
+    assert values["IRAS12"].blend_reason == "provider_flagged"
 
 
 def test_ubvmeans_marks_d_as_an_unresolved_multiple_in_the_aperture(tmp_path):
@@ -326,8 +327,9 @@ def test_ubvmeans_marks_d_as_an_unresolved_multiple_in_the_aperture(tmp_path):
     ))[0]
     values = {value.band: value for value in candidate.measurements}
     assert set(values) == {"VJ", "BJ_VJ", "UJ_BJ"}
-    assert values["VJ"].association_scope == "system"
-    assert values["VJ"].blend_status == "catalog_multiple_in_aperture"
+    assert values["VJ"].ownership_scope == "system"
+    assert values["VJ"].blend_state == "blended"
+    assert values["VJ"].blend_reason == "catalog_multiple_in_aperture"
     assert values["UJ_BJ"].quality == "S"
     assert values["BJ_VJ"].resolution_major_arcsec is None
 

@@ -47,8 +47,9 @@ class PhotometryBeam:
     minor_arcsec: float | None = None
     kind: str | None = None
     reference: str | None = None
-    association_scope: str = "component"
-    blend_status: str = "clear"
+    ownership_scope: str = "component"
+    blend_state: str = "clear"
+    blend_reason: str | None = None
     value: float | None = None
     error: float | None = None
     unit: str | None = None
@@ -365,7 +366,7 @@ def render_review_sky_html(
             label = (
                 f"{beam.get('provider')} {beam.get('band')}<br>"
                 f"{kind}: {width_label} full width<br>"
-                f"scope: {beam.get('association_scope')}; blend: {beam.get('blend_status')}"
+                f"scope: {beam.get('ownership_scope')}; blend: {beam.get('blend_state')}"
                 f"{value_label}<br>"
                 f"{reference}"
             )
@@ -691,7 +692,7 @@ def render_review_sky_html(
         const width = Math.abs(minor - beam.major_arcsec) < 1e-6 ? `${{displayNumber(beam.major_arcsec)}}"` : `${{displayNumber(beam.major_arcsec)}}" × ${{displayNumber(minor)}}"`;
         const kind = beam.kind || "resolution";
         const value = beam.value == null ? "" : `; ${{beam.upper_limit ? "<" : ""}}${{displayNumber(beam.value)}} ${{beam.unit || ""}}`;
-        return `${{beam.provider}} ${{beam.band}}: ${{kind}} ${{width}} full width; ${{beam.association_scope}}; ${{beam.blend_status}}${{value}}`;
+        return `${{beam.provider}} ${{beam.band}}: ${{kind}} ${{width}} full width; ${{beam.ownership_scope}}; ${{beam.blend_state}}${{value}}`;
       }}).join("; ");
     }}
     function linkedTargetValue(point) {{
@@ -2054,8 +2055,8 @@ def _measurement_summaries(session: Session, raw_row_id: int, *, limit: int = 8)
             flags.append(str(measurement.quality))
         if measurement.excluded:
             flags.append("excluded")
-        if measurement.blend_status != "clear":
-            flags.append(measurement.blend_status)
+        if measurement.blend_state != "clear":
+            flags.append(measurement.blend_state)
         suffix = f" ({', '.join(flags)})" if flags else ""
         summaries.append(
             f"{measurement.band}={marker}{_compact_display_value(measurement.value)}"
@@ -2092,8 +2093,9 @@ def _measurement_beams(session: Session, raw_row_id: int, *, limit: int = 12) ->
                 minor_arcsec=measurement.resolution_minor_arcsec,
                 kind=measurement.resolution_kind,
                 reference=measurement.resolution_reference,
-                association_scope=measurement.association_scope,
-                blend_status=measurement.blend_status,
+                ownership_scope=measurement.ownership_scope,
+                blend_state=measurement.blend_state,
+                blend_reason=measurement.blend_reason,
                 value=measurement.value,
                 error=measurement.error,
                 unit=measurement.unit,

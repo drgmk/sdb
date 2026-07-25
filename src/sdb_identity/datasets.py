@@ -357,8 +357,8 @@ class CuratedDatasetService:
                     note2=f"Name:{_text(item.get('name')) or ''}",
                     excluded=_truthy(item.get("exclude")),
                     exclusion_reason="submm_obs exclude flag" if _truthy(item.get("exclude")) else None,
-                    association_scope="component",
-                    blend_status="clear",
+                    ownership_scope="component",
+                    blend_state="clear",
                 ))
 
     @staticmethod

@@ -186,11 +186,11 @@ def test_hierarchy_target_context_reports_photometry_blending(session_factory, t
     photometry = context["photometry_context"]
     assert photometry["nearest_pair_arcsec"] == pytest.approx(0.2)
     assert photometry["likely_blended_bands"] == ["allwise:WISE3P4"]
-    assert photometry["predicted_scope_counts"] == {"blended": 1}
-    assert photometry["predicted_blend_counts"] == {"likely_blended_at_catalog_resolution": 1}
-    assert photometry["bands"][0]["predicted_blend_status"] == "likely_blended_at_catalog_resolution"
-    assert photometry["bands"][0]["predicted_association_scope"] == "blended"
-    assert photometry["bands"][0]["predicted_scope_blend_status"] == "likely_blended_at_catalog_resolution"
+    assert photometry["predicted_scope_counts"] == {"shared": 1}
+    assert photometry["predicted_blend_counts"] == {"blended": 1}
+    assert photometry["bands"][0]["predicted_blend_state"] == "blended"
+    assert photometry["bands"][0]["predicted_ownership_scope"] == "shared"
+    assert photometry["bands"][0]["predicted_blend_reason"] == "unresolved_at_catalog_resolution"
     system_context = service.system_context(target.sdbid)
     neighbourhood = system_context["catalog_neighbourhood_by_target"][target.sdbid][0]
     assert neighbourhood["neighbourhood_flags"] == {
@@ -450,9 +450,10 @@ def test_hierarchy_photometry_context_prefers_accepted_candidate(session_factory
     assert photometry["likely_blended_bands"] == []
     assert photometry["predicted_scope_counts"] == {"component": 1}
     assert photometry["predicted_blend_counts"] == {"clear": 1}
-    assert photometry["bands"][0]["predicted_blend_status"] == "likely_resolved_at_catalog_resolution"
-    assert photometry["bands"][0]["predicted_association_scope"] == "component"
-    assert photometry["bands"][0]["predicted_scope_blend_status"] == "clear"
+    assert photometry["bands"][0]["predicted_blend_state"] == "clear"
+    assert photometry["bands"][0]["predicted_blend_reason"] == "resolved_at_catalog_resolution"
+    assert photometry["bands"][0]["predicted_ownership_scope"] == "component"
+    assert photometry["bands"][0]["predicted_blend_state"] == "clear"
 
 
 def test_system_target_scope_respects_catalog_resolution():
@@ -462,8 +463,8 @@ def test_system_target_scope_respects_catalog_resolution():
         "target_level": "system",
         "assignment_status": "semantic_group_contains_nearest_component",
         "semantic_kind": "system_or_parent",
-        "stored_association_scope": "component",
-        "stored_blend_status": "clear",
+        "stored_ownership_scope": "component",
+        "stored_blend_state": "clear",
     }
     resolved = _photometry_scope_prediction(
         **common,
@@ -474,10 +475,11 @@ def test_system_target_scope_respects_catalog_resolution():
         blend_prediction="likely_blended_at_catalog_resolution",
     )
 
-    assert resolved["predicted_association_scope"] == "component"
-    assert resolved["predicted_scope_blend_status"] == "clear"
-    assert blended["predicted_association_scope"] == "system"
-    assert blended["predicted_scope_blend_status"] == "likely_blended_at_catalog_resolution"
+    assert resolved["predicted_ownership_scope"] == "component"
+    assert resolved["predicted_blend_state"] == "clear"
+    assert blended["predicted_ownership_scope"] == "system"
+    assert blended["predicted_blend_state"] == "blended"
+    assert blended["predicted_blend_reason"] == "unresolved_at_catalog_resolution"
 
 
 def test_hierarchy_photometry_review_filters_sample_provider_and_blends(
@@ -558,7 +560,7 @@ def test_hierarchy_photometry_review_filters_sample_provider_and_blends(
     assert [row["sdbid"] for row in rows] == [target.sdbid]
     assert rows[0]["likely_blended_bands"] == ["allwise:WISE3P4"]
     assert rows[0]["measurement_count"] == 1
-    assert rows[0]["predicted_scope_counts"] == {"blended": 1}
+    assert rows[0]["predicted_scope_counts"] == {"shared": 1}
     assert rows[0]["bands"][0]["scope_reason"] == (
         "catalog resolution is larger than the nearest known component separation"
     )

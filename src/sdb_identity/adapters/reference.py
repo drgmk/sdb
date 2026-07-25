@@ -454,7 +454,8 @@ class IrasSnapshotAdapter(SnapshotCatalogAdapter):
                 resolution_minor_arcsec=self.resolutions[wavelength],
                 resolution_kind="catalog_extent_limit_in_scan",
                 resolution_reference="IRAS Catalogs and Atlases Explanatory Supplement",
-                blend_status="provider_flagged" if provider_flagged else "clear",
+                blend_state="blended" if provider_flagged else "clear",
+                blend_reason="provider_flagged" if provider_flagged else None,
             ))
         return tuple(values)
 
@@ -556,11 +557,13 @@ class UbvMeansSnapshotAdapter(SnapshotCatalogAdapter):
     def measurements(self, payload):
         component = row_text(payload, "m_LID") or ""
         if component.upper() == "D":
-            association_scope = "system"
-            blend_status = "catalog_multiple_in_aperture"
+            ownership_scope = "system"
+            blend_state = "blended"
+            blend_reason = "catalog_multiple_in_aperture"
         else:
-            association_scope = "component"
-            blend_status = "clear"
+            ownership_scope = "component"
+            blend_state = "clear"
+            blend_reason = None
         values = []
         for band, column, error, flag, observations, systematic in (
             ("VJ", "Vmag", "e_Vmag", "n_Vmag", "o_Vmag", 0.02),
@@ -580,8 +583,9 @@ class UbvMeansSnapshotAdapter(SnapshotCatalogAdapter):
                 quality=row_text(payload, flag),
                 note1=f"component:{component}",
                 note2=f"observations:{row_text(payload, observations) or ''}",
-                association_scope=association_scope,
-                blend_status=blend_status,
+                ownership_scope=ownership_scope,
+                blend_state=blend_state,
+                blend_reason=blend_reason,
             ))
         return tuple(values)
 

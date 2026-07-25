@@ -85,8 +85,8 @@ class ReadinessService:
                     overrides.get((value.provider, value.band), value).excluded
                     for value in measurements
                 )
-                shared = sum(value.association_scope == "shared" for value in measurements)
-                blended = sum(value.blend_status != "clear" for value in measurements)
+                shared = sum(value.ownership_scope == "shared" for value in measurements)
+                blended = sum(value.blend_state != "clear" for value in measurements)
                 upper_limits = sum(value.upper_limit for value in measurements)
                 private = sum(value.private for value in measurements)
                 for kind, count, detail in (

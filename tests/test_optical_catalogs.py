@@ -137,8 +137,9 @@ def test_tycho2_normalizes_native_bands_and_marks_photocentres():
     })
     assert candidate.source_id == "TYC 1-13-1"
     assert [value.band for value in candidate.measurements] == ["BT", "VT"]
-    assert all(value.association_scope == "system" for value in candidate.measurements)
-    assert all(value.blend_status == "provider_flagged" for value in candidate.measurements)
+    assert all(value.ownership_scope == "system" for value in candidate.measurements)
+    assert all(value.blend_state == "blended" for value in candidate.measurements)
+    assert all(value.blend_reason == "provider_flagged" for value in candidate.measurements)
     proximity = candidate.payload["_sdb_review"]["fields"][0]
     assert proximity == {
         "key": "nearest_source_arcsec",

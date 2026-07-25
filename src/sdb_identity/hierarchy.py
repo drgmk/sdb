@@ -2310,8 +2310,8 @@ def _system_photometry(
             "unit": measurement.unit,
             "resolution_major_arcsec": measurement.resolution_major_arcsec,
             "resolution_minor_arcsec": measurement.resolution_minor_arcsec,
-            "association_scope": measurement.association_scope,
-            "blend_status": measurement.blend_status,
+            "ownership_scope": measurement.ownership_scope,
+            "blend_state": measurement.blend_state,
             "excluded": measurement.excluded,
         })
     return {key: value for key, value in result.items() if value}
@@ -2980,14 +2980,14 @@ def _target_photometry_context(
             assignment_status=assignment_status,
             semantic_kind=semantic_kind,
             blend_prediction=blend_prediction,
-            stored_association_scope=measurement.association_scope,
-            stored_blend_status=measurement.blend_status,
+            stored_ownership_scope=measurement.ownership_scope,
+            stored_blend_state=measurement.blend_state,
         )
-        predicted_scope_counts[scope_prediction["predicted_association_scope"]] = (
-            predicted_scope_counts.get(scope_prediction["predicted_association_scope"], 0) + 1
+        predicted_scope_counts[scope_prediction["predicted_ownership_scope"]] = (
+            predicted_scope_counts.get(scope_prediction["predicted_ownership_scope"], 0) + 1
         )
-        predicted_blend_counts[scope_prediction["predicted_scope_blend_status"]] = (
-            predicted_blend_counts.get(scope_prediction["predicted_scope_blend_status"], 0) + 1
+        predicted_blend_counts[scope_prediction["predicted_blend_state"]] = (
+            predicted_blend_counts.get(scope_prediction["predicted_blend_state"], 0) + 1
         )
         rows.append({
             "provider": measurement.provider,
@@ -2996,10 +2996,11 @@ def _target_photometry_context(
             "resolution_minor_arcsec": measurement.resolution_minor_arcsec,
             "resolution_kind": measurement.resolution_kind,
             "resolution_reference": measurement.resolution_reference,
-            "association_scope": measurement.association_scope,
-            "stored_association_scope": measurement.association_scope,
-            "stored_blend_status": measurement.blend_status,
-            "predicted_blend_status": blend_prediction,
+            "ownership_scope": measurement.ownership_scope,
+            "stored_ownership_scope": measurement.ownership_scope,
+            "stored_blend_state": measurement.blend_state,
+            "stored_blend_reason": measurement.blend_reason,
+            "resolution_blend_evidence": blend_prediction,
             **scope_prediction,
         })
 
@@ -3036,8 +3037,8 @@ def _refresh_photometry_band_summaries(photometry: dict[str, object]) -> None:
     scope_counts: dict[str, int] = {}
     blend_counts: dict[str, int] = {}
     for band in bands:
-        scope = str(band.get("predicted_association_scope") or "unknown")
-        blend = str(band.get("predicted_scope_blend_status") or "unknown")
+        scope = str(band.get("predicted_ownership_scope") or "unknown")
+        blend = str(band.get("predicted_blend_state") or "unknown")
         scope_counts[scope] = scope_counts.get(scope, 0) + 1
         blend_counts[blend] = blend_counts.get(blend, 0) + 1
     photometry["predicted_scope_counts"] = dict(sorted(scope_counts.items()))
@@ -3054,13 +3055,14 @@ def _photometry_scope_prediction(
     assignment_status: str,
     semantic_kind: str,
     blend_prediction: str,
-    stored_association_scope: str,
-    stored_blend_status: str,
+    stored_ownership_scope: str,
+    stored_blend_state: str,
 ) -> dict[str, str]:
-    if stored_association_scope != "component" or stored_blend_status != "clear":
+    if stored_ownership_scope != "component" or stored_blend_state != "clear":
         return {
-            "predicted_association_scope": stored_association_scope,
-            "predicted_scope_blend_status": stored_blend_status,
+            "predicted_ownership_scope": stored_ownership_scope,
+            "predicted_blend_state": stored_blend_state,
+            "predicted_blend_reason": "stored_catalog_state",
             "scope_reason": "provider or existing catalog state already marks this measurement",
         }
     if assignment_status in {
@@ -3069,8 +3071,9 @@ def _photometry_scope_prediction(
         "ambiguous_disconnected_groups",
     }:
         return {
-            "predicted_association_scope": "ambiguous",
-            "predicted_scope_blend_status": "hierarchy_ambiguous",
+            "predicted_ownership_scope": "ambiguous",
+            "predicted_blend_state": "ambiguous",
+            "predicted_blend_reason": "hierarchy_ambiguous",
             "scope_reason": f"target assignment is {assignment_status}",
         }
     if (
@@ -3078,8 +3081,9 @@ def _photometry_scope_prediction(
         and blend_prediction == "likely_resolved_at_catalog_resolution"
     ):
         return {
-            "predicted_association_scope": "component",
-            "predicted_scope_blend_status": "clear",
+            "predicted_ownership_scope": "component",
+            "predicted_blend_state": "clear",
+            "predicted_blend_reason": "resolved_at_catalog_resolution",
             "scope_reason": (
                 "catalog resolution separates the nearest known components; "
                 "the selected source is associated with the component at the target position"
@@ -3090,8 +3094,9 @@ def _photometry_scope_prediction(
         and blend_prediction == "likely_blended_at_catalog_resolution"
     ):
         return {
-            "predicted_association_scope": "system",
-            "predicted_scope_blend_status": blend_prediction,
+            "predicted_ownership_scope": "system",
+            "predicted_blend_state": "blended",
+            "predicted_blend_reason": "unresolved_at_catalog_resolution",
             "scope_reason": (
                 "target is a system and catalog resolution is larger than the "
                 "nearest known component separation"
@@ -3099,8 +3104,9 @@ def _photometry_scope_prediction(
         }
     if target_level == "system":
         return {
-            "predicted_association_scope": "system",
-            "predicted_scope_blend_status": "system_level_target",
+            "predicted_ownership_scope": "system",
+            "predicted_blend_state": "unknown",
+            "predicted_blend_reason": "system_level_target",
             "scope_reason": (
                 "SIMBAD/provider context identifies the target as a system or parent, "
                 "and catalog resolution does not distinguish a component"
@@ -3108,25 +3114,29 @@ def _photometry_scope_prediction(
         }
     if blend_prediction == "likely_blended_at_catalog_resolution":
         return {
-            "predicted_association_scope": "blended",
-            "predicted_scope_blend_status": blend_prediction,
+            "predicted_ownership_scope": "shared",
+            "predicted_blend_state": "blended",
+            "predicted_blend_reason": "unresolved_at_catalog_resolution",
             "scope_reason": "catalog resolution is larger than the nearest known component separation",
         }
     if blend_prediction == "likely_resolved_at_catalog_resolution":
         return {
-            "predicted_association_scope": "component",
-            "predicted_scope_blend_status": "clear",
+            "predicted_ownership_scope": "component",
+            "predicted_blend_state": "clear",
+            "predicted_blend_reason": "resolved_at_catalog_resolution",
             "scope_reason": "catalog resolution is smaller than the nearest known component separation",
         }
     if semantic_kind in {"component", "subsystem"}:
         return {
-            "predicted_association_scope": "component",
-            "predicted_scope_blend_status": "unknown_resolution",
+            "predicted_ownership_scope": "component",
+            "predicted_blend_state": "unknown",
+            "predicted_blend_reason": "unknown_resolution",
             "scope_reason": "target is semantically component-like, but band resolution is unavailable",
         }
     return {
-        "predicted_association_scope": "component",
-        "predicted_scope_blend_status": blend_prediction,
+        "predicted_ownership_scope": "component",
+        "predicted_blend_state": "unknown",
+        "predicted_blend_reason": blend_prediction,
         "scope_reason": "no hierarchy/resolution evidence changes component-level interpretation",
     }
 

@@ -223,7 +223,8 @@ class GaiaDr3Adapter:
                     quality=";".join(quality_parts) or None,
                     note1="; ".join(note_parts),
                     note2=f"BP/RP excess:{excess:.6g}" if excess is not None else "",
-                    blend_status="provider_flagged" if provider_flagged else "clear",
+                    blend_state="blended" if provider_flagged else "clear",
+                    blend_reason="provider_flagged" if provider_flagged else None,
                 )
             )
         # Preserve the complete provider row and normalized review metadata.

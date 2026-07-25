@@ -354,8 +354,9 @@ class NormalizedMeasurement(Base):
     resolution_minor_arcsec: Mapped[float | None] = mapped_column(Float)
     resolution_kind: Mapped[str | None] = mapped_column(String(40))
     resolution_reference: Mapped[str | None] = mapped_column(Text)
-    association_scope: Mapped[str] = mapped_column(String(20), default="component", nullable=False)
-    blend_status: Mapped[str] = mapped_column(String(30), default="clear", nullable=False)
+    ownership_scope: Mapped[str] = mapped_column(String(20), default="component", nullable=False)
+    blend_state: Mapped[str] = mapped_column(String(30), default="clear", nullable=False)
+    blend_reason: Mapped[str | None] = mapped_column(String(80))
 
 
 class IrasDetectionFamily(Base):

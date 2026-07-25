@@ -747,7 +747,7 @@ def _format_photometry_review_queue_table(rows: list[dict[str, object]]) -> str:
     )
     rendered = ["  ".join(headers)]
     for row in rows:
-        predicted = row.get("predicted_scope") or row.get("predicted_blend_status") or ""
+        predicted = row.get("predicted_scope") or row.get("predicted_blend_state") or ""
         rendered.append("  ".join([
             str(row.get("priority") or ""),
             str(row.get("sdbid") or ""),

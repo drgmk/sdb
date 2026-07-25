@@ -234,8 +234,9 @@ class Tycho2Adapter(VizierConeAdapter):
                 quality=magnitude_flag or position_flag or mean_position_flag or None,
                 note1=f"pflag:{mean_position_flag};posflg:{position_flag}",
                 note2=f"prox:{proximity};table:{table_name.rsplit('/', 1)[-1]}",
-                association_scope="system" if photocentre else "component",
-                blend_status="provider_flagged" if photocentre else "clear",
+                ownership_scope="system" if photocentre else "component",
+                blend_state="blended" if photocentre else "clear",
+                blend_reason="provider_flagged" if photocentre else None,
             ))
         # Preserve the complete provider row and normalized review metadata.
         payload = add_review_metadata(
