@@ -71,5 +71,5 @@ def test_compare_export_cli(tmp_path, capsys):
     row = ("2MJ", 7.1, 0.02, 0.01, 0, "mag", "ref", "", "", "A", 0, 0)
     _write(legacy, [row])
     _write(current, [row])
-    assert main(["compare-export", str(legacy), str(current)]) == 0
+    assert main(["maintenance", "compare-export", str(legacy), str(current)]) == 0
     assert '"review_required": false' in capsys.readouterr().out

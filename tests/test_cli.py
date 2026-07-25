@@ -126,8 +126,9 @@ def test_cli_catalog_status_and_export(tmp_path, capsys):
         {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
     ).refresh(target.sdbid, "2mass")
 
-    assert main(["--database", str(database), "catalog-status", target.sdbid]) == 0
+    assert main(["--database", str(database), "runs", target.sdbid, "--provider", "2mass"]) == 0
     status = json.loads(capsys.readouterr().out)
+    assert status["kind"] == "catalog"
     assert status["provider"] == "2mass"
     assert status["status"] == "match"
 
@@ -158,8 +159,9 @@ def test_cli_metadata_status_and_notes(tmp_path, capsys):
         FakeMetadataProvider(MetadataQueryResult("match", (snapshot(),))),
     ).refresh(target.sdbid)
 
-    assert main(["--database", str(database), "metadata-status", target.sdbid]) == 0
+    assert main(["--database", str(database), "runs", target.sdbid, "--provider", "simbad"]) == 0
     status = json.loads(capsys.readouterr().out)
+    assert status["kind"] == "metadata"
     assert status["provider"] == "simbad"
     assert status["status"] == "match"
 
@@ -271,7 +273,7 @@ def test_cli_photometry_override_history(tmp_path, capsys):
     excluded = json.loads(capsys.readouterr().out)
     assert excluded["excluded"] is True
     assert main([
-        "--database", str(database), "photometry", "list", target.sdbid,
+        "--database", str(database), "photometry", "overrides", target.sdbid,
     ]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert listed["reason"] == "blended"
@@ -455,12 +457,12 @@ def test_cli_inspection_commands_resolve_by_alias(tmp_path, capsys):
     status = json.loads(capsys.readouterr().out)
     assert status["sdbid"] == target.sdbid
 
-    assert main(["--database", str(database), "catalog-status", "TESTALIAS 77"]) == 0
+    assert main(["--database", str(database), "runs", "TESTALIAS 77", "--provider", "2mass"]) == 0
     row = json.loads(capsys.readouterr().out)
     assert row["sdbid"] == target.sdbid
     assert row["provider"] == "2mass"
 
-    assert main(["--database", str(database), "metadata-status", "TESTALIAS 77"]) == 0
+    assert main(["--database", str(database), "runs", "TESTALIAS 77", "--provider", "simbad"]) == 0
     metadata = json.loads(capsys.readouterr().out)
     assert metadata["sdbid"] == target.sdbid
     assert metadata["provider"] == "simbad"

@@ -105,13 +105,15 @@ def parser() -> argparse.ArgumentParser:
     refresh = _add_parser(commands, "refresh", "Refresh one provider for one target.", "Runs a single catalog or metadata provider and stores a versioned result. Previous rows remain available for provenance; current rows are updated only after a successful provider attempt.")
     refresh.add_argument("target")
     refresh.add_argument("--provider", choices=["2mass", "allwise", "gaia_dr3", "tycho2", *REFERENCE_ADAPTERS, "simbad"], required=True)
-    catalog_status = _add_parser(commands, "catalog-status", "Show catalog run status for one target.", "Use this to see which providers matched, failed, returned no match, or are ambiguous. Add --provider to focus on one photometric catalog.")
-    catalog_status.add_argument("target")
-    catalog_status.add_argument("--provider", choices=["2mass", "allwise", "gaia_dr3", "tycho2", *REFERENCE_ADAPTERS])
+    runs = _add_parser(commands, "runs", "Show catalog and metadata provider run status for one target.", "Reports which providers matched, failed, returned no match, or are ambiguous, across both catalog photometry and SIMBAD metadata. Each row is tagged with its kind. Add --provider to focus on one provider.")
+    runs.add_argument("target")
+    runs.add_argument("--provider", choices=["2mass", "allwise", "gaia_dr3", "tycho2", *REFERENCE_ADAPTERS, "simbad"])
     export = _add_parser(commands, "export", "Write one target as an SDF-compatible rawphot file.", "Exports current photometry and target metadata into the IPAC-like format consumed by SDF, preserving exclusion flags for plotting without fitting. It also writes a versioned joint-fit JSON sidecar; neither operation refreshes providers.")
     export.add_argument("target")
     export.add_argument("--output", required=True)
-    compare_export = _add_parser(commands, "compare-export", "Compare two rawphot exports for parity checks.", "Reads legacy and current rawphot files and reports band/value differences. This is a diagnostic command for migration validation, not an import path.")
+    maintenance = _add_parser(commands, "maintenance", "Diagnostic and repair commands outside the normal workflow.", "One-off maintenance and migration-validation utilities that are not part of the routine import/update/export path.")
+    maintenance_commands = maintenance.add_subparsers(dest="maintenance_command", required=True)
+    compare_export = _add_parser(maintenance_commands, "compare-export", "Compare two rawphot exports for parity checks.", "Reads legacy and current rawphot files and reports band/value differences. This is a diagnostic command for migration validation, not an import path.")
     compare_export.add_argument("legacy")
     compare_export.add_argument("current")
     update_command = _add_parser(commands, "update", "Fill missing provider results and optionally export targets.", "Updates one target, a sample, or all targets without repeating completed current results unless --force is supplied. It can run bounded workers, use bulk-capable stages, apply reference snapshots, and write dirty exports.")
@@ -171,9 +173,6 @@ def parser() -> argparse.ArgumentParser:
     cache_validate = _add_parser(cache_commands, "validate", "Validate one cached provider snapshot.", "Checks that a current cached snapshot has source metadata, ReadMe text, tables, rows, and column metadata. If a matching reference snapshot exists, its interpreted row count is reported for comparison.")
     cache_validate.add_argument("catalog")
     cache_validate.add_argument("--provider")
-    metadata_status = _add_parser(commands, "metadata-status", "Show metadata provider status for one target.", "Currently this reports SIMBAD metadata state: main identifier, object types, relationships, and failures. Use it to distinguish no-match, transient failure, and incomplete metadata work.")
-    metadata_status.add_argument("target")
-    metadata_status.add_argument("--provider", choices=["simbad"])
     hierarchy = _add_parser(commands, "hierarchy", "Create and inspect target systems and relationships.", "Hierarchy records keep binary/multiple-system structure separate from photometry. This first layer supports manual systems and relationships; WDS, CCDM, and SIMBAD imports can later write the same tables.")
     hierarchy_commands = hierarchy.add_subparsers(dest="hierarchy_command", required=True)
     hierarchy_create = _add_parser(hierarchy_commands, "create-system", "Create a target system.", "A system groups related components such as a binary or multiple. The optional primary target is also added as the first system member and marked export-dirty.")
@@ -371,7 +370,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--provider", required=True)
         command.add_argument("--actor", required=True)
         command.add_argument("--reason", required=True)
-    photometry_list = _add_parser(photometry_commands, "list", "List current photometry and override state for a target.", "Shows normalized measurements, providers, and inclusion/exclusion status. Use this before applying manual photometry overrides.")
+    photometry_list = _add_parser(photometry_commands, "overrides", "List photometry inclusion/exclusion overrides for a target.", "Shows the append-only include/exclude override decisions recorded for a target's measurements, with actor and reason. It does not list the measurements themselves; use `photometry review` for association context.")
     photometry_list.add_argument("target")
     photometry_review = _add_parser(photometry_commands, "review", "Review current photometry association context for a target.", "Lists current normalized measurements plus unaccepted current raw catalog rows. This is read-only and intended to precede assign (ownership) and include/exclude (fit eligibility) decisions.")
     photometry_review.add_argument("target")
@@ -951,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
     from .progress import ProgressReporter
 
     reporter = ProgressReporter.for_cli(quiet=args.quiet, force=args.progress)
-    if args.command == "compare-export":
+    if args.command == "maintenance" and args.maintenance_command == "compare-export":
         from .parity import compare_exports
 
         try:
@@ -1939,7 +1938,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": value.reason,
                         "created_at": value.created_at.isoformat(),
                     }, sort_keys=True))
-            elif args.photometry_command == "list":
+            elif args.photometry_command == "overrides":
                 for value in list_photometry_overrides(sessions, args.target):
                     print(_format_json(args, {
                         "id": value.id,
@@ -2463,31 +2462,7 @@ def main(argv: list[str] | None = None) -> int:
                 status_payload["hierarchy"] = HierarchyService(sessions).target_context_summary(target.sdbid)
                 print(_format_json(args, status_payload, sort_keys=True))
             return 0
-        if args.command == "catalog-status":
-            from .dirty import resolve_targets
-            targets = resolve_targets(session, args.target)
-            if not targets:
-                print(f"target not found: {args.target}", file=sys.stderr)
-                return 1
-            for target in targets:
-                query = select(CatalogRun).where(CatalogRun.target_id == target.id)
-                if args.provider:
-                    query = query.where(CatalogRun.provider == args.provider)
-                runs = session.scalars(query.order_by(CatalogRun.id.desc()))
-                for run in runs:
-                    print(_format_json(args, {
-                        "sdbid": target.sdbid,
-                        "run_id": run.id,
-                        "provider": run.provider,
-                        "release": run.release,
-                        "status": run.status,
-                        "is_current": run.is_current,
-                        "candidate_count": run.candidate_count,
-                        "selected_source_id": run.selected_source_id,
-                        "error": run.error,
-                    }, sort_keys=True))
-            return 0
-        if args.command == "metadata-status":
+        if args.command == "runs":
             from .models import MetadataRun
             from .dirty import resolve_targets
 
@@ -2495,22 +2470,43 @@ def main(argv: list[str] | None = None) -> int:
             if not targets:
                 print(f"target not found: {args.target}", file=sys.stderr)
                 return 1
+            want_catalog = args.provider != "simbad"
+            want_metadata = args.provider in (None, "simbad")
             for target in targets:
-                query = select(MetadataRun).where(MetadataRun.target_id == target.id)
-                if args.provider:
-                    query = query.where(MetadataRun.provider == args.provider)
-                for run in session.scalars(query.order_by(MetadataRun.id.desc())):
-                    print(_format_json(args, {
-                        "sdbid": target.sdbid,
-                        "run_id": run.id,
-                        "provider": run.provider,
-                        "release": run.release,
-                        "status": run.status,
-                        "is_current": run.is_current,
-                        "query_identifier": run.query_identifier,
-                        "candidate_count": run.candidate_count,
-                        "error": run.error,
-                    }, sort_keys=True))
+                if want_catalog:
+                    query = select(CatalogRun).where(CatalogRun.target_id == target.id)
+                    if args.provider:
+                        query = query.where(CatalogRun.provider == args.provider)
+                    for run in session.scalars(query.order_by(CatalogRun.id.desc())):
+                        print(_format_json(args, {
+                            "kind": "catalog",
+                            "sdbid": target.sdbid,
+                            "run_id": run.id,
+                            "provider": run.provider,
+                            "release": run.release,
+                            "status": run.status,
+                            "is_current": run.is_current,
+                            "candidate_count": run.candidate_count,
+                            "selected_source_id": run.selected_source_id,
+                            "error": run.error,
+                        }, sort_keys=True))
+                if want_metadata:
+                    query = select(MetadataRun).where(MetadataRun.target_id == target.id)
+                    if args.provider:
+                        query = query.where(MetadataRun.provider == args.provider)
+                    for run in session.scalars(query.order_by(MetadataRun.id.desc())):
+                        print(_format_json(args, {
+                            "kind": "metadata",
+                            "sdbid": target.sdbid,
+                            "run_id": run.id,
+                            "provider": run.provider,
+                            "release": run.release,
+                            "status": run.status,
+                            "is_current": run.is_current,
+                            "query_identifier": run.query_identifier,
+                            "candidate_count": run.candidate_count,
+                            "error": run.error,
+                        }, sort_keys=True))
             return 0
         if args.kind == "iras-families":
             from .models import IrasBandSelection, IrasDetectionFamily
