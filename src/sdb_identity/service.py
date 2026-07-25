@@ -16,13 +16,13 @@ from .models import (
     ExternalIdentifier,
     MatchCandidate,
     MatchDecision,
-    OperatorAction,
     ProviderOutcome,
     MetadataRun,
     SimbadMetadata,
     Submission,
     Target,
 )
+from .decisions import DecisionContext
 from .providers import Astrometry, Candidate, GaiaProvider, NullGaia, NullSimbad, ProviderError, SimbadProvider
 
 _GAIA_DR3_IDENTIFIER = re.compile(r"^Gaia\s+DR3\s+(\d+)$", re.IGNORECASE)
@@ -358,11 +358,25 @@ class IdentityService:
                     return AddResult(target.id, target.sdbid, False, selected.source)
             return AddResult(target.id, target.sdbid, created, selected.source)
 
-    def override_match(self, candidate_id: int, *, actor: str, reason: str) -> None:
+    def override_match(
+        self,
+        candidate_id: int,
+        *,
+        actor: str | None,
+        reason: str | None = None,
+    ) -> None:
         with self.sessions.begin() as session:
             candidate = session.get(MatchCandidate, candidate_id)
             if candidate is None:
                 raise KeyError(f"candidate {candidate_id} not found")
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Accepted identity candidate {candidate.id} from "
+                    f"{candidate.provider} source {candidate.source_id}"
+                ),
+            )
             candidate.accepted = True
             siblings = session.scalars(
                 select(MatchCandidate).where(
@@ -372,8 +386,13 @@ class IdentityService:
             )
             for sibling in siblings:
                 sibling.accepted = False
-            session.add(MatchDecision(candidate_id=candidate_id, decision="accepted", method="manual", actor=actor, reason=reason))
-            session.add(OperatorAction(actor=actor, action="override_match", object_type="match_candidate", object_id=candidate_id, details=reason))
+            session.add(MatchDecision(
+                candidate_id=candidate_id,
+                decision="accepted",
+                method="manual",
+                actor=decision.actor,
+                reason=decision.reason,
+            ))
 
     def match_history(self, candidate_id: int) -> list[MatchDecision]:
         with self.sessions() as session:

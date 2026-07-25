@@ -21,6 +21,7 @@ from .catalog_measurements import (
     current_measurements_for_target,
 )
 from .dirty import find_target, mark_export_dirty
+from .decisions import DecisionContext
 from .models import (
     AstrometricSolution,
     ExternalIdentifier,
@@ -1719,8 +1720,8 @@ class HierarchyService:
         native_id: str,
         reference_label: str,
         component_label: str,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
         source_id: int | None = None,
         status: str | None = None,
         relation_type: str | None = None,
@@ -1730,17 +1731,11 @@ class HierarchyService:
         clean_native = native_id.strip()
         clean_reference = reference_label.strip()
         clean_component = component_label.strip()
-        clean_actor = actor.strip()
-        clean_reason = reason.strip()
         clean_status = status.strip() if status is not None else None
         clean_relation_type = relation_type.strip() if relation_type is not None else None
         clean_structural_role = structural_role.strip() if structural_role is not None else None
         if clean_structural_role is not None and clean_structural_role not in {"structural", "non_structural"}:
             raise ValueError("structural role must be structural or non_structural")
-        if not clean_actor:
-            raise ValueError("actor is required")
-        if not clean_reason:
-            raise ValueError("reason is required")
         if clean_status is None and clean_relation_type is None and clean_structural_role is None:
             raise ValueError("status, relation type, or structural role override is required")
         with self.session_factory.begin() as session:
@@ -1759,6 +1754,23 @@ class HierarchyService:
             if len(matches) > 1 and source_id is None:
                 raise ValueError("multiple graph edges matched; supply --source-id")
             edge = matches[0]
+            requested = ", ".join(
+                f"{name}={value}"
+                for name, value in (
+                    ("status", clean_status),
+                    ("type", clean_relation_type),
+                    ("role", clean_structural_role),
+                )
+                if value is not None
+            )
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Overrode {edge.source} structural edge {edge.native_id} "
+                    f"{edge.reference_label}->{edge.component_label}: {requested}"
+                ),
+            )
             latest = _latest_graph_overrides(session, [edge]).get(edge.id)
             previous_status = latest.new_status if latest is not None and latest.new_status is not None else edge.status
             previous_relation_type = (
@@ -1784,8 +1796,8 @@ class HierarchyService:
                 new_relation_type=clean_relation_type,
                 previous_structural_role=previous_structural_role,
                 new_structural_role=clean_structural_role,
-                actor=clean_actor,
-                reason=clean_reason,
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(override)
             session.flush()
@@ -1798,8 +1810,8 @@ class HierarchyService:
                 new_relation_type=clean_relation_type or previous_relation_type,
                 previous_structural_role=previous_structural_role,
                 new_structural_role=clean_structural_role or previous_structural_role,
-                actor=clean_actor,
-                reason=clean_reason,
+                actor=decision.actor,
+                reason=decision.reason,
             )
 
     def review_matches(self, provider: str | None = None) -> tuple[HierarchyMatchReviewRow, ...]:
@@ -1843,19 +1855,24 @@ class HierarchyService:
         self,
         candidate_id: int,
         *,
-        actor: str,
-        reason: str = "",
+        actor: str | None,
+        reason: str | None = None,
         system: str | None = None,
         component_label: str | None = None,
         relationship_type: str = "hierarchy_record",
     ) -> HierarchyMatchActionResult:
-        clean_actor = actor.strip()
-        if not clean_actor:
-            raise ValueError("actor is required")
         if not relationship_type.strip():
             raise ValueError("relationship type is required")
         with self.session_factory.begin() as session:
             candidate, record, target = _find_required_candidate_context(session, candidate_id)
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Accepted {record.provider} hierarchy candidate {candidate.id} "
+                    f"for {target.sdbid}: {candidate.reason}"
+                ),
+            )
             previous_status = candidate.status
             system_row = None
             if system is not None:
@@ -1887,8 +1904,8 @@ class HierarchyService:
                 relation_epoch=record.measure_epoch,
                 confidence="accepted_candidate",
                 status=_RELATIONSHIP_STATUS,
-                actor=clean_actor,
-                reason=_join_notes(f"accepted hierarchy candidate {candidate.id}: {candidate.reason}", reason),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(relationship)
             session.flush()
@@ -1898,8 +1915,8 @@ class HierarchyService:
                 action="accept",
                 previous_status=previous_status,
                 new_status=candidate.status,
-                actor=clean_actor,
-                reason=reason,
+                actor=decision.actor,
+                reason=decision.reason,
                 system_id=None if system_row is None else system_row.id,
                 relationship_id=relationship.id,
             ))
@@ -1925,16 +1942,19 @@ class HierarchyService:
         self,
         candidate_id: int,
         *,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
     ) -> HierarchyMatchActionResult:
-        clean_actor = actor.strip()
-        if not clean_actor:
-            raise ValueError("actor is required")
-        if not reason.strip():
-            raise ValueError("reason is required")
         with self.session_factory.begin() as session:
-            candidate, _record, target = _find_required_candidate_context(session, candidate_id)
+            candidate, record, target = _find_required_candidate_context(session, candidate_id)
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Rejected {record.provider} hierarchy candidate {candidate.id} "
+                    f"for {target.sdbid}"
+                ),
+            )
             previous_status = candidate.status
             candidate.status = "rejected"
             session.add(HierarchyMatchAction(
@@ -1942,8 +1962,8 @@ class HierarchyService:
                 action="reject",
                 previous_status=previous_status,
                 new_status=candidate.status,
-                actor=clean_actor,
-                reason=reason,
+                actor=decision.actor,
+                reason=decision.reason,
             ))
             mark_export_dirty(
                 session,

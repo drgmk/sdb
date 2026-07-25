@@ -14,6 +14,16 @@ class Base(DeclarativeBase):
     pass
 
 
+class AuditedActionMixin:
+    """Shared columns for append-only operator actions."""
+
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class Target(Base):
     __tablename__ = "targets"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -81,15 +91,12 @@ class Sample(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class SampleMembershipAction(Base):
+class SampleMembershipAction(AuditedActionMixin, Base):
     __tablename__ = "sample_membership_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sample_id: Mapped[int] = mapped_column(ForeignKey("samples.id"), nullable=False, index=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(10), nullable=False)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class SampleExportRun(Base):
@@ -248,17 +255,6 @@ class MatchDecision(Base):
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     actor: Mapped[str | None] = mapped_column(String(100))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class OperatorAction(Base):
-    __tablename__ = "operator_actions"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    action: Mapped[str] = mapped_column(String(40), nullable=False)
-    object_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    object_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    details: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -507,18 +503,15 @@ class HierarchyMatchCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class HierarchyMatchAction(Base):
+class HierarchyMatchAction(AuditedActionMixin, Base):
     __tablename__ = "hierarchy_match_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     candidate_id: Mapped[int] = mapped_column(ForeignKey("hierarchy_match_candidates.id"), nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     previous_status: Mapped[str] = mapped_column(String(30), nullable=False)
     new_status: Mapped[str] = mapped_column(String(30), nullable=False)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
     system_id: Mapped[int | None] = mapped_column(ForeignKey("target_systems.id"))
     relationship_id: Mapped[int | None] = mapped_column(ForeignKey("structural_edges.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class TargetSystem(Base):
@@ -531,16 +524,13 @@ class TargetSystem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class TargetLifecycleAction(Base):
+class TargetLifecycleAction(AuditedActionMixin, Base):
     __tablename__ = "target_lifecycle_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     superseded_by_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class TargetSystemMember(Base):
@@ -603,7 +593,7 @@ class StructuralEdge(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class StructuralEdgeAction(Base):
+class StructuralEdgeAction(AuditedActionMixin, Base):
     """Append-only decision/audit log for structural edges (replaces HierarchyGraphOverride)."""
     __tablename__ = "structural_edge_actions"
     __table_args__ = (
@@ -622,9 +612,6 @@ class StructuralEdgeAction(Base):
     new_relation_type: Mapped[str | None] = mapped_column(String(40))
     previous_structural_role: Mapped[str | None] = mapped_column(String(40))
     new_structural_role: Mapped[str | None] = mapped_column(String(40))
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class MeasurementTargetAssociation(Base):
@@ -640,7 +627,7 @@ class MeasurementTargetAssociation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class MeasurementAssociationAction(Base):
+class MeasurementAssociationAction(AuditedActionMixin, Base):
     __tablename__ = "measurement_association_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     measurement_id: Mapped[int] = mapped_column(ForeignKey("normalized_measurements.id"), nullable=False, index=True)
@@ -649,9 +636,6 @@ class MeasurementAssociationAction(Base):
     role: Mapped[str] = mapped_column(String(40), nullable=False)
     method: Mapped[str] = mapped_column(String(40), nullable=False)
     weight: Mapped[float | None] = mapped_column(Float)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class UserNote(Base):
@@ -708,16 +692,13 @@ class ImportJob(Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class PhotometryOverride(Base):
+class PhotometryOverride(AuditedActionMixin, Base):
     __tablename__ = "photometry_overrides"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     band: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     excluded: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class DatasetRevision(Base):
@@ -754,27 +735,21 @@ class CuratedRecord(Base):
     association_message: Mapped[str | None] = mapped_column(Text)
 
 
-class CuratedAssociationAction(Base):
+class CuratedAssociationAction(AuditedActionMixin, Base):
     __tablename__ = "curated_association_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dataset: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     record_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(20), nullable=False)
     target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class CuratedPhotometryOverride(Base):
+class CuratedPhotometryOverride(AuditedActionMixin, Base):
     __tablename__ = "curated_photometry_overrides"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dataset: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     record_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     excluded: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class ReferenceApplicationRun(Base):
@@ -818,7 +793,7 @@ class ReferenceApplicationRecord(Base):
     selected_target_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class CatalogMatchOverride(Base):
+class CatalogMatchOverride(AuditedActionMixin, Base):
     __tablename__ = "catalog_match_overrides"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
@@ -826,9 +801,6 @@ class CatalogMatchOverride(Base):
     previous_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
     replacement_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
     selected_source_id: Mapped[str] = mapped_column(String(200), nullable=False)
-    actor: Mapped[str] = mapped_column(String(100), nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class ExportDirtyTarget(Base):

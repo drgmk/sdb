@@ -6,6 +6,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .decisions import DecisionContext
 from .dirty import find_target, mark_export_dirty
 from .models import (
     CatalogDetection,
@@ -34,9 +35,6 @@ def review_photometry_eligibility_decision(
     """Preview or atomically append target/provider/band fit overrides."""
     if not changes:
         raise ValueError("at least one fit-eligibility change is required")
-    if apply and (not str(actor or "").strip() or not str(reason or "").strip()):
-        raise ValueError("actor and reason are required when applying a decision")
-
     context = session_factory.begin() if apply else session_factory()
     with context as session:
         normalized: list[dict[str, object]] = []
@@ -93,6 +91,7 @@ def review_photometry_eligibility_decision(
             "state_token": token,
             "has_changes": any(row["has_change"] for row in normalized),
             "changes": normalized,
+            "suggested_reason": _eligibility_suggested_reason(normalized),
             "notes": [
                 "fit eligibility is independent of measurement ownership",
                 "overrides apply to the measurement origin target, provider, and band",
@@ -105,6 +104,11 @@ def review_photometry_eligibility_decision(
             raise RuntimeError(
                 "fit eligibility changed after preview; reload and preview again"
             )
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=str(result["suggested_reason"]),
+        )
         applied_ids = []
         for value in normalized:
             if not value["has_change"]:
@@ -114,8 +118,8 @@ def review_photometry_eligibility_decision(
                 provider=str(value["provider"]),
                 band=str(value["band"]),
                 excluded=bool(value["desired_excluded"]),
-                actor=str(actor).strip(),
-                reason=str(reason).strip(),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(override)
             session.flush()
@@ -155,9 +159,6 @@ def review_target_lifecycle_decision(
         raise ValueError(f"role must be one of {sorted(TARGET_ROLES)}")
     if state not in _REVIEW_STATES:
         raise ValueError(f"state must be one of {sorted(_REVIEW_STATES)}")
-    if apply and (not str(actor or "").strip() or not str(reason or "").strip()):
-        raise ValueError("actor and reason are required when applying a decision")
-
     context = session_factory.begin() if apply else session_factory()
     with context as session:
         target = find_target(session, target_reference)
@@ -219,6 +220,9 @@ def review_target_lifecycle_decision(
             ),
             "interpretation": _lifecycle_interpretation(role),
             "assignment_reconciliation": reconciliation,
+            "suggested_reason": (
+                f"Set {target.sdbid} modelling role to {role} with state {state}"
+            ),
         }
         if not apply:
             return result
@@ -226,6 +230,11 @@ def review_target_lifecycle_decision(
             raise RuntimeError(
                 "target lifecycle changed after preview; reload and preview again"
             )
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=str(result["suggested_reason"]),
+        )
         lifecycle_count = 0
         action_id = None
         if (role, state) != (current_role, current_state):
@@ -233,8 +242,8 @@ def review_target_lifecycle_decision(
                 target_id=target.id,
                 role=role,
                 state=state,
-                actor=str(actor).strip(),
-                reason=str(reason).strip(),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(action)
             session.flush()
@@ -250,8 +259,8 @@ def review_target_lifecycle_decision(
         removed, added = _apply_lifecycle_assignment_reconciliation(
             session,
             reconciliation,
-            actor=str(actor).strip(),
-            reason=str(reason).strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         return {
             **result,
@@ -370,8 +379,6 @@ def review_detection_decision(
     expected_token: str | None = None,
 ) -> dict[str, object]:
     """Preview or atomically apply one reviewed catalog-detection decision."""
-    if apply and (not str(actor or "").strip() or not str(reason or "").strip()):
-        raise ValueError("actor and reason are required when applying a decision")
     if (target_role is None) != (target_state is None):
         raise ValueError("target_role and target_state must be supplied together")
     if target_role is not None and target_role not in TARGET_ROLES:
@@ -397,23 +404,28 @@ def review_detection_decision(
             raise RuntimeError(
                 "review state changed after preview; reload and preview the decision again"
             )
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=str(snapshot["suggested_reason"]),
+        )
         lifecycle_applied = _apply_lifecycle(
             session,
             snapshot,
-            actor=str(actor).strip(),
-            reason=str(reason).strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         removed = _remove_assignments(
             session,
             snapshot,
-            actor=str(actor).strip(),
-            reason=str(reason).strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         added = _add_assignments(
             session,
             snapshot,
-            actor=str(actor).strip(),
-            reason=str(reason).strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         dirty_target_ids = {
             snapshot["scope_target"]["target_id"],
@@ -544,6 +556,28 @@ def _decision_snapshot(
         ],
         "lifecycle_action_id": None if latest_lifecycle is None else latest_lifecycle.id,
     }
+    add_description = ", ".join(
+        f"{row['role']} for {row['sdbid']}" for row in [
+            {
+                "measurement_id": measurement_id,
+                **_target_row(targets[target_id]),
+                "role": assignment_role,
+            }
+            for measurement_id, target_id, assignment_role in add_pairs
+        ]
+    )
+    remove_description = ", ".join(
+        f"{row.role} for {targets[row.target_id].sdbid}" for row in remove_rows
+    )
+    reason_parts = [
+        f"Reviewed {detection.provider} source {detection.source_id}",
+        *([f"assigned {add_description}"] if add_description else []),
+        *([f"removed {remove_description}"] if remove_description else []),
+        *(
+            [f"set {scope_target.sdbid} role to {target_role}"]
+            if lifecycle_change else []
+        ),
+    ]
     return {
         "mode": "preview",
         "state_token": hashlib.sha256(
@@ -593,12 +627,27 @@ def _decision_snapshot(
         ],
         "lifecycle_change": lifecycle_change,
         "has_changes": bool(add_pairs or remove_rows or lifecycle_change),
+        "suggested_reason": "; ".join(reason_parts),
         "notes": [
             "selected bands from one canonical catalog detection are reviewed together",
             "provider exclusions are preserved independently of ownership assignments",
             "apply replaces current assignments for only the selected measurements",
         ],
     }
+
+
+def _eligibility_suggested_reason(
+    changes: list[dict[str, object]],
+) -> str:
+    descriptions = [
+        (
+            f"{'Excluded' if row['desired_excluded'] else 'Included'} "
+            f"{row['sdbid']} {row['provider']} {row['band']}"
+        )
+        for row in changes
+        if row["has_change"]
+    ]
+    return "; ".join(descriptions) or "Confirmed current photometry fit eligibility"
 
 
 def _apply_lifecycle(

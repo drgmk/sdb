@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .decisions import validate_actor_reason, validate_enum_field
+from .decisions import DecisionContext, validate_enum_field
 from .dirty import mark_export_dirty
 from .models import ExternalIdentifier, Target, TargetLifecycleAction
 from .service import normalize_identifier
@@ -78,13 +78,12 @@ def set_target_lifecycle(
     *,
     role: str,
     state: str,
-    actor: str,
-    reason: str,
+    actor: str | None,
+    reason: str | None = None,
     superseded_by: str | int | None = None,
 ) -> TargetLifecycleAction:
     role = validate_enum_field(role, TARGET_ROLES, "role")
     state = validate_enum_field(state, TARGET_STATES, "state")
-    validate_actor_reason(actor, reason)
     if state == "superseded" and superseded_by is None:
         raise ValueError("superseded state requires superseded_by")
     if state != "superseded" and superseded_by is not None:
@@ -98,13 +97,20 @@ def set_target_lifecycle(
             raise KeyError(f"replacement target not found: {superseded_by}")
         if replacement is not None and replacement.id == target.id:
             raise ValueError("a target cannot supersede itself")
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=(
+                f"Set {target.sdbid} modelling role to {role} with state {state}"
+            ),
+        )
         action = TargetLifecycleAction(
             target_id=target.id,
             role=role,
             state=state,
             superseded_by_target_id=None if replacement is None else replacement.id,
-            actor=actor.strip(),
-            reason=reason.strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         session.add(action)
         session.flush()

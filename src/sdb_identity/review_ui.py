@@ -4,6 +4,7 @@ import html
 import hashlib
 import json
 import math
+import os
 import threading
 import webbrowser
 from collections import defaultdict
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .assignment_readiness import assignment_readiness_report
+from .decisions import DecisionContext
 from .fitting_groups import fitting_group_report
 from .models import RawCatalogRow
 from .review_actions import (
@@ -469,14 +471,17 @@ def _relative_from_payload(
         raise RuntimeError(
             "SIMBAD relative state changed after preview; reload and preview again"
         )
-    actor = _optional_text(payload.get("actor"))
-    reason = _optional_text(payload.get("reason"))
+    decision = DecisionContext.resolve(
+        actor=_optional_text(payload.get("actor")),
+        reason=_optional_text(payload.get("reason")),
+        suggested_reason=str(preview["suggested_reason"]),
+    )
     result = import_immediate_relatives(
         session_factory,
         target,
         identity_service=identity_service_factory(),
-        actor=actor or "",
-        reason=reason or "",
+        actor=decision.actor,
+        reason=decision.reason,
     ).as_dict()
     value = {
         **preview,
@@ -513,6 +518,9 @@ def _relative_preview_payload(
         "has_changes": bool(counts["import"] or counts["already_imported"]),
         "counts": counts,
         "relatives": rows,
+        "suggested_reason": (
+            f"Imported and reconciled immediate stellar relatives for {target_reference}"
+        ),
     }
     return _with_human_summary(value, _relative_summary(value))
 
@@ -740,6 +748,7 @@ def _target_page(
     raw_row_detections: dict[int, int],
     navigation: dict[str, object] | None = None,
 ) -> str:
+    default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
         (row for row in graph["targets"] if row["sdbid"] == sdbid),
         None,
@@ -864,7 +873,7 @@ def _target_page(
   <aside id="assignment-drawer" class="assignment-drawer" hidden>
     <div class="drawer-header"><div><h2>Photometry assignment</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close assignment editor">×</button></div>
     <p id="assignment-prompt" class="muted">Select a plotted catalog source with normalized photometry.</p>
-    <section class="decision-meta"><label>Actor <input id="actor"></label><label>Reason <input id="reason"></label></section>
+    <section class="decision-meta"><label>Actor <input id="actor" value="{_e(default_actor)}"></label><label>Reason <input id="reason"></label></section>
     <div id="detection-editors">{''.join(cards) or '<p>No current measurements.</p>'}</div>
     <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
     <section class="preview-panel"><h2>Fit eligibility preview</h2><p class="muted">Include/exclude is independent of component ownership. It applies to the measurement's origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band setting, then preview.</div><button id="apply-eligibility" disabled>Apply eligibility overrides</button></section>
@@ -875,14 +884,14 @@ def _target_page(
     <label class="role-choice"><input type="radio" name="lifecycle-role" value="physical"{' checked' if target['role'] != 'composite' else ''}> <strong>Physical / fitted model</strong><span>Fit one photospheric model for this target. Use this for an unresolved combined-light AB system when A and B are not separately modelled; WDS multiplicity remains recorded.</span></label>
     <label class="role-choice"><input type="radio" name="lifecycle-role" value="composite"{' checked' if target['role'] == 'composite' else ''}> <strong>Composite / measurement scope</strong><span>Do not fit this target itself. Its measurements must be assigned to separately imported physical contributors such as A and B.</span></label>
     <p id="lifecycle-warning" class="warning" hidden>A composite without imported physical contributors will remain unresolved for joint fitting. Choose physical if one combined-light model is the intended approximation.</p>
-    <section class="decision-meta"><label>Actor <input id="lifecycle-actor"></label><label>Reason <input id="lifecycle-reason"></label></section>
+    <section class="decision-meta"><label>Actor <input id="lifecycle-actor" value="{_e(default_actor)}"></label><label>Reason <input id="lifecycle-reason"></label></section>
     <div class="dialog-actions"><button id="preview-lifecycle" type="button">Preview role decision</button><button id="apply-lifecycle" type="button" disabled>Apply audited decision</button></div>
     <div id="lifecycle-preview" class="change-summary muted">Choose a role, then preview.</div>
   </dialog>
   <dialog id="relatives-dialog">
     <form method="dialog" class="dialog-header"><div><h2>Immediate SIMBAD relatives</h2><code>{_e(sdbid)}</code></div><button value="cancel" aria-label="Close relative import dialog">×</button></form>
     <p>Preview or import only immediate stellar/substellar parents and children. Contextual groups, planets, disks, and unknown object types are retained for review but are not imported; newly imported targets are not expanded recursively.</p>
-    <section class="decision-meta"><label>Actor <input id="relatives-actor"></label><label>Reason <input id="relatives-reason"></label></section>
+    <section class="decision-meta"><label>Actor <input id="relatives-actor" value="{_e(default_actor)}"></label><label>Reason <input id="relatives-reason"></label></section>
     <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
     <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
   </dialog>
@@ -1052,12 +1061,21 @@ function renderHumanSummary(element,value){
   element.appendChild(details);
 }
 function renderRequestError(element,error){element.classList.add('muted');element.textContent=error.message;}
+function prefillReason(inputId,preview){
+  const input=document.getElementById(inputId);
+  if(!input||!preview||!preview.suggested_reason)return;
+  if(!input.value||input.value===input.dataset.suggestedReason){
+    input.value=preview.suggested_reason;
+    input.dataset.suggestedReason=preview.suggested_reason;
+  }
+}
 document.querySelectorAll('.preview').forEach(button=>button.addEventListener('click',async()=>{
   const section=button.closest('.detection');
   currentPayload=payloadFor(section);
   try{
     currentPreview=await request('/api/decision/preview',currentPayload);
     renderHumanSummary(document.getElementById('preview'),currentPreview);
+    prefillReason('reason',currentPreview);
     document.getElementById('apply').disabled=!currentPreview.has_changes;
   }catch(error){renderRequestError(document.getElementById('preview'),error);}
 }));
@@ -1079,6 +1097,7 @@ document.querySelectorAll('.preview-eligibility').forEach(button=>button.addEven
   try{
     currentEligibilityPreview=await request('/api/eligibility/preview',currentEligibilityPayload);
     renderHumanSummary(document.getElementById('eligibility-preview'),currentEligibilityPreview);
+    prefillReason('reason',currentEligibilityPreview);
     document.getElementById('apply-eligibility').disabled=!currentEligibilityPreview.has_changes;
   }catch(error){renderRequestError(document.getElementById('eligibility-preview'),error);}
 }));
@@ -1130,6 +1149,7 @@ document.getElementById('preview-lifecycle').addEventListener('click',async()=>{
   try{
     lifecyclePreview=await request('/api/lifecycle/preview',payload);
     renderHumanSummary(document.getElementById('lifecycle-preview'),lifecyclePreview);
+    prefillReason('lifecycle-reason',lifecyclePreview);
     document.getElementById('apply-lifecycle').disabled=!lifecyclePreview.has_changes;
   }catch(error){renderRequestError(document.getElementById('lifecycle-preview'),error);}
 });
@@ -1158,6 +1178,7 @@ async function refreshRelativesPreview(){
   try{
     relativesPreview=await request('/api/relatives/preview',{target:window.SDB_TARGET});
     renderHumanSummary(element,relativesPreview);
+    prefillReason('relatives-reason',relativesPreview);
     document.getElementById('apply-relatives').disabled=!relativesPreview.has_changes;
   }catch(error){relativesPreview=null;renderRequestError(element,error);}
 }

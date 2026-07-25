@@ -26,7 +26,7 @@ from .models import (
     RawCatalogRow,
     Target,
 )
-from .decisions import validate_actor_reason
+from .decisions import DecisionContext
 from .dirty import clear_export_dirty, mark_export_dirty
 from .service import normalize_identifier
 
@@ -475,29 +475,35 @@ class CuratedDatasetService:
         record_no: int,
         target_reference: str | int,
         *,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
     ) -> CuratedAssociationAction:
-        validate_actor_reason(actor, reason)
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
             target = self._target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Associated {dataset} record {record_no} with {target.sdbid}"
+                ),
+            )
             old_target_id = record.target_id
             action = CuratedAssociationAction(
                 dataset=dataset,
                 record_no=record_no,
                 action="associate",
                 target_id=target.id,
-                actor=actor.strip(),
-                reason=reason.strip(),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(action)
             record.target_id = target.id
             record.association_status = "matched"
             record.association_method = "manual"
-            record.association_message = reason.strip()
+            record.association_message = decision.reason
             self._refresh_counts(session, revision)
             self._rematerialize(session, revision)
             if old_target_id is not None and old_target_id != target.id:
@@ -511,26 +517,30 @@ class CuratedDatasetService:
         dataset: str,
         record_no: int,
         *,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
     ) -> CuratedAssociationAction:
-        validate_actor_reason(actor, reason)
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
             old_target_id = record.target_id
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=f"Removed association for {dataset} record {record_no}",
+            )
             action = CuratedAssociationAction(
                 dataset=dataset,
                 record_no=record_no,
                 action="unassociate",
-                target_id=None,
-                actor=actor.strip(),
-                reason=reason.strip(),
+                target_id=old_target_id,
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(action)
             record.target_id = None
             record.association_status = "unresolved"
             record.association_method = "manual_unassociated"
-            record.association_message = reason.strip()
+            record.association_message = decision.reason
             self._refresh_counts(session, revision)
             self._rematerialize(session, revision)
             if old_target_id is not None:
@@ -544,19 +554,25 @@ class CuratedDatasetService:
         record_no: int,
         *,
         excluded: bool,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
     ) -> CuratedPhotometryOverride:
-        if not actor.strip() or not reason.strip():
-            raise ValueError("actor and reason are required")
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"{'Excluded' if excluded else 'Included'} {dataset} "
+                    f"record {record_no} photometry"
+                ),
+            )
             override = CuratedPhotometryOverride(
                 dataset=dataset,
                 record_no=record_no,
                 excluded=excluded,
-                actor=actor.strip(),
-                reason=reason.strip(),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(override)
             if record.target_id is not None:

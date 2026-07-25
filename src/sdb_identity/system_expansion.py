@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
+from .decisions import DecisionContext
 from .dirty import find_target, mark_export_dirty
 from .hierarchy import (
     HierarchyService,
@@ -128,17 +129,22 @@ def import_immediate_relatives(
     target_reference: str | int,
     *,
     identity_service: IdentityService,
-    actor: str,
-    reason: str,
+    actor: str | None,
+    reason: str | None = None,
 ) -> RelativeImportResult:
-    if not actor.strip() or not reason.strip():
-        raise ValueError("actor and reason are required")
     preview = preview_immediate_relatives(session_factory, target_reference)
     with session_factory() as session:
         requested = find_target(session, target_reference)
         if requested is None:
             raise KeyError(f"target not found: {target_reference}")
         requested_sdbid = requested.sdbid
+    decision = DecisionContext.resolve(
+        actor=actor,
+        reason=reason,
+        suggested_reason=(
+            f"Imported and reconciled immediate stellar relatives for {requested_sdbid}"
+        ),
+    )
 
     hierarchy = HierarchyService(session_factory)
     system = _find_or_create_expansion_system(
@@ -149,8 +155,8 @@ def import_immediate_relatives(
         hierarchy,
         requested_sdbid,
         system_id=system.id,
-        actor=actor,
-        reason=reason,
+        actor=decision.actor,
+        reason=decision.reason,
     )
     rows = []
     counts = {
@@ -195,8 +201,8 @@ def import_immediate_relatives(
             target_sdbid,
             role=str(relative["suggested_role"]),
             state=str(relative["suggested_state"]),
-            actor=actor,
-            reason=reason,
+            actor=decision.actor,
+            reason=decision.reason,
         )
         _ensure_simbad_relationship(
             session_factory,
@@ -204,8 +210,8 @@ def import_immediate_relatives(
             requested_sdbid=requested_sdbid,
             relative_sdbid=target_sdbid,
             relative=relative,
-            actor=actor,
-            reason=reason,
+            actor=decision.actor,
+            reason=decision.reason,
         )
         if relative["direction"] == "parent" and relative["suggested_role"] == "composite":
             system.name = _promote_system_primary(

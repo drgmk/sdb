@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .decisions import DecisionContext
 from .dirty import find_target
 from .models import Sample, SampleMembershipAction, Target
 
@@ -75,10 +76,16 @@ class SampleService:
                 for value in session.scalars(select(Sample).order_by(Sample.name))
             ]
 
-    def add(self, name: str, target_reference: str | int, *, actor: str, reason: str):
+    def add(
+        self, name: str, target_reference: str | int, *,
+        actor: str | None, reason: str | None = None,
+    ):
         return self._action(name, target_reference, "add", actor=actor, reason=reason)
 
-    def remove(self, name: str, target_reference: str | int, *, actor: str, reason: str):
+    def remove(
+        self, name: str, target_reference: str | int, *,
+        actor: str | None, reason: str | None = None,
+    ):
         return self._action(name, target_reference, "remove", actor=actor, reason=reason)
 
     def members(self, name: str) -> list[Target]:
@@ -105,7 +112,8 @@ class SampleService:
             ))
 
     def import_members(
-        self, name: str, path: str | Path, *, actor: str, reason: str,
+        self, name: str, path: str | Path, *,
+        actor: str | None, reason: str | None = None,
     ) -> dict[str, int]:
         path = Path(path)
         text = path.read_text(encoding="utf-8-sig")
@@ -121,7 +129,6 @@ class SampleService:
             if not reference:
                 raise ValueError(f"row {number} has no target, sdbid, or name")
             references.append(reference)
-        actor, reason = self._audit(actor, reason)
         with self.sessions.begin() as session:
             sample = self._sample(session, name)
             targets = []
@@ -130,6 +137,14 @@ class SampleService:
                 if target is None:
                     raise KeyError(f"target not found: {reference}")
                 targets.append(target)
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Imported {len({target.id for target in targets})} "
+                    f"members into sample {sample.name} from {path.name}"
+                ),
+            )
             added = skipped = 0
             unique_targets = {target.id: target for target in targets}.values()
             for target in unique_targets:
@@ -138,13 +153,12 @@ class SampleService:
                     continue
                 session.add(SampleMembershipAction(
                     sample_id=sample.id, target_id=target.id, action="add",
-                    actor=actor, reason=reason,
+                    actor=decision.actor, reason=decision.reason,
                 ))
                 added += 1
             return {"rows": len(rows), "added": added, "skipped": skipped}
 
     def _action(self, name, target_reference, action, *, actor, reason):
-        actor, reason = self._audit(actor, reason)
         with self.sessions.begin() as session:
             sample = self._sample(session, name)
             target = find_target(session, target_reference)
@@ -154,9 +168,18 @@ class SampleService:
             if current == action or (current is None and action == "remove"):
                 state = "member" if action == "add" else "not a member"
                 raise ValueError(f"target is already {state} of sample {sample.name}")
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"{'Added' if action == 'add' else 'Removed'} "
+                    f"{target.sdbid} {'to' if action == 'add' else 'from'} "
+                    f"sample {sample.name}"
+                ),
+            )
             value = SampleMembershipAction(
                 sample_id=sample.id, target_id=target.id, action=action,
-                actor=actor, reason=reason,
+                actor=decision.actor, reason=decision.reason,
             )
             session.add(value)
             session.flush()
@@ -206,10 +229,3 @@ class SampleService:
             return None
         clean = str(value).strip()
         return clean or None
-
-    @staticmethod
-    def _audit(actor, reason):
-        actor, reason = str(actor).strip(), str(reason).strip()
-        if not actor or not reason:
-            raise ValueError("actor and reason are required")
-        return actor, reason

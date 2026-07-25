@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
 from .catalog_resolution import default_resolution
-from .decisions import validate_actor_reason
+from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .models import (
     AstrometricSolution,
@@ -686,10 +686,9 @@ class CatalogService:
         self,
         raw_row_id: int,
         *,
-        actor: str,
-        reason: str,
+        actor: str | None,
+        reason: str | None = None,
     ) -> CatalogRefreshResult:
-        validate_actor_reason(actor, reason)
         with self.sessions() as session, session.begin():
             selected_raw = session.get(RawCatalogRow, raw_row_id)
             if selected_raw is None:
@@ -707,6 +706,14 @@ class CatalogService:
                 candidate = adapter.parse_row(payload)
             else:
                 raise ValueError(f"catalog adapter cannot reconstruct candidates: {previous.provider}")
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Selected {previous.provider} source {candidate.source_id} "
+                    f"for target {previous.target_id}"
+                ),
+            )
 
             replacement = CatalogRun(
                 target_id=previous.target_id,
@@ -779,8 +786,8 @@ class CatalogService:
                 previous_run_id=previous.id,
                 replacement_run_id=replacement.id,
                 selected_source_id=candidate.source_id,
-                actor=actor.strip(),
-                reason=reason.strip(),
+                actor=decision.actor,
+                reason=decision.reason,
             )
             session.add(override)
             session.flush()

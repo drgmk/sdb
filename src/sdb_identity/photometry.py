@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
-from .decisions import validate_actor_reason, validate_enum_field
+from .decisions import DecisionContext, validate_enum_field
 from .catalog_measurements import current_measurement_encounters
 from .models import (
     CatalogRun, ExternalIdentifier, MeasurementAssociationAction,
@@ -37,23 +37,30 @@ def set_photometry_override(
     provider: str,
     band: str,
     excluded: bool,
-    actor: str,
-    reason: str,
+    actor: str | None,
+    reason: str | None = None,
 ) -> PhotometryOverride:
     if not provider.strip() or not band.strip():
         raise ValueError("provider and band are required")
-    validate_actor_reason(actor, reason)
     with session_factory.begin() as session:
         target = _target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=(
+                f"{'Excluded' if excluded else 'Included'} {target.sdbid} "
+                f"{provider.strip().lower()} {band.strip().upper()} for fitting and export"
+            ),
+        )
         value = PhotometryOverride(
             target_id=target.id,
             provider=provider.strip().lower(),
             band=band.strip().upper(),
             excluded=excluded,
-            actor=actor.strip(),
-            reason=reason.strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         session.add(value)
         session.flush()
@@ -111,13 +118,13 @@ def assign_measurement_target(
     role: str = "contributor",
     method: str = "manual",
     weight: float | None = None,
-    actor: str,
-    reason: str,
+    actor: str | None,
+    reason: str | None = None,
 ) -> MeasurementTargetAssociation:
     role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
     method = method.strip().lower()
-    if not method or not actor.strip() or not reason.strip():
-        raise ValueError("method, actor, and reason are required")
+    if not method:
+        raise ValueError("method is required")
     if weight is not None and weight < 0:
         raise ValueError("weight must be non-negative")
     with session_factory.begin() as session:
@@ -127,6 +134,14 @@ def assign_measurement_target(
         target = _target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=(
+                f"Assigned measurement {measurement.id} to {target.sdbid} "
+                f"as {role.replace('_', ' ')}"
+            ),
+        )
         association = session.scalar(select(MeasurementTargetAssociation).where(
             MeasurementTargetAssociation.measurement_id == measurement.id,
             MeasurementTargetAssociation.target_id == target.id,
@@ -139,13 +154,13 @@ def assign_measurement_target(
                 role=role,
                 method=method,
                 weight=weight,
-                note=reason.strip(),
+                note=decision.reason,
             )
             session.add(association)
         else:
             association.method = method
             association.weight = weight
-            association.note = reason.strip()
+            association.note = decision.reason
         action = MeasurementAssociationAction(
             measurement_id=measurement.id,
             target_id=target.id,
@@ -153,8 +168,8 @@ def assign_measurement_target(
             role=role,
             method=method,
             weight=weight,
-            actor=actor.strip(),
-            reason=reason.strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         session.add(action)
         session.flush()
@@ -175,11 +190,10 @@ def unassign_measurement_target(
     target_reference: str | int,
     *,
     role: str = "contributor",
-    actor: str,
-    reason: str,
+    actor: str | None,
+    reason: str | None = None,
 ) -> MeasurementAssociationAction:
     role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
-    validate_actor_reason(actor, reason)
     with session_factory.begin() as session:
         measurement = session.get(NormalizedMeasurement, measurement_id)
         if measurement is None:
@@ -194,6 +208,14 @@ def unassign_measurement_target(
         ))
         if association is None:
             raise KeyError("current measurement assignment not found")
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=(
+                f"Removed measurement {measurement.id} assignment to "
+                f"{target.sdbid} as {role.replace('_', ' ')}"
+            ),
+        )
         action = MeasurementAssociationAction(
             measurement_id=measurement.id,
             target_id=target.id,
@@ -201,8 +223,8 @@ def unassign_measurement_target(
             role=association.role,
             method=association.method,
             weight=association.weight,
-            actor=actor.strip(),
-            reason=reason.strip(),
+            actor=decision.actor,
+            reason=decision.reason,
         )
         session.add(action)
         session.delete(association)

@@ -74,6 +74,8 @@ def test_fit_eligibility_review_appends_atomic_band_overrides(session_factory):
         session_factory, changes=changes,
     )
     assert preview["has_changes"] is True
+    assert "Excluded" in preview["suggested_reason"]
+    assert "Included" in preview["suggested_reason"]
     assert {row["desired_excluded"] for row in preview["changes"]} == {False, True}
 
     applied = review_photometry_eligibility_decision(
@@ -98,6 +100,33 @@ def test_fit_eligibility_review_appends_atomic_band_overrides(session_factory):
         session_factory, changes=changes,
     )
     assert repeated["has_changes"] is False
+
+
+def test_fit_eligibility_review_can_store_suggested_reason(
+    session_factory, monkeypatch,
+):
+    monkeypatch.setenv("SDB_ACTOR", "reviewer")
+    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
+    _wise_measurements(session_factory, target)
+    changes = [{
+        "target": target.sdbid,
+        "provider": "allwise",
+        "band": "WISE3P4",
+        "excluded": True,
+    }]
+    preview = review_photometry_eligibility_decision(
+        session_factory, changes=changes,
+    )
+    review_photometry_eligibility_decision(
+        session_factory,
+        changes=changes,
+        apply=True,
+        expected_token=preview["state_token"],
+    )
+    with session_factory() as session:
+        override = session.scalar(select(PhotometryOverride))
+    assert override.actor == "reviewer"
+    assert override.reason == preview["suggested_reason"]
 
 
 def test_detection_decision_previews_and_atomically_assigns_all_selected_bands(

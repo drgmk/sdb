@@ -10,8 +10,14 @@ def test_migration_builds_schema_and_views(tmp_path):
     init_database(path)
     with sqlite3.connect(path) as connection:
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
         views = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='view'")}
     assert version is not None
+    assert "operator_actions" not in tables
     assert {"target_summary", "unresolved_submissions", "ambiguous_matches", "failed_provider_requests"} <= views
 
 
@@ -72,7 +78,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0041_photometry_semantics"
+    assert version == "0042_drop_operator_actions"
     assert {
         "photometry_overrides",
         "dataset_revisions", "curated_records",
@@ -151,5 +157,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0041_photometry_semantics"
+    assert version == "0042_drop_operator_actions"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

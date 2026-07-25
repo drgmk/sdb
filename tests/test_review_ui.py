@@ -16,7 +16,8 @@ from tests.test_system_expansion import _root_with_metadata
 from tests.test_system_photometry_foundation import _configured_system
 
 
-def test_review_ui_queue_preview_and_apply(session_factory):
+def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
+    monkeypatch.setenv("SDB_ACTOR", "browser reviewer")
     system, component_a, component_b = _configured_system(session_factory)
     measurements = _wise_measurements(session_factory, system)
     for measurement in measurements:
@@ -63,6 +64,8 @@ def test_review_ui_queue_preview_and_apply(session_factory):
     assert "Include in fit/export" in workspace.text
     assert "Show but exclude from fit" in workspace.text
     assert "/api/eligibility/preview" in workspace.text
+    assert 'id="actor" value="browser reviewer"' in workspace.text
+    assert "prefillReason('reason',currentPreview)" in workspace.text
 
     sky = client.get(f"/target/{system.sdbid}/sky")
     assert sky.status_code == 200
@@ -84,6 +87,7 @@ def test_review_ui_queue_preview_and_apply(session_factory):
     assert preview.status_code == 200
     preview_value = preview.json()
     assert preview_value["has_changes"] is True
+    assert preview_value["suggested_reason"].startswith("Reviewed allwise source")
     assert len(preview_value["add_assignments"]) == 4
     assert preview_value["human_summary"]["title"] == "Decision changes ready"
     assert any("Add contributor" in row for row in preview_value["human_summary"]["changes"])

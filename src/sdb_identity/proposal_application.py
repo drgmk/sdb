@@ -5,6 +5,7 @@ from collections import Counter
 from sqlalchemy.orm import Session, sessionmaker
 
 from .assignment_proposals import measurement_assignment_proposals
+from .decisions import configured_actor, resolve_reason
 from .dirty import find_target
 from .photometry import assign_measurement_target
 from .progress import NULL_PROGRESS, ProgressReporter
@@ -30,10 +31,11 @@ def apply_measurement_assignment_proposals(
     """
     if (target_reference is None) == (sample is None):
         raise ValueError("specify exactly one target or --sample")
-    if apply and not str(actor or "").strip():
-        raise ValueError("--actor is required with --apply")
-    if not reason.strip():
-        raise ValueError("reason is required")
+    resolved_actor = configured_actor(actor) if apply else None
+    resolved_reason = resolve_reason(
+        reason,
+        "Accepted high-confidence automatic assignment proposals",
+    )
     reporter = reporter or NULL_PROGRESS
     references = _references(
         session_factory, target_reference=target_reference, sample=sample
@@ -120,7 +122,7 @@ def apply_measurement_assignment_proposals(
 
         status = "planned"
         if apply:
-            audit_reason = f"{reason.strip()}; {proposal['proposal_reason']}"
+            audit_reason = f"{resolved_reason}; {proposal['proposal_reason']}"
             for value in missing:
                 assign_measurement_target(
                     session_factory,
@@ -128,7 +130,7 @@ def apply_measurement_assignment_proposals(
                     int(value["target_id"]),
                     role=str(value["role"]),
                     method="automatic_proposal",
-                    actor=str(actor).strip(),
+                    actor=resolved_actor,
                     reason=audit_reason,
                 )
             status = "applied"

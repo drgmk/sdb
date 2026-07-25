@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from .database import init_database, make_session_factory
+from .decisions import configured_actor
 from .models import AstrometricSolution, CatalogRun, MatchCandidate, RawCatalogRow, Target
 from .providers import ProviderError
 from .service import AddRequest, IdentityService, UnresolvedTarget
@@ -30,6 +31,28 @@ def _add_parser(subparsers, name: str, summary: str, detail: str, **kwargs):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         **kwargs,
     )
+
+
+def _add_actor_argument(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--actor",
+        default=os.environ.get("SDB_ACTOR"),
+        help="audit actor; defaults to SDB_ACTOR",
+    )
+    command.set_defaults(_operator_audit=True)
+
+
+def _add_reason_argument(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--reason",
+        help="audit reason; a contextual description is generated when omitted",
+    )
+
+
+def _prepare_operator_audit(args: argparse.Namespace) -> None:
+    if not getattr(args, "_operator_audit", False):
+        return
+    args.actor = configured_actor(getattr(args, "actor", None))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -82,6 +105,9 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--epoch", type=float, default=2000.0)
     status = _add_parser(commands, "status", "Show the identity and provider state for one target.", "TARGET may be an sdbid or known identifier. The report is intended for quick inspection before refreshing catalogs, reviewing matches, or exporting photometry.")
     status.add_argument("target")
+    history = _add_parser(commands, "history", "Show operator decisions for one target system.", "Builds a normalized timeline on demand from the domain-specific action tables. By default it includes every imported member of the target's systems.")
+    history.add_argument("target")
+    history.add_argument("--target-only", action="store_true")
     review = _add_parser(commands, "review", "Inspect review queues or launch the local assignment UI.", "Use this to inspect ambiguous identity/catalog candidates and unresolved IRAS families, or use `review serve --sample NAME` for the localhost-only system-photometry workspace. Queue output is JSON; browser changes require preview followed by an audited apply.")
     review.add_argument("kind", choices=["matches", "catalog-matches", "iras-families", "serve"])
     review.add_argument("--all", action="store_true", dest="review_all")
@@ -96,12 +122,12 @@ def parser() -> argparse.ArgumentParser:
     review_view.add_argument("--open", action="store_true", help="open the generated HTML in the default browser")
     override = _add_parser(commands, "override-match", "Manually accept an identity match candidate.", "This records an append-only audit decision and marks sibling identity candidates as not accepted. Use it only after inspecting `sdb review matches` output.")
     override.add_argument("candidate_id", type=int)
-    override.add_argument("--actor", required=True)
-    override.add_argument("--reason", required=True)
+    _add_actor_argument(override)
+    _add_reason_argument(override)
     catalog_override = _add_parser(commands, "override-catalog-match", "Manually accept a catalog photometry match candidate.", "This changes the current catalog association through an audited override rather than editing raw provider rows. Use it for ambiguous catalog matches after checking source IDs, separation, and notes.")
     catalog_override.add_argument("candidate_id", type=int)
-    catalog_override.add_argument("--actor", required=True)
-    catalog_override.add_argument("--reason", required=True)
+    _add_actor_argument(catalog_override)
+    _add_reason_argument(catalog_override)
     refresh = _add_parser(commands, "refresh", "Refresh one provider for one target.", "Runs a single catalog or metadata provider and stores a versioned result. Previous rows remain available for provenance; current rows are updated only after a successful provider attempt.")
     refresh.add_argument("target")
     refresh.add_argument("--provider", choices=["2mass", "allwise", "gaia_dr3", "tycho2", *REFERENCE_ADAPTERS, "simbad"], required=True)
@@ -208,8 +234,8 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_relatives.add_argument("target")
     hierarchy_import_relatives = _add_parser(hierarchy_commands, "import-relatives", "Import immediate stellar SIMBAD relatives and reconcile one target system.", "Imports only current immediate stellar/substellar parents and children, then records component membership, lifecycle roles, and SIMBAD parent/child evidence. Clusters, moving groups, planets, disks, unknown types, and relatives of newly added targets are not expanded.")
     hierarchy_import_relatives.add_argument("target")
-    hierarchy_import_relatives.add_argument("--actor", required=True)
-    hierarchy_import_relatives.add_argument("--reason", required=True)
+    _add_actor_argument(hierarchy_import_relatives)
+    _add_reason_argument(hierarchy_import_relatives)
     hierarchy_target_state = _add_parser(hierarchy_commands, "target-state", "Show the current physical/composite role and lifecycle state.", "Existing targets default to unspecified/active. States are append-only review decisions and do not yet suppress or otherwise change legacy exports.")
     hierarchy_target_state.add_argument("target")
     hierarchy_set_target_state = _add_parser(hierarchy_commands, "set-target-state", "Record an audited target role and lifecycle state.", "Use physical for fitted stellar components and composite for scopes such as AB. Suppressed, archived, system-only, and superseded states are recorded now but do not alter export until an explicit policy is enabled.")
@@ -217,8 +243,8 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_set_target_state.add_argument("--role", choices=["unspecified", "physical", "composite"], required=True)
     hierarchy_set_target_state.add_argument("--state", choices=["active", "system_only", "review_only", "suppressed", "superseded", "archived"], required=True)
     hierarchy_set_target_state.add_argument("--superseded-by")
-    hierarchy_set_target_state.add_argument("--actor", required=True)
-    hierarchy_set_target_state.add_argument("--reason", required=True)
+    _add_actor_argument(hierarchy_set_target_state)
+    _add_reason_argument(hierarchy_set_target_state)
     hierarchy_review_queue = _add_parser(hierarchy_commands, "review-queue", "Prioritize hierarchy targets needing review.", "Combines hierarchy candidates, accepted decisions, diagnostics, and photometry blend context for a target set. --view priority (default) ranks targets by review priority; --view blend lists hierarchy/blend photometry context per band. Select exactly one target set with TARGET, --sample, or --all.")
     hierarchy_review_queue.add_argument("target", nargs="?")
     hierarchy_review_queue.add_argument("--view", choices=["priority", "blend"], default="priority")
@@ -284,19 +310,19 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_graph_override.add_argument("--status")
     hierarchy_graph_override.add_argument("--type", dest="relation_type")
     hierarchy_graph_override.add_argument("--role", choices=["structural", "non_structural"], dest="structural_role")
-    hierarchy_graph_override.add_argument("--actor", required=True)
-    hierarchy_graph_override.add_argument("--reason", required=True)
+    _add_actor_argument(hierarchy_graph_override)
+    _add_reason_argument(hierarchy_graph_override)
     hierarchy_accept = _add_parser(hierarchy_commands, "accept-candidate", "Accept a hierarchy match candidate.", "Marks one WDS/CCDM candidate as accepted, writes an audit action, and creates a source-backed relationship evidence row. If --system is supplied, the target is also added to that system.")
     hierarchy_accept.add_argument("candidate_id", type=int)
-    hierarchy_accept.add_argument("--actor", required=True)
+    _add_actor_argument(hierarchy_accept)
     hierarchy_accept.add_argument("--reason", default="")
     hierarchy_accept.add_argument("--system")
     hierarchy_accept.add_argument("--component")
     hierarchy_accept.add_argument("--type", default="hierarchy_record", dest="relationship_type")
     hierarchy_reject = _add_parser(hierarchy_commands, "reject-candidate", "Reject a hierarchy match candidate.", "Marks one candidate as rejected and appends an audit action. Rejection does not delete provider rows or candidate evidence.")
     hierarchy_reject.add_argument("candidate_id", type=int)
-    hierarchy_reject.add_argument("--actor", required=True)
-    hierarchy_reject.add_argument("--reason", required=True)
+    _add_actor_argument(hierarchy_reject)
+    _add_reason_argument(hierarchy_reject)
     attributes = _add_parser(commands, "attributes", "Show current catalog attributes for one target.", "Attributes are non-photometric catalog values such as ages or flags copied from provider rows. They are versioned like photometry and can be filtered by --key.")
     attributes.add_argument("target")
     attributes.add_argument("--key")
@@ -305,7 +331,7 @@ def parser() -> argparse.ArgumentParser:
     note_add = _add_parser(note_commands, "add", "Add an operator note to a target.", "Notes are append-only annotations for human context and do not alter provider rows or exported measurements directly. Include an actor so later reviews can trace who added the note.")
     note_add.add_argument("target")
     note_add.add_argument("text")
-    note_add.add_argument("--actor", required=True)
+    _add_actor_argument(note_add)
     note_list = _add_parser(note_commands, "list", "List operator notes for a target.", "Shows notes in database order for quick review. Use this before making manual overrides when the target has known caveats.")
     note_list.add_argument("target")
     sample = _add_parser(commands, "sample", "Create, edit, inspect, and export target samples.", "Samples group arbitrary targets and keep small metadata such as date and note. Membership changes are audited and can drive readiness checks and sample exports.")
@@ -323,8 +349,8 @@ def parser() -> argparse.ArgumentParser:
         sample_action = _add_parser(sample_commands, action, f"{action.title()} one target {'to' if action == 'add' else 'from'} a sample.", "Membership changes are audited with actor and reason. A target can belong to any number of samples.")
         sample_action.add_argument("name")
         sample_action.add_argument("target")
-        sample_action.add_argument("--actor", required=True)
-        sample_action.add_argument("--reason", required=True)
+        _add_actor_argument(sample_action)
+        _add_reason_argument(sample_action)
     sample_members = _add_parser(sample_commands, "members", "List current members of a sample.", "Outputs the targets currently assigned to the sample. This is the membership source used by sample readiness and sample export.")
     sample_members.add_argument("name")
     sample_readiness = _add_parser(sample_commands, "readiness", "Check whether a sample is ready for export or review.", "Reports missing, ambiguous, failed, and dirty provider state across all sample members. The command exits non-zero when blockers remain.")
@@ -337,8 +363,8 @@ def parser() -> argparse.ArgumentParser:
     sample_import = _add_parser(sample_commands, "import", "Import sample membership from a file.", "Adds memberships in bulk while recording actor and reason. The target identities must already exist or be resolvable by the importer format.")
     sample_import.add_argument("name")
     sample_import.add_argument("file")
-    sample_import.add_argument("--actor", required=True)
-    sample_import.add_argument("--reason", required=True)
+    _add_actor_argument(sample_import)
+    _add_reason_argument(sample_import)
     import_command = _add_parser(commands, "import", "Import a CSV batch of target submissions.", "The batch importer creates durable per-row work items that can be resumed or retried. Optional refresh stages run after identity creation with per-stage worker limits.")
     import_command.add_argument("file")
     import_command.add_argument(
@@ -368,8 +394,8 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("target")
         command.add_argument("band")
         command.add_argument("--provider", required=True)
-        command.add_argument("--actor", required=True)
-        command.add_argument("--reason", required=True)
+        _add_actor_argument(command)
+        _add_reason_argument(command)
     photometry_list = _add_parser(photometry_commands, "overrides", "List photometry inclusion/exclusion overrides for a target.", "Shows the append-only include/exclude override decisions recorded for a target's measurements, with actor and reason. It does not list the measurements themselves; use `photometry review` for association context.")
     photometry_list.add_argument("target")
     photometry_review = _add_parser(photometry_commands, "review", "Review current photometry association context for a target.", "Lists current normalized measurements plus unaccepted current raw catalog rows. This is read-only and intended to precede assign (ownership) and include/exclude (fit eligibility) decisions.")
@@ -405,14 +431,14 @@ def parser() -> argparse.ArgumentParser:
     photometry_assign.add_argument("--role", choices=["contributor", "composite_scope"], default="contributor")
     photometry_assign.add_argument("--method", default="manual")
     photometry_assign.add_argument("--weight", type=float)
-    photometry_assign.add_argument("--actor", required=True)
-    photometry_assign.add_argument("--reason", required=True)
+    _add_actor_argument(photometry_assign)
+    _add_reason_argument(photometry_assign)
     photometry_unassign = _add_parser(photometry_commands, "unassign", "Remove a current measurement assignment while preserving its history.", "Deletes only the materialized current assignment and appends an unassign action. Provider rows, normalized photometry, and earlier assignment actions remain intact.")
     photometry_unassign.add_argument("measurement_id", type=int)
     photometry_unassign.add_argument("target")
     photometry_unassign.add_argument("--role", choices=["contributor", "composite_scope"], default="contributor")
-    photometry_unassign.add_argument("--actor", required=True)
-    photometry_unassign.add_argument("--reason", required=True)
+    _add_actor_argument(photometry_unassign)
+    _add_reason_argument(photometry_unassign)
     photometry_assignment_history = _add_parser(photometry_commands, "assignment-history", "List append-only measurement assignment actions.", "Shows every assign and unassign action for a target, including actor, reason, method, role, and optional response weight.")
     photometry_assignment_history.add_argument("target")
     photometry_proposals = _add_parser(photometry_commands, "proposals", "Propose system-level measurement contributors without changing the database.", "Uses exact identifiers, catalog positions, per-band resolution, hierarchy semantics, and target lifecycle state. Ambiguous rows remain review-required; use photometry assign separately to accept a proposal.")
@@ -475,19 +501,19 @@ def parser() -> argparse.ArgumentParser:
     dataset_associate.add_argument("dataset", choices=["submm_obs"])
     dataset_associate.add_argument("record_no", type=int)
     dataset_associate.add_argument("target")
-    dataset_associate.add_argument("--actor", required=True)
-    dataset_associate.add_argument("--reason", required=True)
+    _add_actor_argument(dataset_associate)
+    _add_reason_argument(dataset_associate)
     dataset_unassociate = _add_parser(dataset_commands, "unassociate", "Remove a manual curated-record association.", "Records an audited unassociation without deleting the curated record. Use this when a previous association was wrong or superseded.")
     dataset_unassociate.add_argument("dataset", choices=["submm_obs"])
     dataset_unassociate.add_argument("record_no", type=int)
-    dataset_unassociate.add_argument("--actor", required=True)
-    dataset_unassociate.add_argument("--reason", required=True)
+    _add_actor_argument(dataset_unassociate)
+    _add_reason_argument(dataset_unassociate)
     for action in ("exclude", "include"):
         dataset_override = _add_parser(dataset_commands, action, f"{action.title()} one curated dataset record for export.", "This records an audited inclusion/exclusion decision for curated photometry. The underlying source-controlled record remains unchanged.")
         dataset_override.add_argument("dataset", choices=["submm_obs"])
         dataset_override.add_argument("record_no", type=int)
-        dataset_override.add_argument("--actor", required=True)
-        dataset_override.add_argument("--reason", required=True)
+        _add_actor_argument(dataset_override)
+        _add_reason_argument(dataset_override)
     dataset_pending = _add_parser(dataset_commands, "pending", "List targets with pending curated-data export work.", "Shows dataset changes that have not yet flowed through to target exports. Use this to decide which rawphot files need regeneration.")
     dataset_pending.add_argument("dataset", choices=["submm_obs"])
     dataset_mark_exported = _add_parser(dataset_commands, "mark-exported", "Mark curated-data export work complete for a target.", "Clears pending curated export state after an external export step. This is mainly for controlled workflows where export completion is handled outside `sdb export-dirty`.")
@@ -942,6 +968,11 @@ def _is_json_record_stream(args) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    try:
+        _prepare_operator_audit(args)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     from .progress import ProgressReporter
 
     reporter = ProgressReporter.for_cli(quiet=args.quiet, force=args.progress)
@@ -1144,6 +1175,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"database does not exist: {path}; run 'sdb init'", file=sys.stderr)
         return 2
     sessions = make_session_factory(path)
+    if args.command == "history":
+        from .decision_history import system_decision_history
+
+        try:
+            for value in system_decision_history(
+                sessions,
+                args.target,
+                include_system=not args.target_only,
+            ):
+                print(_format_json(args, value, sort_keys=True))
+        except (KeyError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        return 0
     if args.command == "alma":
         from .alma import AlmaArchiveService
 
