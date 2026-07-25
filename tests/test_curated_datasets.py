@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sdb_identity.datasets import CuratedDatasetService
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.export import export_ipac
-from sdb_identity.models import CatalogRun, DatasetDirtyTarget, ExternalIdentifier
+from sdb_identity.models import CatalogRun, ExportDirtyTarget, ExternalIdentifier
 from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 
 
@@ -87,7 +87,10 @@ def test_submm_reimport_is_idempotent_and_tracks_changes(session_factory, tmp_pa
         ))
         assert [run.target_id for run in current_runs] == [first.target_id]
         dirty = list(session.scalars(
-            select(DatasetDirtyTarget).where(DatasetDirtyTarget.revision_id == changed.revision_id)
+            select(ExportDirtyTarget).where(
+                ExportDirtyTarget.source_type == "dataset",
+                ExportDirtyTarget.source_id == str(changed.revision_id),
+            )
         ))
         assert {row.target_id for row in dirty} == {first.target_id, second.target_id}
 

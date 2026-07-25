@@ -55,26 +55,9 @@ def row_float(row: Any, *names: str) -> float | None:
     return result if math.isfinite(result) else None
 
 
-def _json_value(value):
-    mask = getattr(value, "mask", False)
-    try:
-        masked = bool(mask) if not hasattr(mask, "any") else bool(mask.any())
-    except ValueError:
-        masked = True
-    if masked:
-        return None
-    if hasattr(value, "item") and getattr(value, "ndim", 0) == 0:
-        value = value.item()
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def row_payload(row: Any) -> dict[str, object]:
-    names = row.keys() if isinstance(row, dict) else row.colnames
-    return {str(name): _json_value(row[name]) for name in names}
+# Re-exported from the shared serialization module (kept here for the many
+# call sites that import them from this adapter).
+from ..serialization import json_value as _json_value, row_payload  # noqa: E402,F401
 
 
 @dataclass(frozen=True)

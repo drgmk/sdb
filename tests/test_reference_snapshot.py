@@ -534,7 +534,7 @@ def test_bulk_application_is_idempotent_and_refreshes_changed_rows(session_facto
     changed = service.apply_gaspar()
     assert (changed.refreshed, changed.matched) == (1, 1)
     with session_factory() as session:
-        from sdb_identity.models import NormalizedMeasurement, ReferenceDirtyTarget
+        from sdb_identity.models import ExportDirtyTarget, NormalizedMeasurement
         current = session.scalar(
             select(NormalizedMeasurement)
             .join(CatalogRun, CatalogRun.id == NormalizedMeasurement.run_id)
@@ -546,7 +546,9 @@ def test_bulk_application_is_idempotent_and_refreshes_changed_rows(session_facto
         )
         assert current.value == 13.5
         dirty_targets = {
-            value.target_id for value in session.scalars(select(ReferenceDirtyTarget))
+            value.target_id for value in session.scalars(
+                select(ExportDirtyTarget).where(ExportDirtyTarget.source_type == "reference")
+            )
         }
         assert matched.target_id in dirty_targets
         assert unmatched.target_id in dirty_targets

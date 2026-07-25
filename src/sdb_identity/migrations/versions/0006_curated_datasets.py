@@ -1,6 +1,7 @@
 """Revisioned curated datasets and affected-target tracking."""
 
 from alembic import op
+import sqlalchemy as sa
 
 from sdb_identity.models import Base
 
@@ -10,13 +11,24 @@ branch_labels = None
 depends_on = None
 
 
-TABLES = ("dataset_revisions", "curated_records", "dataset_dirty_targets")
+# dataset_dirty_targets is created inline (its model was retired once
+# export_dirty_targets subsumed it); the rest still come from live metadata.
+TABLES = ("dataset_revisions", "curated_records")
 
 
 def upgrade():
     Base.metadata.create_all(
         bind=op.get_bind(),
         tables=[Base.metadata.tables[name] for name in TABLES],
+    )
+    op.create_table(
+        "dataset_dirty_targets",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("revision_id", sa.Integer(), sa.ForeignKey("dataset_revisions.id"), nullable=False, index=True),
+        sa.Column("target_id", sa.Integer(), sa.ForeignKey("targets.id"), nullable=False, index=True),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("exported_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("revision_id", "target_id"),
     )
     op.execute(
         "CREATE VIEW unresolved_curated_records AS "
@@ -36,6 +48,7 @@ def upgrade():
 def downgrade():
     op.execute("DROP VIEW IF EXISTS pending_dataset_exports")
     op.execute("DROP VIEW IF EXISTS unresolved_curated_records")
+    op.drop_table("dataset_dirty_targets")
     Base.metadata.drop_all(
         bind=op.get_bind(),
         tables=[Base.metadata.tables[name] for name in reversed(TABLES)],

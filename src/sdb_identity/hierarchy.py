@@ -6,10 +6,8 @@ import hashlib
 import json
 import math
 import re
-import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
 
 from sqlalchemy import Integer, delete, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,7 +15,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from .astrometry import angular_separation_arcsec
 from .adapters.vizier import row_payload
 from .adapters.review_metadata import normalize_review_payload
-from .astroquery_config import configure_vizier_class
 from .cache_store import CachedSnapshotData, SnapshotCache
 from .catalog_measurements import (
     current_measurement_encounters,
@@ -50,6 +47,7 @@ from .models import (
 )
 from .providers import Astrometry, ProviderError
 from .service import normalize_identifier
+from .snapshots import SnapshotClient, VizierSnapshotClient
 
 
 HIERARCHY_CATALOGS = {
@@ -79,29 +77,6 @@ _COMPONENT_TOKEN_RE = re.compile(r"^(?:[A-Z]{1,3}|[A-Z][a-z0-9])$")
 _TRAILING_COMPONENT_RE = re.compile(r"(?:^|[\s_-])([A-Z]{1,3}|[A-Z][a-z0-9])$")
 _WDS_CCDM_COMPONENT_RE = re.compile(r"\b(?:WDS|CCDM)\s+J?\d{4,6}[+-]\d{4,6}\s*([A-Z]{1,3}|[A-Z][a-z0-9])\b", re.IGNORECASE)
 _HD_ATTACHED_COMPONENT_RE = re.compile(r"^HD\s+\d+([A-Z]{1,3}|[A-Z][a-z0-9])$")
-
-
-class HierarchySnapshotClient(Protocol):
-    def fetch_tables(self, catalog: str): ...
-    def fetch_readme(self, catalog: str) -> str: ...
-    def source_url(self, catalog: str) -> str: ...
-
-
-class AstroqueryHierarchySnapshotClient:
-    @staticmethod
-    def source_url(catalog: str) -> str:
-        return f"https://vizier.cds.unistra.fr/viz-bin/VizieR?-source={catalog}"
-
-    def fetch_tables(self, catalog: str):
-        from astroquery.vizier import Vizier
-
-        configure_vizier_class(Vizier)
-        return Vizier(columns=["**"], row_limit=-1).get_catalogs(catalog)
-
-    def fetch_readme(self, catalog: str) -> str:
-        url = f"https://cdsarc.cds.unistra.fr/ftp/{catalog}/ReadMe"
-        with urllib.request.urlopen(url, timeout=60) as response:
-            return response.read().decode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -970,7 +945,7 @@ class HierarchyService:
         self,
         provider: str,
         *,
-        client: HierarchySnapshotClient | None = None,
+        client: SnapshotClient | None = None,
         cache_path: str | Path | None = None,
         refresh_cache: bool = False,
         release: str | None = None,
@@ -980,7 +955,7 @@ class HierarchyService:
         catalog = HIERARCHY_CATALOGS.get(provider)
         if catalog is None:
             raise ValueError(f"unsupported hierarchy provider: {provider}")
-        client = client or AstroqueryHierarchySnapshotClient()
+        client = client or VizierSnapshotClient()
         cache_status = "disabled"
         if cache_path is not None:
             cache = SnapshotCache(cache_path)

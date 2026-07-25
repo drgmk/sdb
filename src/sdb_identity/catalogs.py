@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
 from .catalog_resolution import default_resolution
+from .decisions import validate_actor_reason
 from .dirty import mark_export_dirty
 from .models import (
     AstrometricSolution,
@@ -20,7 +21,6 @@ from .models import (
     CatalogRun,
     CatalogAttribute,
     CatalogMatchOverride,
-    CatalogDirtyTarget,
     ExternalIdentifier,
     NormalizedMeasurement,
     RawCatalogRow,
@@ -683,8 +683,7 @@ class CatalogService:
         actor: str,
         reason: str,
     ) -> CatalogRefreshResult:
-        if not actor.strip() or not reason.strip():
-            raise ValueError("actor and reason are required")
+        validate_actor_reason(actor, reason)
         with self.sessions() as session, session.begin():
             selected_raw = session.get(RawCatalogRow, raw_row_id)
             if selected_raw is None:
@@ -779,11 +778,6 @@ class CatalogService:
             )
             session.add(override)
             session.flush()
-            session.add(CatalogDirtyTarget(
-                override_id=override.id,
-                target_id=previous.target_id,
-                reason="manual catalog candidate selection",
-            ))
             mark_export_dirty(
                 session,
                 previous.target_id,

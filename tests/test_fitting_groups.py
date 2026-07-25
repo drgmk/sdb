@@ -218,7 +218,7 @@ def test_assignment_readiness_cli_table_and_json(
     )
 
     assert main([
-        "--database", str(db_path), "photometry", "assignment-readiness",
+        "--database", str(db_path), "photometry", "fitting-groups", "--view", "readiness",
         target.sdbid,
     ]) == 0
     table = capsys.readouterr().out
@@ -227,7 +227,7 @@ def test_assignment_readiness_cli_table_and_json(
     assert "decide whether the target is physical or composite" in table
 
     assert main([
-        "--database", str(db_path), "photometry", "assignment-readiness",
+        "--database", str(db_path), "photometry", "fitting-groups", "--view", "readiness",
         target.sdbid, "--format", "json",
     ]) == 0
     value = json.loads(capsys.readouterr().out)

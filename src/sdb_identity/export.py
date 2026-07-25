@@ -3,16 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from astropy.table import Table
-from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
     CatalogRun,
-    CatalogDirtyTarget,
     CuratedPhotometryOverride,
-    DatasetDirtyTarget,
     ExternalIdentifier,
     IrasBandSelection,
     IrasDetectionFamily,
@@ -20,7 +17,6 @@ from .models import (
     NormalizedMeasurement,
     PhotometryOverride,
     RawCatalogRow,
-    ReferenceDirtyTarget,
     SimbadMetadata,
     Target,
 )
@@ -220,28 +216,4 @@ def export_ipac(
     table.write(output, format="ascii.ipac", overwrite=True)
     with session_factory() as session, session.begin():
         clear_export_dirty(session, target.id)
-        session.execute(
-            update(DatasetDirtyTarget)
-            .where(
-                DatasetDirtyTarget.target_id == target.id,
-                DatasetDirtyTarget.exported_at.is_(None),
-            )
-            .values(exported_at=datetime.now(timezone.utc))
-        )
-        session.execute(
-            update(ReferenceDirtyTarget)
-            .where(
-                ReferenceDirtyTarget.target_id == target.id,
-                ReferenceDirtyTarget.exported_at.is_(None),
-            )
-            .values(exported_at=datetime.now(timezone.utc))
-        )
-        session.execute(
-            update(CatalogDirtyTarget)
-            .where(
-                CatalogDirtyTarget.target_id == target.id,
-                CatalogDirtyTarget.exported_at.is_(None),
-            )
-            .values(exported_at=datetime.now(timezone.utc))
-        )
     return output

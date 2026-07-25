@@ -10,6 +10,8 @@ from typing import Iterable
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from .serialization import row_payload as _row_payload, safe_json as _safe_json
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -102,40 +104,6 @@ class CacheValidationResult:
     row_count: int
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
-
-
-def _json_default(value):
-    if hasattr(value, "item"):
-        value = value.item()
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    return str(value)
-
-
-def _safe_json(value) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=_json_default)
-
-
-def _json_value(value):
-    mask = getattr(value, "mask", False)
-    try:
-        masked = bool(mask) if not hasattr(mask, "any") else bool(mask.any())
-    except ValueError:
-        masked = True
-    if masked:
-        return None
-    if hasattr(value, "item") and getattr(value, "ndim", 0) == 0:
-        value = value.item()
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _row_payload(row) -> dict[str, object]:
-    names = row.keys() if isinstance(row, dict) else row.colnames
-    return {str(name): _json_value(row[name]) for name in names}
 
 
 def _table_name(table, fallback: str) -> str:

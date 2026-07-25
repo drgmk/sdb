@@ -1,6 +1,7 @@
 """Durable bulk application of whole-catalog reference snapshots."""
 
 from alembic import op
+import sqlalchemy as sa
 
 from sdb_identity.models import Base
 
@@ -9,11 +10,12 @@ down_revision = "0007_curated_controls"
 branch_labels = None
 depends_on = None
 
+# reference_dirty_targets is created inline (its model was retired once
+# export_dirty_targets subsumed it); the rest still come from live metadata.
 TABLES = (
     "reference_application_runs",
     "reference_application_items",
     "reference_application_records",
-    "reference_dirty_targets",
 )
 
 
@@ -21,6 +23,15 @@ def upgrade():
     Base.metadata.create_all(
         bind=op.get_bind(),
         tables=[Base.metadata.tables[name] for name in TABLES],
+    )
+    op.create_table(
+        "reference_dirty_targets",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("application_run_id", sa.Integer(), sa.ForeignKey("reference_application_runs.id"), nullable=False, index=True),
+        sa.Column("target_id", sa.Integer(), sa.ForeignKey("targets.id"), nullable=False, index=True),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("exported_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("application_run_id", "target_id"),
     )
     op.execute(
         "CREATE VIEW reference_application_status AS "
@@ -48,6 +59,7 @@ def downgrade():
     op.execute("DROP VIEW IF EXISTS pending_reference_exports")
     op.execute("DROP VIEW IF EXISTS unmatched_reference_records")
     op.execute("DROP VIEW IF EXISTS reference_application_status")
+    op.drop_table("reference_dirty_targets")
     Base.metadata.drop_all(
         bind=op.get_bind(),
         tables=[Base.metadata.tables[name] for name in reversed(TABLES)],

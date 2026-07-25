@@ -4,12 +4,13 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import propagate_to_epoch
 from .catalogs import CatalogQueryContext, CatalogService
-from .models import AstrometricSolution, CatalogRun, ExternalIdentifier, ReferenceApplicationItem, ReferenceApplicationRecord, ReferenceApplicationRun, ReferenceDirtyTarget, Target
+from .dirty import mark_export_dirty
+from .models import AstrometricSolution, CatalogRun, ExportDirtyTarget, ExternalIdentifier, ReferenceApplicationItem, ReferenceApplicationRecord, ReferenceApplicationRun, Target
 from .providers import Astrometry
 from .adapters.reference import snapshot_adapter
 from .reference_definitions import SNAPSHOT_CATALOGS
@@ -150,11 +151,13 @@ class ReferenceApplicationService:
                     selected_source_id=result.selected_source_id,
                     candidate_count=result.candidate_count,
                 ))
-                session.add(ReferenceDirtyTarget(
-                    application_run_id=application_id,
-                    target_id=result.target_id,
+                mark_export_dirty(
+                    session,
+                    result.target_id,
+                    source_type="reference",
+                    source_id=application_id,
                     reason="reference snapshot applied",
-                ))
+                )
 
             current_selected: dict[str, list[int]] = defaultdict(list)
             for run in session.scalars(select(CatalogRun).where(
@@ -271,11 +274,17 @@ class ReferenceApplicationService:
     def pending(self, provider: str | None = None):
         with self.sessions() as session:
             query = (
-                select(ReferenceDirtyTarget, Target, ReferenceApplicationRun)
-                .join(ReferenceApplicationRun, ReferenceApplicationRun.id == ReferenceDirtyTarget.application_run_id)
-                .join(Target, Target.id == ReferenceDirtyTarget.target_id)
-                .where(ReferenceDirtyTarget.exported_at.is_(None))
-                .order_by(ReferenceDirtyTarget.id)
+                select(ExportDirtyTarget, Target, ReferenceApplicationRun)
+                .join(Target, Target.id == ExportDirtyTarget.target_id)
+                .join(
+                    ReferenceApplicationRun,
+                    ReferenceApplicationRun.id == cast(ExportDirtyTarget.source_id, Integer),
+                )
+                .where(
+                    ExportDirtyTarget.source_type == "reference",
+                    ExportDirtyTarget.exported_at.is_(None),
+                )
+                .order_by(ExportDirtyTarget.id)
             )
             if provider is not None:
                 query = query.where(ReferenceApplicationRun.provider == provider)

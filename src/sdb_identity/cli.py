@@ -413,8 +413,6 @@ def parser() -> argparse.ArgumentParser:
     photometry_unassign.add_argument("--role", choices=["contributor", "composite_scope"], default="contributor")
     photometry_unassign.add_argument("--actor", required=True)
     photometry_unassign.add_argument("--reason", required=True)
-    photometry_assignments = _add_parser(photometry_commands, "assignments", "List current measurement assignments for a target.", "Shows the current contributor/composite-scope projection used to build future system-level fitting inputs. Use assignment-history to inspect superseded actions.")
-    photometry_assignments.add_argument("target")
     photometry_assignment_history = _add_parser(photometry_commands, "assignment-history", "List append-only measurement assignment actions.", "Shows every assign and unassign action for a target, including actor, reason, method, role, and optional response weight.")
     photometry_assignment_history.add_argument("target")
     photometry_proposals = _add_parser(photometry_commands, "proposals", "Propose system-level measurement contributors without changing the database.", "Uses exact identifiers, catalog positions, per-band resolution, hierarchy semantics, and target lifecycle state. Ambiguous rows remain review-required; use photometry assign separately to accept a proposal.")
@@ -445,25 +443,22 @@ def parser() -> argparse.ArgumentParser:
     photometry_fitting_groups = _add_parser(
         photometry_commands,
         "fitting-groups",
-        "Derive read-only joint-fitting groups from accepted assignments.",
+        "Read-only joint-fitting groups and assignment views from accepted assignments.",
         "Physical targets are connected only by included measurements assigned to more than "
         "one contributor. Composite targets remain measurement scopes rather than model nodes; "
-        "excluded and unresolved measurements are reported without changing the database.",
+        "excluded and unresolved measurements are reported without changing the database. "
+        "--view full (default) prints the whole projection; --view readiness summarizes "
+        "system-level blockers and previews SIMBAD stellar relatives; --view assignments lists "
+        "the current contributor/composite-scope projection for one target.",
     )
     photometry_fitting_groups.add_argument("target", nargs="?")
     photometry_fitting_groups.add_argument("--sample")
-    photometry_assignment_readiness = _add_parser(
-        photometry_commands,
-        "assignment-readiness",
-        "Summarize system-level blockers in accepted photometry assignments.",
-        "Groups composite-scope measurements by target, distinguishes confirmed composites "
-        "from targets whose role is unspecified, and previews immediate SIMBAD stellar "
-        "relatives. This is read-only and does not import targets or alter assignments.",
+    photometry_fitting_groups.add_argument(
+        "--view", choices=["full", "readiness", "assignments"], default="full",
     )
-    photometry_assignment_readiness.add_argument("target", nargs="?")
-    photometry_assignment_readiness.add_argument("--sample")
-    photometry_assignment_readiness.add_argument(
+    photometry_fitting_groups.add_argument(
         "--format", choices=["table", "json", "jsonl"], default="table",
+        help="readiness view only; full and assignments views always print JSON",
     )
     dataset = _add_parser(commands, "dataset", "Import and manage curated source-controlled datasets.", "Curated datasets such as submm_obs are reimportable tables maintained outside remote providers. The commands reconcile records to targets, review unresolved rows, and control export inclusion.")
     dataset_commands = dataset.add_subparsers(dest="dataset_command", required=True)
@@ -2108,12 +2103,6 @@ def main(argv: list[str] | None = None) -> int:
                     "actor": value.actor,
                     "reason": value.reason,
                 }, sort_keys=True))
-            elif args.photometry_command == "assignments":
-                print(_format_json(
-                    args,
-                    list_measurement_target_assignments(sessions, args.target),
-                    sort_keys=True,
-                ))
             elif args.photometry_command == "assignment-history":
                 print(_format_json(args, [{
                     "action_id": value.id,
@@ -2154,32 +2143,39 @@ def main(argv: list[str] | None = None) -> int:
                     sort_keys=True,
                 ))
             elif args.photometry_command == "fitting-groups":
-                from .fitting_groups import fitting_group_report
+                if args.view == "assignments":
+                    print(_format_json(
+                        args,
+                        list_measurement_target_assignments(sessions, args.target),
+                        sort_keys=True,
+                    ))
+                elif args.view == "readiness":
+                    from .assignment_readiness import assignment_readiness_report
 
-                print(_format_json(
-                    args,
-                    fitting_group_report(
+                    report = assignment_readiness_report(
                         sessions,
                         target_reference=args.target,
                         sample=args.sample,
-                    ),
-                    sort_keys=True,
-                ))
-            elif args.photometry_command == "assignment-readiness":
-                from .assignment_readiness import assignment_readiness_report
+                    )
+                    if args.format == "table":
+                        print(_format_assignment_readiness_table(report["rows"]))
+                    elif args.format == "jsonl":
+                        for value in report["rows"]:
+                            print(_format_json(args, value, sort_keys=True))
+                    else:
+                        print(_format_json(args, report, sort_keys=True))
+                else:  # full
+                    from .fitting_groups import fitting_group_report
 
-                report = assignment_readiness_report(
-                    sessions,
-                    target_reference=args.target,
-                    sample=args.sample,
-                )
-                if args.format == "table":
-                    print(_format_assignment_readiness_table(report["rows"]))
-                elif args.format == "json":
-                    print(_format_json(args, report, sort_keys=True))
-                else:
-                    for value in report["rows"]:
-                        print(_format_json(args, value, sort_keys=True))
+                    print(_format_json(
+                        args,
+                        fitting_group_report(
+                            sessions,
+                            target_reference=args.target,
+                            sample=args.sample,
+                        ),
+                        sort_keys=True,
+                    ))
         except (KeyError, ValueError) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -2330,7 +2326,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.dataset_command == "pending":
                 for dirty, target in service.pending(args.dataset):
                     print(_format_json(args, {
-                        "dirty_id": dirty.id, "revision_id": dirty.revision_id,
+                        "dirty_id": dirty.id,
+                        "revision_id": None if dirty.source_id is None else int(dirty.source_id),
                         "target_id": target.id, "sdbid": target.sdbid,
                         "reason": dirty.reason,
                     }, sort_keys=True))

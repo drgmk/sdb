@@ -12,7 +12,7 @@ from sdb_identity.catalogs import (
     CatalogService,
     MeasurementValue,
 )
-from sdb_identity.models import CatalogBatchRequest, CatalogDirtyTarget, CatalogMatchOverride, CatalogRun, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
+from sdb_identity.models import CatalogBatchRequest, CatalogMatchOverride, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import AddRequest, IdentityService
@@ -361,7 +361,9 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
         assert audit.previous_run_id == ambiguous.run_id
         assert audit.replacement_run_id == replacement.run_id
         assert audit.reason == "image inspection"
-        assert session.query(CatalogDirtyTarget).count() == 1
+        assert session.query(ExportDirtyTarget).where(
+            ExportDirtyTarget.source_type == "catalog_override"
+        ).count() == 1
         assert session.scalar(select(ExternalIdentifier).where(
             ExternalIdentifier.source == "allwise"
         )) is None

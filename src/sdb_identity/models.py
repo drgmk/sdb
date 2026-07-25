@@ -753,16 +753,6 @@ class CuratedRecord(Base):
     association_message: Mapped[str | None] = mapped_column(Text)
 
 
-class DatasetDirtyTarget(Base):
-    __tablename__ = "dataset_dirty_targets"
-    __table_args__ = (UniqueConstraint("revision_id", "target_id"),)
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    revision_id: Mapped[int] = mapped_column(ForeignKey("dataset_revisions.id"), nullable=False, index=True)
-    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class CuratedAssociationAction(Base):
     __tablename__ = "curated_association_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -827,16 +817,6 @@ class ReferenceApplicationRecord(Base):
     selected_target_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class ReferenceDirtyTarget(Base):
-    __tablename__ = "reference_dirty_targets"
-    __table_args__ = (UniqueConstraint("application_run_id", "target_id"),)
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    application_run_id: Mapped[int] = mapped_column(ForeignKey("reference_application_runs.id"), nullable=False, index=True)
-    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class CatalogMatchOverride(Base):
     __tablename__ = "catalog_match_overrides"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -848,15 +828,6 @@ class CatalogMatchOverride(Base):
     actor: Mapped[str] = mapped_column(String(100), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
-
-class CatalogDirtyTarget(Base):
-    __tablename__ = "catalog_dirty_targets"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    override_id: Mapped[int] = mapped_column(ForeignKey("catalog_match_overrides.id"), nullable=False, unique=True)
-    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExportDirtyTarget(Base):

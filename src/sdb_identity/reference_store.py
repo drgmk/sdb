@@ -10,18 +10,17 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
 
 from astropy.table import Table
-from astroquery.vizier import Vizier
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, bindparam, create_engine, or_, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from .astroquery_config import configure_vizier_class
 from .cache_store import CachedSnapshotData, SnapshotCache
 from .providers import ProviderError
 from .reference_definitions import SNAPSHOT_CATALOGS
+from .serialization import safe_json as _safe_json
 from .service import normalize_identifier
+from .snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
 from .adapters.vizier import row_float, row_payload, row_text
 
 def utcnow():
@@ -103,28 +102,6 @@ class ReferenceRelationship(ReferenceBase):
     to_column: Mapped[str] = mapped_column(String(100), nullable=False)
     parser: Mapped[str] = mapped_column(String(40), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-
-
-class SnapshotClient(Protocol):
-    def fetch_tables(self, catalog: str): ...
-    def fetch_readme(self, catalog: str) -> str: ...
-
-
-class AstroquerySnapshotClient:
-    provider = "vizier"
-
-    @staticmethod
-    def source_url(catalog: str) -> str:
-        return f"https://vizier.cds.unistra.fr/viz-bin/VizieR?-source={catalog}"
-
-    def fetch_tables(self, catalog: str):
-        configure_vizier_class(Vizier)
-        return Vizier(columns=["**"], row_limit=-1).get_catalogs(catalog)
-
-    def fetch_readme(self, catalog: str) -> str:
-        url = f"https://cdsarc.cds.unistra.fr/ftp/{catalog}/ReadMe"
-        with urllib.request.urlopen(url, timeout=30) as response:
-            return response.read().decode("utf-8")
 
 
 class CdsBulkSnapshotClient:
@@ -229,18 +206,6 @@ class SnapshotResult:
     table_count: int
     row_count: int
     unchanged: bool
-
-
-def _json_default(value):
-    if hasattr(value, "item"):
-        value = value.item()
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    return str(value)
-
-
-def _safe_json(value) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=_json_default)
 
 
 def _cached_tables_as_astropy(snapshot: CachedSnapshotData) -> list[Table]:

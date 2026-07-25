@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .decisions import validate_actor_reason, validate_enum_field
 from .dirty import mark_export_dirty
 from .models import ExternalIdentifier, Target, TargetLifecycleAction
 from .service import normalize_identifier
@@ -81,14 +82,9 @@ def set_target_lifecycle(
     reason: str,
     superseded_by: str | int | None = None,
 ) -> TargetLifecycleAction:
-    role = role.strip().lower()
-    state = state.strip().lower()
-    if role not in TARGET_ROLES:
-        raise ValueError(f"role must be one of {sorted(TARGET_ROLES)}")
-    if state not in TARGET_STATES:
-        raise ValueError(f"state must be one of {sorted(TARGET_STATES)}")
-    if not actor.strip() or not reason.strip():
-        raise ValueError("actor and reason are required")
+    role = validate_enum_field(role, TARGET_ROLES, "role")
+    state = validate_enum_field(state, TARGET_STATES, "state")
+    validate_actor_reason(actor, reason)
     if state == "superseded" and superseded_by is None:
         raise ValueError("superseded state requires superseded_by")
     if state != "superseded" and superseded_by is not None:

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
+from .decisions import validate_actor_reason, validate_enum_field
 from .catalog_measurements import current_measurement_encounters
 from .models import (
     CatalogRun, ExternalIdentifier, MeasurementAssociationAction,
@@ -41,8 +42,7 @@ def set_photometry_override(
 ) -> PhotometryOverride:
     if not provider.strip() or not band.strip():
         raise ValueError("provider and band are required")
-    if not actor.strip() or not reason.strip():
-        raise ValueError("actor and reason are required")
+    validate_actor_reason(actor, reason)
     with session_factory.begin() as session:
         target = _target(session, target_reference)
         if target is None:
@@ -113,10 +113,8 @@ def assign_measurement_target(
     actor: str,
     reason: str,
 ) -> MeasurementTargetAssociation:
-    role = role.strip().lower()
+    role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
     method = method.strip().lower()
-    if role not in MEASUREMENT_TARGET_ROLES:
-        raise ValueError(f"role must be one of {sorted(MEASUREMENT_TARGET_ROLES)}")
     if not method or not actor.strip() or not reason.strip():
         raise ValueError("method, actor, and reason are required")
     if weight is not None and weight < 0:
@@ -179,11 +177,8 @@ def unassign_measurement_target(
     actor: str,
     reason: str,
 ) -> MeasurementAssociationAction:
-    role = role.strip().lower()
-    if role not in MEASUREMENT_TARGET_ROLES:
-        raise ValueError(f"role must be one of {sorted(MEASUREMENT_TARGET_ROLES)}")
-    if not actor.strip() or not reason.strip():
-        raise ValueError("actor and reason are required")
+    role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
+    validate_actor_reason(actor, reason)
     with session_factory.begin() as session:
         measurement = session.get(NormalizedMeasurement, measurement_id)
         if measurement is None:

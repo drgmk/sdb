@@ -1,6 +1,7 @@
 """Append-only manual catalog candidate selections."""
 
 from alembic import op
+import sqlalchemy as sa
 
 from sdb_identity.models import Base
 
@@ -13,10 +14,17 @@ depends_on = None
 def upgrade():
     Base.metadata.create_all(
         bind=op.get_bind(),
-        tables=[
-            Base.metadata.tables["catalog_match_overrides"],
-            Base.metadata.tables["catalog_dirty_targets"],
-        ],
+        tables=[Base.metadata.tables["catalog_match_overrides"]],
+    )
+    # catalog_dirty_targets is created inline (its model was retired once
+    # export_dirty_targets subsumed it).
+    op.create_table(
+        "catalog_dirty_targets",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("override_id", sa.Integer(), sa.ForeignKey("catalog_match_overrides.id"), nullable=False, unique=True),
+        sa.Column("target_id", sa.Integer(), sa.ForeignKey("targets.id"), nullable=False, index=True),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("exported_at", sa.DateTime(timezone=True)),
     )
     op.execute(
         "CREATE VIEW pending_catalog_exports AS "
@@ -36,10 +44,8 @@ def upgrade():
 def downgrade():
     op.execute("DROP VIEW IF EXISTS pending_catalog_exports")
     op.execute("DROP VIEW IF EXISTS catalog_match_override_history")
+    op.drop_table("catalog_dirty_targets")
     Base.metadata.drop_all(
         bind=op.get_bind(),
-        tables=[
-            Base.metadata.tables["catalog_dirty_targets"],
-            Base.metadata.tables["catalog_match_overrides"],
-        ],
+        tables=[Base.metadata.tables["catalog_match_overrides"]],
     )

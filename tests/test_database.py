@@ -72,16 +72,15 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0039_drop_hierarchy_edge_tables"
+    assert version == "0040_drop_source_dirty_tables"
     assert {
         "photometry_overrides",
         "dataset_revisions", "curated_records",
-        "dataset_dirty_targets", "curated_association_actions",
+        "curated_association_actions",
         "curated_photometry_overrides",
         "reference_application_runs", "reference_application_items",
-        "reference_application_records", "reference_dirty_targets",
+        "reference_application_records",
         "catalog_match_overrides",
-        "catalog_dirty_targets",
         "catalog_attributes",
         "export_dirty_targets",
         "samples", "sample_membership_actions", "sample_export_runs",
@@ -109,12 +108,10 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
     assert {
         "photometry_override_history",
         "unresolved_curated_records",
-        "pending_dataset_exports", "curated_association_history",
+        "curated_association_history",
         "curated_photometry_override_history",
         "reference_application_status", "unmatched_reference_records",
-        "pending_reference_exports",
         "catalog_match_override_history",
-        "pending_catalog_exports",
         "current_catalog_attributes", "catalog_attribute_conflicts",
         "pending_export_targets",
         "current_sample_memberships", "sample_summary", "sample_export_summary",
@@ -154,5 +151,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0039_drop_hierarchy_edge_tables"
+    assert version == "0040_drop_source_dirty_tables"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

@@ -19,13 +19,14 @@ from .models import (
     CuratedAssociationAction,
     CuratedPhotometryOverride,
     CuratedRecord,
-    DatasetDirtyTarget,
     DatasetRevision,
+    ExportDirtyTarget,
     ExternalIdentifier,
     NormalizedMeasurement,
     RawCatalogRow,
     Target,
 )
+from .decisions import validate_actor_reason
 from .dirty import clear_export_dirty, mark_export_dirty
 from .service import normalize_identifier
 
@@ -249,11 +250,6 @@ class CuratedDatasetService:
             )
             self._materialize(session, revision, records_by_target)
             for target_id, reasons in dirty.items():
-                session.add(DatasetDirtyTarget(
-                    revision_id=revision.id,
-                    target_id=target_id,
-                    reason=", ".join(sorted(reasons)),
-                ))
                 mark_export_dirty(
                     session,
                     target_id,
@@ -375,8 +371,9 @@ class CuratedDatasetService:
                 )
             ) or 0
         affected = session.scalar(
-            select(func.count(DatasetDirtyTarget.id)).where(
-                DatasetDirtyTarget.revision_id == revision.id
+            select(func.count(ExportDirtyTarget.id)).where(
+                ExportDirtyTarget.source_type == "dataset",
+                ExportDirtyTarget.source_id == str(revision.id),
             )
         ) or 0
         return DatasetImportResult(
@@ -481,8 +478,7 @@ class CuratedDatasetService:
         actor: str,
         reason: str,
     ) -> CuratedAssociationAction:
-        if not actor.strip() or not reason.strip():
-            raise ValueError("actor and reason are required")
+        validate_actor_reason(actor, reason)
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
             target = self._target(session, target_reference)
@@ -518,8 +514,7 @@ class CuratedDatasetService:
         actor: str,
         reason: str,
     ) -> CuratedAssociationAction:
-        if not actor.strip() or not reason.strip():
-            raise ValueError("actor and reason are required")
+        validate_actor_reason(actor, reason)
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
             old_target_id = record.target_id
@@ -569,17 +564,25 @@ class CuratedDatasetService:
             session.flush()
             return override
 
-    def pending(self, dataset: str = "submm_obs") -> list[tuple[DatasetDirtyTarget, Target]]:
+    def pending(self, dataset: str = "submm_obs") -> list[tuple[ExportDirtyTarget, Target]]:
         with self.session_factory() as session:
-            return list(session.execute(
-                select(DatasetDirtyTarget, Target)
-                .join(DatasetRevision, DatasetRevision.id == DatasetDirtyTarget.revision_id)
-                .join(Target, Target.id == DatasetDirtyTarget.target_id)
-                .where(
-                    DatasetRevision.dataset == dataset,
-                    DatasetDirtyTarget.exported_at.is_(None),
+            revision_ids = [
+                str(revision_id)
+                for revision_id in session.scalars(
+                    select(DatasetRevision.id).where(DatasetRevision.dataset == dataset)
                 )
-                .order_by(DatasetDirtyTarget.id)
+            ]
+            if not revision_ids:
+                return []
+            return list(session.execute(
+                select(ExportDirtyTarget, Target)
+                .join(Target, Target.id == ExportDirtyTarget.target_id)
+                .where(
+                    ExportDirtyTarget.source_type == "dataset",
+                    ExportDirtyTarget.source_id.in_(revision_ids),
+                    ExportDirtyTarget.exported_at.is_(None),
+                )
+                .order_by(ExportDirtyTarget.id)
             ))
 
     def mark_exported(self, dataset: str, target_reference: str | int) -> int:
@@ -587,18 +590,7 @@ class CuratedDatasetService:
             target = self._target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
-            revision_ids = select(DatasetRevision.id).where(DatasetRevision.dataset == dataset)
-            result = session.execute(
-                update(DatasetDirtyTarget)
-                .where(
-                    DatasetDirtyTarget.revision_id.in_(revision_ids),
-                    DatasetDirtyTarget.target_id == target.id,
-                    DatasetDirtyTarget.exported_at.is_(None),
-                )
-                .values(exported_at=datetime.now(timezone.utc))
-            )
-            clear_export_dirty(session, target.id)
-            return result.rowcount
+            return clear_export_dirty(session, target.id)
 
     @staticmethod
     def _target(session: Session, reference: str | int) -> Target | None:
@@ -657,19 +649,6 @@ class CuratedDatasetService:
 
     @staticmethod
     def _dirty(session, revision_id, target_id, reason):
-        existing = session.scalar(select(DatasetDirtyTarget).where(
-            DatasetDirtyTarget.revision_id == revision_id,
-            DatasetDirtyTarget.target_id == target_id,
-        ))
-        if existing is None:
-            session.add(DatasetDirtyTarget(
-                revision_id=revision_id,
-                target_id=target_id,
-                reason=reason,
-            ))
-        else:
-            existing.reason = f"{existing.reason}, {reason}"
-            existing.exported_at = None
         mark_export_dirty(
             session,
             target_id,

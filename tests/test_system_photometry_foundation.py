@@ -193,7 +193,7 @@ def test_cli_records_lifecycle_and_measurement_assignments(tmp_path, capsys):
     ]) == 0
     capsys.readouterr()
     assert main([
-        *common, "photometry", "assignments", component.sdbid,
+        *common, "photometry", "fitting-groups", "--view", "assignments", component.sdbid,
     ]) == 0
     assert f'"measurement_id": {measurement_id}' in capsys.readouterr().out
 
