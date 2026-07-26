@@ -743,24 +743,6 @@ class HierarchyService:
                     "identity_cross_candidates show rejected/accepted source candidates that resolve to another nearby SDB target",
                 ],
             }
-        from .assignment_proposals import measurement_assignment_proposals
-
-        result["measurement_assignment_proposals"] = measurement_assignment_proposals(
-            self.session_factory,
-            target_reference,
-            system_context=result,
-            target_context_loader=lambda reference: (
-                target_context
-                if str(reference) in {str(target_context["target"]["id"]), str(target_context["target"]["sdbid"])}
-                else self.target_context(reference)
-            ),
-        )
-        from .assignment_proposals import measurement_assignment_matrix
-
-        result["measurement_assignment_matrix"] = measurement_assignment_matrix(
-            result,
-            result["measurement_assignment_proposals"],
-        )
         from .system_expansion import preview_immediate_relatives
 
         try:

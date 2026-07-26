@@ -9,8 +9,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters import catalog_source_display_name
 from .adapters.review_metadata import normalize_review_payload
+from .assignment_review import build_measurement_assignment_review
 
 from .astrometry import propagate_to_epoch
 from .dirty import find_target
@@ -177,6 +177,15 @@ def build_review_sky_view(
             arrows.extend(_proper_motion_arrows(target, solution))
         segments = list(hierarchy_segments)
         system_context = HierarchyService(session_factory).system_context(target.sdbid)
+        assignment_review = build_measurement_assignment_review(
+            session_factory,
+            target.sdbid,
+            system_context=system_context,
+        )
+        system_context["measurement_assignment_proposals"] = (
+            assignment_review.proposals
+        )
+        system_context["measurement_assignment_matrix"] = assignment_review.matrix
 
         if radius_arcsec is None:
             farthest = max((point.separation_arcsec for point in points), default=1.0)
@@ -1040,21 +1049,6 @@ def _view_payload(view: ReviewSkyView) -> dict[str, object]:
         value["y_end_arcsec"] = y_end
         value["point_index"] = candidate_point_index.get(segment.candidate_id)
         segments.append(value)
-    system_context = view.system_context
-    if system_context is not None:
-        system_context = dict(system_context)
-        matrix = dict(system_context.get("measurement_assignment_matrix") or {})
-        matrix["rows"] = [
-            {
-                **row,
-                "source_display_name": catalog_source_display_name(
-                    str(row.get("provider") or ""),
-                    str(row.get("source_id") or ""),
-                ),
-            }
-            for row in matrix.get("rows") or []
-        ]
-        system_context["measurement_assignment_matrix"] = matrix
     return {
         "target_id": view.target_id,
         "sdbid": view.sdbid,
@@ -1066,7 +1060,7 @@ def _view_payload(view: ReviewSkyView) -> dict[str, object]:
         "segments": segments,
         "paths": paths,
         "hierarchy_tree": _hierarchy_tree_payload(segments),
-        "system_context": system_context,
+        "system_context": view.system_context,
     }
 
 

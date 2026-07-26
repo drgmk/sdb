@@ -4,6 +4,7 @@ from astropy.table import Table
 
 from sdb_identity.catalogs import CatalogService, MeasurementValue
 from sdb_identity.assignment_proposals import measurement_assignment_proposals
+from sdb_identity.assignment_review import build_measurement_assignment_review
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
@@ -222,8 +223,15 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
         (component_b.sdbid, "contributor"),
     }
     context = HierarchyService(session_factory).system_context(system.sdbid)
-    assert context["measurement_assignment_proposals"] == proposals
-    matrix = context["measurement_assignment_matrix"]
+    assert "measurement_assignment_proposals" not in context
+    assert "measurement_assignment_matrix" not in context
+    review = build_measurement_assignment_review(
+        session_factory,
+        system.sdbid,
+        system_context=context,
+    )
+    assert review.proposals == proposals
+    matrix = review.matrix
     assert [column["label"] for column in matrix["columns"]] == [
         "A", "B", "proposal AB",
     ]
@@ -233,10 +241,9 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     assert matrix["summary"] == {
         "target_count": 3,
         "measurement_count": 1,
-        "detection_count": 1,
-            "stored_measurement_count": 1,
-            "encounter_count": 1,
-        "duplicate_detection_count": 0,
+        "stored_measurement_count": 1,
+        "encounter_count": 1,
+        "duplicate_measurement_group_count": 0,
         "comparison_counts": {"unassigned": 1},
         "review_required": 0,
     }
@@ -267,14 +274,14 @@ def test_system_matrix_consolidates_duplicate_catalog_detection_for_review(
         assert session.query(NormalizedMeasurement).count() == 1
         assert session.query(RawCatalogRow).count() == 2
 
-    matrix = HierarchyService(session_factory).system_context(system.sdbid)[
-        "measurement_assignment_matrix"
-    ]
+    matrix = build_measurement_assignment_review(
+        session_factory, system.sdbid,
+    ).matrix
 
     assert matrix["summary"]["stored_measurement_count"] == 1
     assert matrix["summary"]["encounter_count"] == 2
-    assert matrix["summary"]["detection_count"] == 1
-    assert matrix["summary"]["duplicate_detection_count"] == 0
+    assert matrix["summary"]["measurement_count"] == 1
+    assert matrix["summary"]["duplicate_measurement_group_count"] == 0
     assert matrix["summary"]["review_required"] == 0
     row = matrix["rows"][0]
     assert row["stored_measurement_count"] == 1

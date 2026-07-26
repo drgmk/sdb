@@ -494,6 +494,8 @@ def test_review_sky_view_includes_photometry_for_accepted_catalog_row(session_fa
     assert any(value.startswith("2MJ=") for value in point.photometry)
     assert "nearest catalog source (prox)=1.70 arcsec" in point.attributes
     assert not any("(_r)" in value for value in point.attributes)
+    assert view.system_context is not None
+    assert "measurement_assignment_matrix" in view.system_context
     html = render_review_sky_html(view)
     assert "photometry" in html
     assert "nearest catalog source" in html
