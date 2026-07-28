@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
+from sdb_identity.models import ExternalIdentifier, Target
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_dashboard import review_dashboard_report
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService
+from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 from tests.test_review_actions import _wise_measurements
 
 
@@ -21,6 +24,17 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
         samples.add(
             "dashboard", target.sdbid, actor="test", reason="dashboard fixture",
         )
+    with session_factory() as session:
+        clean_id = session.scalar(
+            select(Target.id).where(Target.sdbid == clean.sdbid)
+        )
+        session.add(ExternalIdentifier(
+            target_id=clean_id,
+            value="HD 123",
+            normalized_value=normalize_identifier("HD 123"),
+            source="submitted",
+        ))
+        session.commit()
 
     clean_measurements = _wise_measurements(
         session_factory, clean, source_id="clean-wise", ra=10.0,
@@ -55,6 +69,7 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
     rows = {row["sdbid"]: row for row in report["rows"]}
 
     assert rows[clean.sdbid]["classification"] == "assigned_clean"
+    assert rows[clean.sdbid]["display_name"] == "HD 123"
     assert rows[clean.sdbid]["priority"] == "none"
     assert rows[unassigned.sdbid]["classification"] == "unassigned_photometry"
     assert rows[unassigned.sdbid]["unassigned_detection_count"] == 1

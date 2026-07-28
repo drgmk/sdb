@@ -7,9 +7,14 @@ from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.export import export_ipac
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
+from sdb_identity.models import (
+    CuratedRecord,
+    DatasetRevision,
+    ExternalIdentifier,
+)
 from sdb_identity.readiness import ReadinessService
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService
+from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.test_metadata import FakeMetadataProvider
 
@@ -78,6 +83,66 @@ def test_readiness_reports_photometry_review_signals(session_factory):
     assert report.status == "review"
     assert "excluded_photometry" in kinds
     assert "pending_export" in kinds
+
+
+def test_readiness_blocks_only_sample_relevant_unresolved_curated_rows(
+    session_factory,
+):
+    target = _sample_target(session_factory)
+    CatalogService(session_factory, {"2mass": FakeCatalog([])}).refresh(
+        target.target_id, "2mass",
+    )
+    with session_factory() as session, session.begin():
+        session.add(ExternalIdentifier(
+            target_id=target.target_id,
+            value="HD 123",
+            normalized_value=normalize_identifier("HD 123"),
+            source="submitted",
+        ))
+        revision = DatasetRevision(
+            dataset="test_curated",
+            source_path="/test/curated.ipac",
+            source_sha256="a" * 64,
+            status="active",
+            is_current=True,
+            row_count=2,
+            unresolved_count=2,
+        )
+        session.add(revision)
+        session.flush()
+        session.add_all([
+            CuratedRecord(
+                revision_id=revision.id,
+                record_no=1,
+                row_sha256="b" * 64,
+                source_identifier="HD 123",
+                payload_json="{}",
+                association_status="unresolved",
+            ),
+            CuratedRecord(
+                revision_id=revision.id,
+                record_no=2,
+                row_sha256="c" * 64,
+                source_identifier="unrelated target",
+                payload_json="{}",
+                association_status="unresolved",
+            ),
+        ])
+
+    report = ReadinessService(session_factory).report(
+        "science", providers=("2mass",),
+    )
+    curated = [
+        issue for issue in report.issues
+        if issue["kind"] == "curated_record"
+    ]
+
+    assert report.sample_unresolved_curated_count == 1
+    assert report.global_unresolved_curated_count == 2
+    assert report.blocker_count == 1
+    assert len(curated) == 1
+    assert curated[0]["record_no"] == 1
+    assert curated[0]["sdbid"] == target.sdbid
 
 
 def test_readiness_cli_returns_nonzero_only_for_blockers(db_path, capsys):

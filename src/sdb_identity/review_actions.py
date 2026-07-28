@@ -6,6 +6,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .adapters import catalog_source_display_name
 from .decisions import DecisionContext
 from .dirty import find_target, mark_export_dirty
 from .models import (
@@ -14,6 +15,7 @@ from .models import (
     MeasurementTargetAssociation,
     NormalizedMeasurement,
     PhotometryOverride,
+    RawCatalogRow,
     Target,
     TargetLifecycleAction,
 )
@@ -496,6 +498,24 @@ def _decision_snapshot(
         measurements = [value for value in measurements if value.id in selected]
     if not measurements:
         raise ValueError("select at least one measurement from the detection")
+    raw = (
+        None
+        if measurements[0].raw_row_id is None
+        else session.get(RawCatalogRow, measurements[0].raw_row_id)
+    )
+    payload = None
+    if raw is not None:
+        try:
+            parsed_payload = json.loads(raw.payload_json)
+        except (TypeError, json.JSONDecodeError):
+            parsed_payload = None
+        if isinstance(parsed_payload, dict):
+            payload = parsed_payload
+    source_display_name = catalog_source_display_name(
+        detection.provider,
+        detection.source_id,
+        payload,
+    )
     selected_ids = {value.id for value in measurements}
     current = list(session.scalars(
         select(MeasurementTargetAssociation)
@@ -570,7 +590,7 @@ def _decision_snapshot(
         f"{row.role} for {targets[row.target_id].sdbid}" for row in remove_rows
     )
     reason_parts = [
-        f"Reviewed {detection.provider} source {detection.source_id}",
+        f"Reviewed {detection.provider} source {source_display_name}",
         *([f"assigned {add_description}"] if add_description else []),
         *([f"removed {remove_description}"] if remove_description else []),
         *(
@@ -588,6 +608,7 @@ def _decision_snapshot(
             "provider": detection.provider,
             "release": detection.release,
             "source_id": detection.source_id,
+            "source_display_name": source_display_name,
             "ra_deg": detection.ra_deg,
             "dec_deg": detection.dec_deg,
             "epoch": detection.epoch,

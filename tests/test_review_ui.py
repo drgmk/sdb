@@ -5,13 +5,28 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from sdb_identity.models import MeasurementTargetAssociation, PhotometryOverride
+from sdb_identity.adapters.allwise import AllWiseAdapter
+from sdb_identity.catalogs import (
+    CatalogCandidate,
+    CatalogService,
+    MeasurementValue,
+)
+from sdb_identity.models import (
+    CatalogMatchOverride,
+    MeasurementTargetAssociation,
+    MetadataRun,
+    PhotometryOverride,
+    RawCatalogRow,
+    SimbadMetadata,
+)
+from sdb_identity.providers import ProviderError
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from tests.fakes import FakeSimbad, astrometry, simbad_result
 from tests.test_review_actions import _wise_measurements
+from tests.test_catalog import FakeCatalog
 from tests.test_system_expansion import _root_with_metadata
 from tests.test_system_photometry_foundation import _configured_system
 
@@ -19,6 +34,32 @@ from tests.test_system_photometry_foundation import _configured_system
 def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     monkeypatch.setenv("SDB_ACTOR", "browser reviewer")
     system, component_a, component_b = _configured_system(session_factory)
+    with session_factory() as session:
+        for index, (target, main_id) in enumerate((
+            (system, "HD TEST AB"),
+            (component_a, "HD TEST A"),
+            (component_b, "HD TEST B"),
+        ), start=1):
+            run = MetadataRun(
+                target_id=target.target_id,
+                provider="simbad",
+                release="test",
+                status="match",
+                is_current=True,
+                query_identifier=main_id,
+                candidate_count=1,
+            )
+            session.add(run)
+            session.flush()
+            session.add(SimbadMetadata(
+                run_id=run.id,
+                target_id=target.target_id,
+                oid=index,
+                main_id=main_id,
+                ra_deg=10,
+                dec_deg=-20,
+            ))
+        session.commit()
     measurements = _wise_measurements(session_factory, system)
     for measurement in measurements:
         assign_measurement_target(
@@ -45,7 +86,9 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert workspace.status_code == 200
     assert "WISE3P4" in workspace.text
     assert "WISE22" in workspace.text
-    assert "class=\"composite-scope\" checked" in workspace.text
+    assert "class='composite-scope' checked" in workspace.text
+    assert "Measurement applies to the combined system" in workspace.text
+    assert "System target" in workspace.text
     assert f'src="/target/{system.sdbid}/sky"' in workspace.text
     assert "SDB_RAW_ROW_DETECTIONS" in workspace.text
     assert str(measurements[0].raw_row_id) in workspace.text
@@ -60,12 +103,21 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert 'id="relatives-dialog"' in workspace.text
     assert "renderHumanSummary" in workspace.text
     assert "/api/relatives/preview" in workspace.text
-    assert "Preview fit eligibility" in workspace.text
-    assert "Include in fit/export" in workspace.text
-    assert "Show but exclude from fit" in workspace.text
+    assert "Preview include/exclude" in workspace.text
+    assert "Fit include/exclude preview" in workspace.text
+    assert "Included in fit" in workspace.text
+    assert "Exclude from fit" in workspace.text
+    assert "Leave unchanged" not in workspace.text
+    assert "included · included" not in workspace.text
+    assert 'class="preview-grid"' in workspace.text
+    assert 'class="drawer-actions"' in workspace.text
+    assert "--drawer-width:min(420px,38vw)" in workspace.text
     assert "/api/eligibility/preview" in workspace.text
     assert 'id="actor" value="browser reviewer"' in workspace.text
     assert "prefillReason('reason',currentPreview)" in workspace.text
+    assert 'placeholder="Preview suggests a reason"' in workspace.text
+    assert "<code>HD TEST A</code> (physical)" in workspace.text
+    assert "<code>HD TEST B</code> (physical)" in workspace.text
 
     sky = client.get(f"/target/{system.sdbid}/sky")
     assert sky.status_code == 200
@@ -115,7 +167,7 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert eligibility_preview.status_code == 200
     eligibility_value = eligibility_preview.json()
     assert eligibility_value["human_summary"]["title"] == (
-        "Fit-eligibility changes ready"
+        "Fit include/exclude changes ready"
     )
     eligibility_apply = client.post("/api/eligibility/apply", json={
         "changes": [{
@@ -157,6 +209,46 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert lifecycle_apply.json()["applied"]["lifecycle_actions"] == 1
 
 
+def test_review_ui_assignment_drawer_uses_snapshot_catalog_display_id(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    CatalogService(session_factory, {
+        "hip2": FakeCatalog(
+            [CatalogCandidate(
+                source_id="36948",
+                ra_deg=10,
+                dec_deg=-20,
+                epoch=1991.25,
+                payload={"HIP": 36948},
+                measurements=(MeasurementValue(
+                    band="HP",
+                    value=8.36,
+                    resolution_major_arcsec=0.1,
+                    resolution_minor_arcsec=0.1,
+                    resolution_kind="test",
+                    resolution_reference="test",
+                ),),
+            )],
+            name="hip2",
+            release="fake-hip2",
+            query_epoch=1991.25,
+        ),
+    }).refresh(target.sdbid, "hip2")
+
+    client = TestClient(create_review_app(session_factory))
+    workspace = client.get(f"/target/{target.sdbid}")
+    sky = client.get(f"/target/{target.sdbid}/sky")
+
+    assert workspace.status_code == 200
+    assert "<h3>hip2 · HIP 36948</h3>" in workspace.text
+    assert "pointDisplayId(point)" in workspace.text
+    assert sky.status_code == 200
+    assert '"source_display_name": "HIP 36948"' in sky.text
+
+
 def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_factory):
     root = _root_with_metadata(session_factory)
     identity = IdentityService(
@@ -180,12 +272,17 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
     assert value["has_changes"] is True
     assert value["counts"] == {
         "import": 1,
-        "already_imported": 0,
+        "reconcile": 0,
+        "complete": 0,
         "context_only": 2,
         "review_required": 1,
     }
     assert value["human_summary"]["title"] == "SIMBAD-relative changes ready"
     assert any("Import HD 1B" in row for row in value["human_summary"]["changes"])
+    assert any(
+        "HD 1 b — planet" in row
+        for row in value["human_summary"]["warnings"]
+    )
 
     applied = client.post("/api/relatives/apply", json={
         "target": root.sdbid,
@@ -199,6 +296,107 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
     assert result["failed"] == 0
     assert result["human_summary"]["title"].startswith("Relative import finished")
     assert any("Imported HD 1B" in row for row in result["human_summary"]["changes"])
+
+    current = client.post(
+        "/api/relatives/preview", json={"target": root.sdbid},
+    ).json()
+    assert current["has_changes"] is False
+    assert current["counts"]["complete"] == 1
+    assert current["counts"]["import"] == 0
+    assert current["counts"]["reconcile"] == 0
+
+    _wise_measurements(session_factory, root)
+    workspace = client.get(f"/target/{root.sdbid}")
+    assert workspace.status_code == 200
+    assert "<code>HD 1 AB</code>" in workspace.text
+    assert "<code>HD 1B</code> (physical)" in workspace.text
+
+
+def test_review_ui_previews_catalog_accept_no_match_and_retry(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    adapter = AllWiseAdapter()
+    rows = [
+        {
+            "AllWISE": "one", "RAJ2000": 10.00010, "DEJ2000": -20,
+            "qph": "AAAA", "ccf": "0000", "W1mag": 7.0, "e_W1mag": 0.1,
+        },
+        {
+            "AllWISE": "two", "RAJ2000": 10.00011, "DEJ2000": -20,
+            "qph": "AAAA", "ccf": "0000", "W1mag": 8.0, "e_W1mag": 0.1,
+        },
+    ]
+    adapter.query = lambda context: [
+        adapter.parse_row(row) for row in rows
+    ]
+    service = CatalogService(session_factory, {"allwise": adapter})
+    ambiguous = service.refresh(target.sdbid, "allwise")
+    with session_factory() as session:
+        candidate = session.scalar(
+            select(RawCatalogRow)
+            .where(RawCatalogRow.run_id == ambiguous.run_id)
+            .order_by(RawCatalogRow.id.desc())
+        )
+
+    client = TestClient(create_review_app(
+        session_factory,
+        catalog_service_factory=lambda provider, action: service,
+    ))
+    workspace = client.get(f"/target/{target.sdbid}")
+    assert "Preview accept candidate" in workspace.text
+    assert "Preview no match" in workspace.text
+    assert "/api/provider-result/preview" in workspace.text
+
+    accepted = client.post("/api/provider-result/preview", json={
+        "action": "accept_candidate",
+        "run_id": ambiguous.run_id,
+        "raw_row_id": candidate.id,
+    })
+    assert accepted.status_code == 200
+    assert accepted.json()["human_summary"]["title"] == (
+        "Catalog candidate ready to accept"
+    )
+
+    no_match = client.post("/api/provider-result/preview", json={
+        "action": "reviewed_no_match",
+        "run_id": ambiguous.run_id,
+        "raw_row_id": candidate.id,
+    })
+    assert no_match.status_code == 200
+    no_match_value = no_match.json()
+    applied = client.post("/api/provider-result/apply", json={
+        "action": "reviewed_no_match",
+        "run_id": ambiguous.run_id,
+        "raw_row_id": candidate.id,
+        "actor": "browser reviewer",
+        "reason": "neither candidate is the target",
+        "state_token": no_match_value["state_token"],
+    })
+    assert applied.status_code == 200
+    assert applied.json()["applied"]["status"] == "no_match"
+    with session_factory() as session:
+        action = session.scalar(
+            select(CatalogMatchOverride)
+            .where(CatalogMatchOverride.action == "reviewed_no_match")
+        )
+        assert action.reason == "neither candidate is the target"
+
+    def fail(_context):
+        raise ProviderError("temporary provider failure", transient=True)
+
+    adapter.query = fail
+    failed = service.refresh(target.sdbid, "allwise")
+    sky = client.get(f"/target/{target.sdbid}/sky")
+    assert "provider failure" in sky.text
+    assert "transient_failure" in sky.text
+    retry = client.post("/api/provider-result/preview", json={
+        "action": "retry",
+        "run_id": failed.run_id,
+        "raw_row_id": None,
+    })
+    assert retry.status_code == 200
+    assert retry.json()["human_summary"]["title"] == "Provider retry ready"
 
 
 def test_review_ui_relative_import_is_disabled_without_live_identity_service(session_factory):
@@ -266,6 +464,7 @@ def test_review_ui_filters_and_navigates_the_unresolved_queue(session_factory):
     assert "1 of 2" in target.text
     assert "rel='next'" in target.text
     assert quote(ordered[1]) in target.text
+    assert "Measurement applies to the combined system" not in target.text
 
     filtered_out = client.get(
         f"/target/{ordered[0]}",

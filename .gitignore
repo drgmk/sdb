@@ -37,6 +37,7 @@ databases/
 *.sqlite-wal
 *.db-shm
 *.db-wal
+sdb.toml
 
 # Generated logs and scratch output
 *.log

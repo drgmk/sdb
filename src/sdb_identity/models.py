@@ -800,7 +800,10 @@ class CatalogMatchOverride(AuditedActionMixin, Base):
     provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     previous_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
     replacement_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
-    selected_source_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    action: Mapped[str] = mapped_column(
+        String(30), default="accept_candidate", nullable=False, index=True,
+    )
+    selected_source_id: Mapped[str | None] = mapped_column(String(200))
 
 
 class ExportDirtyTarget(Base):

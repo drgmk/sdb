@@ -11,6 +11,7 @@ from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.service import AddRequest, IdentityService
+from sdb_identity.update import UpdateSummary
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.test_metadata import FakeMetadataProvider, snapshot
 
@@ -246,6 +247,45 @@ def test_cli_offline_update_reports_missing_snapshot(tmp_path, capsys):
     assert result["items"][0]["action"] == "missing"
 
 
+def test_cli_update_routes_provider_chatter_to_stderr(
+    tmp_path, capsys, monkeypatch,
+):
+    database = tmp_path / "cli.sqlite"
+    main(["--database", str(database), "init"])
+    capsys.readouterr()
+    main([
+        "--database", str(database), "--offline", "add",
+        "--ra", "10", "--dec", "-20",
+    ])
+    target = json.loads(capsys.readouterr().out)
+
+    class NoisyUpdateService:
+        def update_target(self, *args, **kwargs):
+            print("third-party provider status")
+            return UpdateSummary(
+                target_count=1,
+                refreshed=1,
+                skipped=0,
+                missing=0,
+                failed=0,
+                items=(),
+            )
+
+    monkeypatch.setattr(
+        "sdb_identity.cli._update_service",
+        lambda *args, **kwargs: NoisyUpdateService(),
+    )
+    assert main([
+        "--database", str(database), "update", target["sdbid"],
+        "--providers", "2mass",
+    ]) == 0
+    captured = capsys.readouterr()
+
+    assert json.loads(captured.out)["refreshed"] == 1
+    assert "third-party provider status" not in captured.out
+    assert "third-party provider status" in captured.err
+
+
 def test_cli_batch_validates_worker_settings(tmp_path, capsys):
     database = tmp_path / "cli.sqlite"
     targets = tmp_path / "targets.csv"
@@ -399,6 +439,7 @@ def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
 
     assert main(["--database", str(database), "review", "catalog-matches"]) == 0
     reviewed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {value["sdbid"] for value in reviewed} == {target.sdbid}
     chosen = next(value for value in reviewed if value["source_id"] == "two")
     assert main([
         "--database", str(database), "override-catalog-match",

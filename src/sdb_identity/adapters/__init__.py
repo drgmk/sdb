@@ -1,5 +1,8 @@
 """Catalog adapters for querying and normalizing external data."""
 
+import re
+from collections.abc import Mapping
+
 from .allwise import AllWiseAdapter
 from .gaia import GaiaDr3Adapter
 from .reference import (
@@ -15,6 +18,8 @@ from .reference import (
 from .twomass import TwoMassAdapter
 from .tycho2 import Tycho2Adapter
 from .vizier import BandDefinition, VizierConeAdapter
+from ..reference_definitions import SNAPSHOT_CATALOGS
+from ..service import normalize_identifier
 
 
 _IDENTIFIER_ADAPTERS = {
@@ -25,21 +30,77 @@ _IDENTIFIER_ADAPTERS = {
 }
 
 
+def _catalog_identifier_key(value: str) -> str:
+    normalized = normalize_identifier(value)
+    matched = re.fullmatch(r"(HD|HIP|GL|GJ|LHS)\s*0*(\d+)", normalized)
+    if matched is not None:
+        return f"{matched.group(1)} {int(matched.group(2))}"
+    return normalized
+
+
+def catalog_candidate_identifiers(
+    provider: str,
+    source_id: str,
+    payload: Mapping[str, object] | None = None,
+) -> tuple[str, ...]:
+    """Return fully-qualified astronomical identifiers for one catalog row.
+
+    Snapshot source IDs are stable database keys and need not themselves be
+    astronomical identifiers. Their definitions therefore construct aliases
+    from the stored provider payload. Live adapters retain their existing
+    source-ID conventions.
+    """
+    definition = SNAPSHOT_CATALOGS.get(provider)
+    if definition is not None and payload is not None:
+        return definition.identifiers(dict(payload))
+    adapter = _IDENTIFIER_ADAPTERS.get(provider)
+    formatter = None if adapter is None else getattr(
+        adapter, "display_source_id", None
+    )
+    if formatter is not None:
+        return (str(formatter(source_id)),)
+    return (str(source_id).strip(),)
+
+
 def catalog_source_id_matches_identifiers(
     provider: str,
     source_id: str,
     identifiers: tuple[str, ...],
+    *,
+    payload: Mapping[str, object] | None = None,
 ) -> bool:
     """Apply the provider's own source-ID convention to SIMBAD aliases."""
+    definition = SNAPSHOT_CATALOGS.get(provider)
+    if definition is not None and payload is not None:
+        candidate_keys = {
+            _catalog_identifier_key(value)
+            for value in catalog_candidate_identifiers(provider, source_id, payload)
+            if value
+        }
+        identifier_keys = {
+            _catalog_identifier_key(value) for value in identifiers if value
+        }
+        return bool(candidate_keys & identifier_keys)
     adapter = _IDENTIFIER_ADAPTERS.get(provider)
     if adapter is not None:
         return adapter.source_id_matches_identifiers(source_id, identifiers)
-    normalized = " ".join(str(source_id).upper().split())
-    return normalized in {" ".join(value.upper().split()) for value in identifiers}
+    normalized = _catalog_identifier_key(source_id)
+    return normalized in {
+        _catalog_identifier_key(value) for value in identifiers if value
+    }
 
 
-def catalog_source_display_name(provider: str, source_id: str) -> str:
+def catalog_source_display_name(
+    provider: str,
+    source_id: str,
+    payload: Mapping[str, object] | None = None,
+) -> str:
     """Return the adapter-owned, human-readable catalog source name."""
+    definition = SNAPSHOT_CATALOGS.get(provider)
+    if definition is not None and payload is not None:
+        identifiers = catalog_candidate_identifiers(provider, source_id, payload)
+        if identifiers:
+            return identifiers[0]
     adapter = _IDENTIFIER_ADAPTERS.get(provider)
     formatter = None if adapter is None else getattr(adapter, "display_source_id", None)
     if formatter is not None:
@@ -63,4 +124,5 @@ __all__ = [
     "snapshot_adapter",
     "catalog_source_id_matches_identifiers",
     "catalog_source_display_name",
+    "catalog_candidate_identifiers",
 ]

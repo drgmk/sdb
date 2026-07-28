@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
-from .adapters import catalog_source_id_matches_identifiers
+from .adapters import (
+    catalog_source_display_name,
+    catalog_source_id_matches_identifiers,
+)
 from .catalog_measurements import current_measurement_encounters
 from .dirty import find_target
 from .models import (
@@ -22,6 +26,7 @@ from .providers import Astrometry
 
 _INACTIVE_STATES = {"suppressed", "superseded", "archived"}
 _AMBIGUOUS_SCOPES = {"ambiguous", "neighbour_context", "reject"}
+_SIMBAD_IDENTIFIER_SOURCES = {"simbad", "simbad_metadata"}
 
 
 def measurement_assignment_proposals(
@@ -78,6 +83,8 @@ def measurement_assignment_proposals(
     target_contexts: dict[str, dict[str, object]] = {}
     result = []
     for measurement in measurements:
+        raw = raw_rows.get(measurement.id)
+        catalog_payload = _raw_catalog_payload(raw)
         origin = _proposal_origin(
             measurement,
             encounter_targets.get(measurement.id, {measurement.target_id}),
@@ -86,14 +93,14 @@ def measurement_assignment_proposals(
             semantic=semantic,
             lifecycle=lifecycle,
             target_astrometry=target_astrometry,
-            raw=raw_rows.get(measurement.id),
+            raw=raw,
+            catalog_payload=catalog_payload,
         )
         origin_context = target_contexts.get(origin.sdbid)
         if origin_context is None:
             origin_context = target_context_loader(origin.sdbid)
             target_contexts[origin.sdbid] = origin_context
         prediction = _measurement_prediction(origin_context, measurement)
-        raw = raw_rows.get(measurement.id)
         source_position = Astrometry(
             origin.ra2000_deg if raw is None else raw.ra_deg,
             origin.dec2000_deg if raw is None else raw.dec_deg,
@@ -108,6 +115,7 @@ def measurement_assignment_proposals(
             identifiers=identifiers,
             semantic=semantic,
             lifecycle=lifecycle,
+            catalog_payload=catalog_payload,
         )
         prediction = _effective_prediction(
             measurement,
@@ -149,6 +157,11 @@ def measurement_assignment_proposals(
             ),
             "provider": measurement.provider,
             "source_id": measurement.source_id,
+            "source_display_name": catalog_source_display_name(
+                measurement.provider,
+                measurement.source_id,
+                catalog_payload,
+            ),
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
@@ -202,6 +215,7 @@ def _proposal_origin(
     lifecycle: dict[str, dict[str, object]],
     target_astrometry: dict[int, Astrometry],
     raw: RawCatalogRow | None,
+    catalog_payload: dict[str, object] | None,
 ) -> Target:
     encountered = [
         targets[target_id]
@@ -216,6 +230,7 @@ def _proposal_origin(
             measurement.provider,
             measurement.source_id,
             identifiers.get(target.id, ()),
+            catalog_payload=catalog_payload,
         )
         if sources:
             identifier_matches.append((target, _identifier_authority(sources)))
@@ -264,12 +279,19 @@ def _matching_identifier_sources(
     provider: str,
     source_id: str,
     identifiers: tuple[tuple[str, str], ...],
+    *,
+    catalog_payload: dict[str, object] | None = None,
 ) -> tuple[str, ...]:
     """Return the provenance of exact catalog identifiers on one target."""
     return tuple(sorted({
         source
         for value, source in identifiers
-        if catalog_source_id_matches_identifiers(provider, source_id, (value,))
+        if catalog_source_id_matches_identifiers(
+            provider,
+            source_id,
+            (value,),
+            payload=catalog_payload,
+        )
     }))
 
 
@@ -281,7 +303,17 @@ def _identifier_authority(sources: tuple[str, ...]) -> int:
     positional match, which must not outrank SIMBAD when both occur elsewhere
     in the same imported system.
     """
-    return 2 if "simbad" in sources else 1
+    return 2 if _SIMBAD_IDENTIFIER_SOURCES.intersection(sources) else 1
+
+
+def _raw_catalog_payload(raw: RawCatalogRow | None) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    try:
+        payload = json.loads(raw.payload_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _target_astrometry(
@@ -369,6 +401,7 @@ def _candidate_rows(
     identifiers: dict[int, tuple[tuple[str, str], ...]],
     semantic: dict[str, dict[str, object]],
     lifecycle: dict[str, dict[str, object]],
+    catalog_payload: dict[str, object] | None,
 ) -> list[dict[str, object]]:
     rows = []
     for target in targets.values():
@@ -377,7 +410,10 @@ def _candidate_rows(
         role, role_basis = effective_target_role(lifecycle_row, semantic_row)
         state = str(lifecycle_row.get("state") or "active")
         identifier_sources = _matching_identifier_sources(
-            provider, source_id, identifiers.get(target.id, ())
+            provider,
+            source_id,
+            identifiers.get(target.id, ()),
+            catalog_payload=catalog_payload,
         )
         rows.append({
             "target_id": target.id,
@@ -481,7 +517,9 @@ def _propose_assignments(
     identifier_composite = [row for row in composites if row["identifier_preferred"]]
     simbad_identifier_composite = [
         row for row in identifier_composite
-        if "simbad" in (row.get("identifier_sources") or [])
+        if _SIMBAD_IDENTIFIER_SOURCES.intersection(
+            row.get("identifier_sources") or []
+        )
     ]
 
     if scope in _AMBIGUOUS_SCOPES:
@@ -567,7 +605,9 @@ def _propose_assignments(
         if not contributors:
             simbad_scopes = [
                 row for row in composite_scopes
-                if "simbad" in (row.get("identifier_sources") or [])
+                if _SIMBAD_IDENTIFIER_SOURCES.intersection(
+                    row.get("identifier_sources") or []
+                )
             ]
             if len(simbad_scopes) == 1:
                 return assignments, (
@@ -616,4 +656,10 @@ def _identifier_source_label(row: dict[str, object]) -> str:
 
 
 def _identifier_evidence(row: dict[str, object]) -> str:
-    return "simbad_identifier" if "simbad" in (row.get("identifier_sources") or []) else "identifier"
+    return (
+        "simbad_identifier"
+        if _SIMBAD_IDENTIFIER_SOURCES.intersection(
+            row.get("identifier_sources") or []
+        )
+        else "identifier"
+    )

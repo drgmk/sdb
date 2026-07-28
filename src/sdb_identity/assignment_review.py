@@ -40,8 +40,25 @@ class AssignmentMatrixCell(TypedDict):
     proposed_roles: list[str]
     proposal_evidence: list[str]
     duplicate_proposal_conflict: bool
+    mixed_band_assignments: bool
+    band_statuses: dict[str, str]
     identifier_match: bool
     separation_arcsec: object
+
+
+class AssignmentMatrixBand(TypedDict):
+    band: str
+    measurement_ids: list[object]
+    stored_measurement_count: int
+    value: object
+    error: object
+    unit: object
+    values_consistent: bool
+    resolution_major_arcsec: object
+    resolution_minor_arcsec: object
+    excluded: bool
+    comparison_to_current: str
+    duplicate_proposal_conflict: bool
 
 
 class AssignmentMatrixRow(TypedDict):
@@ -52,6 +69,8 @@ class AssignmentMatrixRow(TypedDict):
     source_id: str
     source_display_name: str
     band: str
+    band_count: int
+    bands: list[AssignmentMatrixBand]
     value: object
     error: object
     unit: object
@@ -70,12 +89,14 @@ class AssignmentMatrixRow(TypedDict):
     proposal_reason: str
     comparison_to_current: str
     duplicate_proposal_conflict: bool
+    mixed_band_assignments: bool
     cells: list[AssignmentMatrixCell]
 
 
 class AssignmentMatrixSummary(TypedDict):
     target_count: int
     measurement_count: int
+    band_count: int
     stored_measurement_count: int
     encounter_count: int
     duplicate_measurement_group_count: int
@@ -235,91 +256,237 @@ def measurement_assignment_matrix(
         row["sdbid"],
     ))
 
+    def assignment_signature(
+        proposal: dict[str, object],
+        key: str,
+    ) -> frozenset[tuple[str, str]]:
+        return frozenset(
+            (str(row["sdbid"]), str(row["role"]))
+            for row in proposal.get(key) or []
+            if row.get("sdbid")
+        )
+
+    def group_has_duplicate_conflict(
+        group: list[dict[str, object]],
+    ) -> bool:
+        signatures = [
+            assignment_signature(proposal, "proposed_assignments")
+            for proposal in group
+        ]
+        return any(
+            signature != signatures[0]
+            for signature in signatures[1:]
+        )
+
+    def group_comparison(
+        group: list[dict[str, object]],
+        *,
+        duplicate_conflict: bool,
+    ) -> str:
+        comparisons = {
+            str(proposal["comparison_to_current"]) for proposal in group
+        }
+        if duplicate_conflict:
+            return "duplicate_proposal_conflict"
+        if len(comparisons) == 1:
+            return next(iter(comparisons))
+        return "mixed_duplicate_state"
+
+    def band_cell_state(
+        group: list[dict[str, object]],
+        column: AssignmentMatrixColumn,
+    ) -> dict[str, object]:
+        sdbid = column["sdbid"]
+        current_rows = [
+            row
+            for proposal in group
+            for row in proposal.get("current_assignments") or []
+            if row.get("sdbid") == sdbid
+        ]
+        proposed_rows = [
+            row
+            for proposal in group
+            for row in proposal.get("proposed_assignments") or []
+            if row.get("sdbid") == sdbid
+        ]
+        candidate_rows = [
+            row
+            for proposal in group
+            for row in proposal.get("candidate_targets") or []
+            if row.get("sdbid") == sdbid
+        ]
+        current_roles = sorted({
+            str(row["role"]) for row in current_rows
+        })
+        proposed_roles = sorted({
+            str(row["role"]) for row in proposed_rows
+        })
+        current_signatures = [
+            frozenset(
+                str(row["role"])
+                for row in proposal.get("current_assignments") or []
+                if row.get("sdbid") == sdbid
+            )
+            for proposal in group
+        ]
+        proposed_signatures = [
+            frozenset(
+                str(row["role"])
+                for row in proposal.get("proposed_assignments") or []
+                if row.get("sdbid") == sdbid
+            )
+            for proposal in group
+        ]
+        duplicate_conflict = (
+            any(
+                signature != current_signatures[0]
+                for signature in current_signatures[1:]
+            )
+            or any(
+                signature != proposed_signatures[0]
+                for signature in proposed_signatures[1:]
+            )
+        )
+        candidate = min(
+            candidate_rows,
+            key=lambda row: float(row.get("separation_arcsec") or 0.0),
+            default=None,
+        )
+        if duplicate_conflict:
+            status = "differs"
+        elif current_roles and current_roles == proposed_roles:
+            status = "agrees"
+        elif current_roles and proposed_roles:
+            status = "differs"
+        elif current_roles:
+            status = "current_only"
+        elif proposed_roles:
+            status = "proposed"
+        elif candidate is not None:
+            status = "candidate"
+        else:
+            status = "empty"
+        return {
+            "status": status,
+            "current_roles": current_roles,
+            "proposed_roles": proposed_roles,
+            "proposal_evidence": sorted({
+                str(row["evidence"])
+                for row in proposed_rows
+                if row.get("evidence")
+            }),
+            "duplicate_proposal_conflict": duplicate_conflict,
+            "identifier_match": any(
+                bool(row.get("identifier_match")) for row in candidate_rows
+            ),
+            "separation_arcsec": (
+                None if candidate is None
+                else candidate.get("separation_arcsec")
+            ),
+        }
+
     measurement_groups: dict[
-        tuple[str, str, str], list[dict[str, object]]
+        tuple[str, str], list[dict[str, object]]
     ] = {}
     for proposal in proposals:
         key = (
             str(proposal["provider"]),
             str(proposal["source_id"]),
-            str(proposal["band"]),
         )
         measurement_groups.setdefault(key, []).append(proposal)
 
     rows: list[AssignmentMatrixRow] = []
-    for (provider, source_id, band), group in measurement_groups.items():
-        current_by_target = _assignments_by_target([
-            row
-            for proposal in group
-            for row in proposal.get("current_assignments") or []
-        ])
-        proposed_by_target = _assignments_by_target([
-            row
-            for proposal in group
-            for row in proposal.get("proposed_assignments") or []
-        ])
-        candidates_by_target: dict[str, list[dict[str, object]]] = {}
+    for (provider, source_id), group in measurement_groups.items():
+        band_groups: dict[str, list[dict[str, object]]] = {}
         for proposal in group:
-            for candidate in proposal.get("candidate_targets") or []:
-                if candidate.get("sdbid"):
-                    candidates_by_target.setdefault(
-                        str(candidate["sdbid"]), []
-                    ).append(candidate)
-        proposal_signatures = [
-            {
-                (str(row["sdbid"]), str(row["role"]))
-                for row in proposal.get("proposed_assignments") or []
-                if row.get("sdbid")
+            band_groups.setdefault(str(proposal["band"]), []).append(proposal)
+
+        bands: list[AssignmentMatrixBand] = []
+        for band, band_group in sorted(band_groups.items()):
+            first_band = band_group[0]
+            values = {
+                (
+                    proposal.get("value"),
+                    proposal.get("error"),
+                    proposal.get("unit"),
+                )
+                for proposal in band_group
             }
-            for proposal in group
-        ]
-        duplicate_proposal_conflict = any(
-            signature != proposal_signatures[0]
-            for signature in proposal_signatures[1:]
-        )
+            duplicate_conflict = group_has_duplicate_conflict(band_group)
+            bands.append({
+                "band": band,
+                "measurement_ids": [
+                    proposal["measurement_id"] for proposal in band_group
+                ],
+                "stored_measurement_count": len(band_group),
+                "value": first_band["value"],
+                "error": first_band.get("error"),
+                "unit": first_band["unit"],
+                "values_consistent": len(values) == 1,
+                "resolution_major_arcsec": first_band.get(
+                    "resolution_major_arcsec"
+                ),
+                "resolution_minor_arcsec": first_band.get(
+                    "resolution_minor_arcsec"
+                ),
+                "excluded": any(
+                    bool(proposal.get("excluded"))
+                    for proposal in band_group
+                ),
+                "comparison_to_current": group_comparison(
+                    band_group,
+                    duplicate_conflict=duplicate_conflict,
+                ),
+                "duplicate_proposal_conflict": duplicate_conflict,
+            })
+
         cells: list[AssignmentMatrixCell] = []
         for column in columns:
             sdbid = column["sdbid"]
-            current_rows = current_by_target.get(sdbid, [])
-            proposed_rows = proposed_by_target.get(sdbid, [])
-            current_roles = sorted({
-                str(row["role"]) for row in current_rows
-            })
-            proposed_roles = sorted({
-                str(row["role"]) for row in proposed_rows
-            })
-            candidate_rows = candidates_by_target.get(sdbid, [])
-            candidate = min(
-                candidate_rows,
-                key=lambda row: float(row.get("separation_arcsec") or 0.0),
-                default=None,
+            states = {
+                band: band_cell_state(band_group, column)
+                for band, band_group in sorted(band_groups.items())
+            }
+            current_signatures = {
+                tuple(state["current_roles"]) for state in states.values()
+            }
+            proposed_signatures = {
+                tuple(state["proposed_roles"]) for state in states.values()
+            }
+            mixed_band_assignments = (
+                len(current_signatures) > 1
+                or len(proposed_signatures) > 1
             )
-            target_proposal_signatures = [
-                {
-                    str(row["role"])
-                    for row in proposal.get("proposed_assignments") or []
-                    if row.get("sdbid") == sdbid
-                }
-                for proposal in group
-            ]
-            target_proposal_conflict = any(
-                signature != target_proposal_signatures[0]
-                for signature in target_proposal_signatures[1:]
+            duplicate_conflict = any(
+                bool(state["duplicate_proposal_conflict"])
+                for state in states.values()
             )
-            if target_proposal_conflict:
+            statuses = {
+                str(state["status"]) for state in states.values()
+            }
+            if mixed_band_assignments or duplicate_conflict:
                 status = "differs"
-            elif current_roles and current_roles == proposed_roles:
-                status = "agrees"
-            elif current_roles and proposed_roles:
-                status = "differs"
-            elif current_roles:
-                status = "current_only"
-            elif proposed_roles:
-                status = "proposed"
-            elif candidate is not None:
+            elif len(statuses) == 1:
+                status = next(iter(statuses))
+            elif "candidate" in statuses:
                 status = "candidate"
             else:
                 status = "empty"
+            current_roles = sorted({
+                str(role)
+                for state in states.values()
+                for role in state["current_roles"]
+            })
+            proposed_roles = sorted({
+                str(role)
+                for state in states.values()
+                for role in state["proposed_roles"]
+            })
+            separations = [
+                float(state["separation_arcsec"])
+                for state in states.values()
+                if state["separation_arcsec"] is not None
+            ]
             cells.append({
                 "target_id": column["target_id"],
                 "sdbid": sdbid,
@@ -327,34 +494,42 @@ def measurement_assignment_matrix(
                 "current_roles": current_roles,
                 "proposed_roles": proposed_roles,
                 "proposal_evidence": sorted({
-                    str(row["evidence"])
-                    for row in proposed_rows
-                    if row.get("evidence")
+                    str(evidence)
+                    for state in states.values()
+                    for evidence in state["proposal_evidence"]
                 }),
-                "duplicate_proposal_conflict": target_proposal_conflict,
+                "duplicate_proposal_conflict": duplicate_conflict,
+                "mixed_band_assignments": mixed_band_assignments,
+                "band_statuses": {
+                    band: str(state["status"])
+                    for band, state in states.items()
+                },
                 "identifier_match": any(
-                    bool(row.get("identifier_match"))
-                    for row in candidate_rows
+                    bool(state["identifier_match"])
+                    for state in states.values()
                 ),
                 "separation_arcsec": (
-                    None if candidate is None
-                    else candidate.get("separation_arcsec")
+                    None if not separations else min(separations)
                 ),
             })
         first = group[0]
-        values = {
-            (proposal.get("value"), proposal.get("error"), proposal.get("unit"))
-            for proposal in group
-        }
+        duplicate_proposal_conflict = any(
+            band["duplicate_proposal_conflict"] for band in bands
+        )
+        mixed_band_assignments = any(
+            cell["mixed_band_assignments"] for cell in cells
+        )
         comparisons = {
-            str(proposal["comparison_to_current"]) for proposal in group
+            band["comparison_to_current"] for band in bands
         }
         if duplicate_proposal_conflict:
             comparison = "duplicate_proposal_conflict"
+        elif mixed_band_assignments:
+            comparison = "mixed_band_assignments"
         elif len(comparisons) == 1:
             comparison = next(iter(comparisons))
         else:
-            comparison = "mixed_duplicate_state"
+            comparison = "mixed_band_state"
         scopes = sorted({
             str(proposal["predicted_scope"]) for proposal in group
         })
@@ -372,14 +547,19 @@ def measurement_assignment_matrix(
             "stored_measurement_count": len(group),
             "provider": provider,
             "source_id": source_id,
-            "source_display_name": catalog_source_display_name(
-                provider, source_id
+            "source_display_name": str(
+                first.get("source_display_name")
+                or catalog_source_display_name(provider, source_id)
             ),
-            "band": band,
-            "value": first["value"],
-            "error": first.get("error"),
-            "unit": first["unit"],
-            "values_consistent": len(values) == 1,
+            "band": bands[0]["band"] if len(bands) == 1 else "multiple",
+            "band_count": len(bands),
+            "bands": bands,
+            "value": bands[0]["value"] if len(bands) == 1 else None,
+            "error": bands[0]["error"] if len(bands) == 1 else None,
+            "unit": bands[0]["unit"] if len(bands) == 1 else None,
+            "values_consistent": all(
+                band["values_consistent"] for band in bands
+            ),
             "origin_sdbid": first["origin_sdbid"],
             "origin_sdbids": list(dict.fromkeys(
                 str(proposal["origin_sdbid"]) for proposal in group
@@ -418,6 +598,7 @@ def measurement_assignment_matrix(
             "proposal_reason": " | ".join(reasons),
             "comparison_to_current": comparison,
             "duplicate_proposal_conflict": duplicate_proposal_conflict,
+            "mixed_band_assignments": mixed_band_assignments,
             "cells": cells,
         })
 
@@ -433,6 +614,7 @@ def measurement_assignment_matrix(
         "summary": {
             "target_count": len(columns),
             "measurement_count": len(rows),
+            "band_count": sum(row["band_count"] for row in rows),
             "stored_measurement_count": len(proposals),
             "encounter_count": sum(
                 len(proposal.get("encounter_target_ids") or [])
@@ -449,6 +631,8 @@ def measurement_assignment_matrix(
                     "partial_proposal",
                     "duplicate_proposal_conflict",
                     "mixed_duplicate_state",
+                    "mixed_band_assignments",
+                    "mixed_band_state",
                 }
                 or not row["values_consistent"]
                 for row in rows
@@ -458,18 +642,8 @@ def measurement_assignment_matrix(
             "read-only matrix; proposed cells are not persisted assignments",
             "current and proposed roles are retained separately",
             (
-                "rows sharing provider, source ID, and band are one measurement "
-                "group; underlying measurement IDs remain listed"
+                "rows sharing provider and source ID are one detection; bands "
+                "and underlying measurement IDs remain listed"
             ),
         ],
     }
-
-
-def _assignments_by_target(
-    assignments: list[dict[str, object]],
-) -> dict[str, list[dict[str, object]]]:
-    result: dict[str, list[dict[str, object]]] = {}
-    for row in assignments:
-        if row.get("sdbid"):
-            result.setdefault(str(row["sdbid"]), []).append(row)
-    return result

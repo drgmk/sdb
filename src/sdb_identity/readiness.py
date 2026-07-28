@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import pending_export_targets
 from .catalog_measurements import current_measurements_for_target
 from .models import (
     CatalogRun,
+    CuratedRecord,
+    DatasetRevision,
+    ExternalIdentifier,
     IrasDetectionFamily,
     MetadataRun,
     PhotometryOverride,
@@ -16,6 +20,7 @@ from .models import (
     SampleExportRun,
 )
 from .samples import SampleService
+from .service import normalize_identifier
 from .update import DEFAULT_PROVIDERS
 
 
@@ -33,6 +38,7 @@ class ReadinessSummary:
     blocker_count: int
     warning_count: int
     pending_export_count: int
+    sample_unresolved_curated_count: int
     global_unresolved_curated_count: int
     expected_providers: tuple[str, ...]
     issues: tuple[dict, ...]
@@ -54,6 +60,7 @@ class ReadinessService:
                 f"unknown readiness providers: {', '.join(sorted(unknown))}"
             )
         members = SampleService(self.sessions).members(sample_name)
+        members_by_id = {target.id: target for target in members}
         issues = []
         with self.sessions() as session:
             sample = session.scalar(select(Sample).where(Sample.name == sample_name))
@@ -123,9 +130,11 @@ class ReadinessService:
                     "run_id": latest_export.id,
                     "detail": f"latest sample export is {latest_export.status}",
                 })
-            unresolved_curated = session.execute(text(
-                "SELECT COUNT(*) FROM unresolved_curated_records"
-            )).scalar_one()
+            sample_unresolved_curated, unresolved_curated = (
+                self._curated_readiness(
+                    session, members_by_id, issues,
+                )
+            )
 
         pending = pending_export_targets(self.sessions, sample=sample_name)
         for target, event_count, dirty_since in pending:
@@ -144,10 +153,86 @@ class ReadinessService:
             blocker_count=blockers,
             warning_count=warnings,
             pending_export_count=len(pending),
+            sample_unresolved_curated_count=sample_unresolved_curated,
             global_unresolved_curated_count=unresolved_curated,
             expected_providers=providers,
             issues=tuple(issues),
         )
+
+    @staticmethod
+    def _curated_readiness(session, members_by_id, issues):
+        """Report unresolved curated rows only when aliases connect them here.
+
+        Curated source files are intentionally database-wide. Rows with no
+        connection to a selected sample remain useful global diagnostics but
+        cannot block that sample's export.
+        """
+        identifiers: dict[str, set[int]] = defaultdict(set)
+        if members_by_id:
+            for target_id, normalized_value in session.execute(
+                select(
+                    ExternalIdentifier.target_id,
+                    ExternalIdentifier.normalized_value,
+                ).where(ExternalIdentifier.target_id.in_(members_by_id))
+            ):
+                identifiers[normalized_value].add(target_id)
+        unresolved = list(session.execute(
+            select(CuratedRecord, DatasetRevision)
+            .join(
+                DatasetRevision,
+                DatasetRevision.id == CuratedRecord.revision_id,
+            )
+            .where(
+                DatasetRevision.is_current.is_(True),
+                CuratedRecord.association_status != "matched",
+            )
+            .order_by(DatasetRevision.dataset, CuratedRecord.record_no)
+        ))
+        sample_rows = []
+        for record, revision in unresolved:
+            if record.association_method == "manual_unassociated":
+                continue
+            candidate_ids = set()
+            if record.target_id in members_by_id:
+                candidate_ids.add(record.target_id)
+            candidate_ids.update(
+                identifiers.get(
+                    normalize_identifier(record.source_identifier), set(),
+                )
+            )
+            if not candidate_ids:
+                continue
+            candidates = [
+                members_by_id[target_id]
+                for target_id in sorted(candidate_ids)
+                if target_id in members_by_id
+            ]
+            if not candidates:
+                continue
+            sample_rows.append(record)
+            issue = {
+                "severity": "blocker",
+                "kind": "curated_record",
+                "dataset": revision.dataset,
+                "revision_id": revision.id,
+                "record_no": record.record_no,
+                "source_identifier": record.source_identifier,
+                "association_status": record.association_status,
+                "candidate_target_ids": [
+                    target.id for target in candidates
+                ],
+                "candidate_sdbids": [
+                    target.sdbid for target in candidates
+                ],
+                "detail": (
+                    "unresolved curated record may belong to a sample target"
+                ),
+            }
+            if len(candidates) == 1:
+                issue["target_id"] = candidates[0].id
+                issue["sdbid"] = candidates[0].sdbid
+            issues.append(issue)
+        return len(sample_rows), len(unresolved)
 
     @staticmethod
     def _current_run(session, target_id, provider):

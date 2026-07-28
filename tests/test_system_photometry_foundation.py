@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astropy.table import Table
 
-from sdb_identity.catalogs import CatalogService, MeasurementValue
+from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
 from sdb_identity.assignment_proposals import measurement_assignment_proposals
 from sdb_identity.assignment_review import build_measurement_assignment_review
 from sdb_identity.astrometry import propagate_to_epoch
@@ -241,6 +241,7 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     assert matrix["summary"] == {
         "target_count": 3,
         "measurement_count": 1,
+        "band_count": 1,
         "stored_measurement_count": 1,
         "encounter_count": 1,
         "duplicate_measurement_group_count": 0,
@@ -251,6 +252,9 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     assert (row["provider"], row["band"], row["predicted_scope"]) == (
         "allwise", "WISE3P4", "system",
     )
+    assert row["band_count"] == 1
+    assert [band["band"] for band in row["bands"]] == ["WISE3P4"]
+    assert row["mixed_band_assignments"] is False
     assert {
         (cell["sdbid"], cell["status"], tuple(cell["proposed_roles"]))
         for cell in row["cells"]
@@ -289,6 +293,80 @@ def test_system_matrix_consolidates_duplicate_catalog_detection_for_review(
     assert set(row["encounter_sdbids"]) == {system.sdbid, component_a.sdbid}
     assert row["duplicate_proposal_conflict"] is False
     assert row["comparison_to_current"] == "unassigned"
+
+
+def test_system_matrix_collapses_detection_bands_and_marks_mixed_assignments(
+    session_factory,
+):
+    system, component_a, component_b = _configured_system(session_factory)
+    measurements = [
+        MeasurementValue(
+            band=band,
+            value=value,
+            error=0.02,
+            systematic_error=0.01,
+            unit="mag",
+            bibcode="test",
+            resolution_major_arcsec=6.1,
+            resolution_minor_arcsec=6.1,
+            resolution_kind="fwhm",
+            resolution_reference="test",
+        )
+        for band, value in (("WISE3P4", 7.2), ("WISE22", 6.1))
+    ]
+    CatalogService(session_factory, {
+        "allwise": FakeCatalog(
+            [candidate("joint-wise", measurements=measurements)],
+            name="allwise",
+            release="test",
+            query_epoch=2010.5,
+        ),
+    }).refresh(system.sdbid, "allwise")
+    with session_factory() as session:
+        wise3p4 = session.query(NormalizedMeasurement).filter_by(
+            band="WISE3P4"
+        ).one()
+    assign_measurement_target(
+        session_factory,
+        wise3p4.id,
+        component_a.sdbid,
+        role="contributor",
+        method="fixture",
+        actor="test",
+        reason="make band ownership intentionally mixed",
+    )
+
+    matrix = build_measurement_assignment_review(
+        session_factory, system.sdbid,
+    ).matrix
+
+    assert matrix["summary"]["measurement_count"] == 1
+    assert matrix["summary"]["band_count"] == 2
+    assert matrix["summary"]["stored_measurement_count"] == 2
+    assert len(matrix["rows"]) == 1
+    row = matrix["rows"][0]
+    assert row["band_count"] == 2
+    assert [band["band"] for band in row["bands"]] == [
+        "WISE22", "WISE3P4",
+    ]
+    assert row["mixed_band_assignments"] is True
+    assert row["comparison_to_current"] == "mixed_band_assignments"
+    component_a_cell = next(
+        cell for cell in row["cells"]
+        if cell["sdbid"] == component_a.sdbid
+    )
+    assert component_a_cell["status"] == "differs"
+    assert component_a_cell["mixed_band_assignments"] is True
+    assert component_a_cell["band_statuses"] == {
+        "WISE22": "proposed",
+        "WISE3P4": "agrees",
+    }
+    component_b_cell = next(
+        cell for cell in row["cells"]
+        if cell["sdbid"] == component_b.sdbid
+    )
+    assert component_b_cell["status"] == "proposed"
+    assert component_b_cell["mixed_band_assignments"] is False
 
 
 def test_resolved_source_between_two_components_remains_review_required(
@@ -363,6 +441,97 @@ def test_exact_simbad_identifier_wins_over_nearest_component_position(
     assert proposal["proposed_assignments"][0]["separation_arcsec"] > 1.0
     nearest = min(proposal["candidate_targets"], key=lambda row: row["separation_arcsec"])
     assert nearest["sdbid"] == component_b.sdbid
+
+
+def test_snapshot_payload_identifiers_drive_hip2_and_paunzen_assignments(
+    session_factory,
+):
+    system, component_a, _component_b = _configured_system(session_factory)
+    with session_factory.begin() as session:
+        for value in ("HIP 36948", "TYC 7109-2638-1"):
+            session.add(ExternalIdentifier(
+                target_id=component_a.target_id,
+                value=value,
+                normalized_value=normalize_identifier(value),
+                source="simbad_metadata",
+            ))
+
+    hip = MeasurementValue(
+        band="HP",
+        value=8.36,
+        resolution_major_arcsec=0.1,
+        resolution_minor_arcsec=0.1,
+        resolution_kind="test",
+        resolution_reference="test",
+    )
+    paunzen = MeasurementValue(
+        band="BS_YS",
+        value=0.46,
+        resolution_major_arcsec=0.8,
+        resolution_minor_arcsec=0.8,
+        resolution_kind="catalog_spatial_resolution_limit",
+        resolution_reference="test",
+    )
+    rows = {
+        "hip2": CatalogCandidate(
+            source_id="36948",
+            ra_deg=10.0 - 0.0003,
+            dec_deg=-20.0,
+            epoch=1991.25,
+            payload={"HIP": 36948},
+            measurements=(hip,),
+        ),
+        "paunzen15": CatalogCandidate(
+            source_id="7109|TYC2=2638|TYC3=1",
+            ra_deg=10.0 - 0.0003,
+            dec_deg=-20.0,
+            epoch=2000.0,
+            payload={"TYC1": 7109, "TYC2": 2638, "TYC3": 1},
+            measurements=(paunzen,),
+        ),
+    }
+    for provider, row in rows.items():
+        CatalogService(session_factory, {provider: FakeCatalog(
+            [row],
+            name=provider,
+            release=f"fake-{provider}",
+            query_epoch=row.epoch,
+        )}).refresh(system.sdbid, provider)
+
+    proposals = {
+        value["provider"]: value
+        for value in measurement_assignment_proposals(
+            session_factory, system.sdbid
+        )
+        if value["provider"] in rows
+    }
+
+    assert set(proposals) == {"hip2", "paunzen15"}
+    for proposal in proposals.values():
+        assert proposal["proposal_confidence"] == "high"
+        assert proposal["proposed_assignments"] == [{
+            "target_id": component_a.target_id,
+            "sdbid": component_a.sdbid,
+            "role": "contributor",
+            "evidence": "simbad_identifier",
+            "identifier_match": True,
+            "identifier_preferred": True,
+            "identifier_sources": ["simbad_metadata"],
+            "separation_arcsec": proposal["proposed_assignments"][0][
+                "separation_arcsec"
+            ],
+        }]
+    matrix = build_measurement_assignment_review(
+        session_factory, system.sdbid
+    ).matrix
+    display_ids = {
+        row["provider"]: row["source_display_name"] for row in matrix["rows"]
+        if row["provider"] in rows
+    }
+    assert display_ids == {
+        "hip2": "HIP 36948",
+        "paunzen15": "TYC 7109-2638-1",
+    }
 
 
 def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
@@ -700,10 +869,20 @@ def test_cli_prints_read_only_measurement_assignment_proposals(tmp_path, capsys)
         "--database", str(database), "photometry", "proposals", system.sdbid,
     ]) == 0
     output = capsys.readouterr().out
-    assert '"proposed_assignments"' in output
-    assert component_a.sdbid in output
-    assert component_b.sdbid in output
+    assert '"providers"' in output
+    assert '"confidence"' in output
+    assert '"review_required_measurements"' in output
+    assert '"proposed_assignments"' not in output
     assert list_measurement_target_assignments(sessions, component_a.sdbid) == []
+
+    assert main([
+        "--database", str(database), "photometry", "proposals", system.sdbid,
+        "--details",
+    ]) == 0
+    detailed = capsys.readouterr().out
+    assert '"proposed_assignments"' in detailed
+    assert component_a.sdbid in detailed
+    assert component_b.sdbid in detailed
 
     assert main([
         "--database", str(database), "photometry", "apply-proposals", system.sdbid,
@@ -711,6 +890,7 @@ def test_cli_prints_read_only_measurement_assignment_proposals(tmp_path, capsys)
     output = capsys.readouterr().out
     assert '"mode": "dry_run"' in output
     assert '"skipped_not_high_confidence": 1' in output
+    assert '"items"' not in output
     assert list_measurement_target_assignments(sessions, component_a.sdbid) == []
 
 

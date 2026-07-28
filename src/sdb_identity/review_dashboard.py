@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .assignment_readiness import assignment_readiness_report
 from .fitting_groups import fitting_group_report
+from .models import ExternalIdentifier
 
 
 _PRIORITY_ORDER = {"highest": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
@@ -32,6 +34,9 @@ def review_dashboard_report(
         for row in graph["targets"]
         if row["selected"]
     }
+    display_names = _target_display_names(
+        session_factory, set(selected_targets),
+    )
     measurements_by_target: dict[int, dict[int, dict[str, object]]] = defaultdict(dict)
     for measurement in graph["measurements"]:
         relevant_target_ids = set(measurement.get("encounter_target_ids") or [])
@@ -58,6 +63,7 @@ def review_dashboard_report(
         rows.append({
             "target_id": target_id,
             "sdbid": target["sdbid"],
+            "display_name": display_names.get(target_id),
             "role": target["role"],
             "state": target["state"],
             "classification": classification,
@@ -125,6 +131,43 @@ def review_dashboard_report(
             "dashboard states use stored encounters and accepted assignments only",
             "open a target to compute detailed identifier, position, hierarchy, and resolution proposals",
         ],
+    }
+
+
+def _target_display_names(
+    session_factory: sessionmaker[Session], target_ids: set[int],
+) -> dict[int, str]:
+    """Choose a recognizable operator label without changing target identity."""
+    if not target_ids:
+        return {}
+    source_priority = {
+        "submitted": 0,
+        "simbad_metadata": 1,
+        "simbad": 2,
+        "gaia_dr3": 3,
+        "2mass": 4,
+    }
+    choices: dict[int, tuple[int, int, str]] = {}
+    with session_factory() as session:
+        identifiers = session.scalars(
+            select(ExternalIdentifier)
+            .where(
+                ExternalIdentifier.target_id.in_(target_ids),
+                ExternalIdentifier.source != "sdb",
+            )
+            .order_by(ExternalIdentifier.id)
+        )
+        for identifier in identifiers:
+            choice = (
+                source_priority.get(identifier.source, 9),
+                identifier.id,
+                identifier.value,
+            )
+            current = choices.get(identifier.target_id)
+            if current is None or choice < current:
+                choices[identifier.target_id] = choice
+    return {
+        target_id: choice[2] for target_id, choice in choices.items()
     }
 
 

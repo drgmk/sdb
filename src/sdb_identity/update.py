@@ -69,6 +69,21 @@ class UpdateService:
         providers: Iterable[str] | None = None,
     ) -> UpdateSummary:
         selected = self._providers(providers)
+        selected = tuple(
+            provider
+            for group in (
+                ("simbad",) if "simbad" in selected else (),
+                tuple(
+                    provider for provider in selected
+                    if provider in SNAPSHOT_CATALOGS
+                ),
+                tuple(
+                    provider for provider in selected
+                    if provider != "simbad" and provider not in SNAPSHOT_CATALOGS
+                ),
+            )
+            for provider in group
+        )
         with self.sessions() as session:
             target = find_target(session, target_reference)
             if target is None:
@@ -97,6 +112,20 @@ class UpdateService:
             )]
         current = self._current_remote_provider_targets(targets, selected)
         items: list[UpdateItem] = []
+
+        if "simbad" in selected:
+            if self._metadata_supports_many():
+                items.extend(self._update_metadata_many(
+                    targets,
+                    "simbad",
+                    force=force,
+                    current_target_ids=current.get("simbad", frozenset()),
+                ))
+            else:
+                items.extend(self._run_ordinary_updates(
+                    targets, ["simbad"], force=force, current=current,
+                ))
+
         snapshot_providers = [
             provider for provider in selected if provider in SNAPSHOT_CATALOGS
         ]
@@ -130,24 +159,16 @@ class UpdateService:
                     None, None, provider, "failed", "failed", str(error)
                 ))
 
-        remote = [provider for provider in selected if provider not in SNAPSHOT_CATALOGS]
-        bulk_metadata_providers = []
+        remote = [provider for provider in selected if provider in REMOTE_CATALOGS]
         bulk_providers = []
         ordinary_providers = []
         for provider in remote:
-            if provider == "simbad" and self._metadata_supports_many():
-                bulk_metadata_providers.append(provider)
-            elif provider != "simbad" and hasattr(
+            if hasattr(
                 self.catalog_factory().adapters.get(provider), "query_many"
             ):
                 bulk_providers.append(provider)
             else:
                 ordinary_providers.append(provider)
-        for provider in bulk_metadata_providers:
-            items.extend(self._update_metadata_many(
-                targets, provider, force=force,
-                current_target_ids=current.get(provider, frozenset()),
-            ))
         for provider in self.reporter.iter(
             bulk_providers,
             desc="Bulk provider refresh",
@@ -158,17 +179,9 @@ class UpdateService:
                 targets, provider, force=force,
                 current_target_ids=current.get(provider, frozenset()),
             ))
-        skipped, jobs = self._ordinary_update_jobs(
+        items.extend(self._run_ordinary_updates(
             targets, ordinary_providers, force=force, current=current,
-        )
-        items.extend(skipped)
-        with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            items.extend(self.reporter.iter(
-                executor.map(lambda job: self._update_one(*job, force=force), jobs),
-                desc="Refreshing providers",
-                total=len(jobs),
-                unit="run",
-            ))
+        ))
         return self._summary(len(targets), items)
 
     def update_targets(
@@ -189,24 +202,38 @@ class UpdateService:
                 targets.append((target.id, target.sdbid))
         targets = list(dict.fromkeys(targets))
         current = self._current_remote_provider_targets(targets, selected)
-        bulk_metadata_providers = []
+        items = []
+        if "simbad" in selected:
+            if self._metadata_supports_many():
+                items.extend(self._update_metadata_many(
+                    targets,
+                    "simbad",
+                    force=force,
+                    current_target_ids=current.get("simbad", frozenset()),
+                ))
+            else:
+                items.extend(self._run_ordinary_updates(
+                    targets, ["simbad"], force=force, current=current,
+                ))
+
+        snapshot_providers = [
+            provider for provider in selected if provider in SNAPSHOT_CATALOGS
+        ]
+        items.extend(self._run_ordinary_updates(
+            targets, snapshot_providers, force=force, current=current,
+        ))
+
         bulk_providers = []
         ordinary_providers = []
-        for provider in selected:
-            if provider == "simbad" and self._metadata_supports_many():
-                bulk_metadata_providers.append(provider)
-            elif provider in REMOTE_CATALOGS and hasattr(
+        for provider in (
+            value for value in selected if value in REMOTE_CATALOGS
+        ):
+            if hasattr(
                 self.catalog_factory().adapters.get(provider), "query_many"
             ):
                 bulk_providers.append(provider)
             else:
                 ordinary_providers.append(provider)
-        items = []
-        for provider in bulk_metadata_providers:
-            items.extend(self._update_metadata_many(
-                targets, provider, force=force,
-                current_target_ids=current.get(provider, frozenset()),
-            ))
         for provider in self.reporter.iter(
             bulk_providers,
             desc="Bulk provider refresh",
@@ -217,17 +244,9 @@ class UpdateService:
                 targets, provider, force=force,
                 current_target_ids=current.get(provider, frozenset()),
             ))
-        skipped, jobs = self._ordinary_update_jobs(
+        items.extend(self._run_ordinary_updates(
             targets, ordinary_providers, force=force, current=current,
-        )
-        items.extend(skipped)
-        with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            items.extend(self.reporter.iter(
-                executor.map(lambda job: self._update_one(*job, force=force), jobs),
-                desc="Refreshing providers",
-                total=len(jobs),
-                unit="run",
-            ))
+        ))
         return self._summary(len(targets), items)
 
     def _update_catalog_many(
@@ -337,6 +356,27 @@ class UpdateService:
                 else:
                     jobs.append((target_id, sdbid, provider))
         return skipped, jobs
+
+    def _run_ordinary_updates(
+        self,
+        targets: list[tuple[int, str]],
+        providers: list[str],
+        *,
+        force: bool,
+        current: dict[str, frozenset[int]] | None = None,
+    ) -> list[UpdateItem]:
+        skipped, jobs = self._ordinary_update_jobs(
+            targets, providers, force=force, current=current,
+        )
+        items = list(skipped)
+        with ThreadPoolExecutor(max_workers=self.workers) as executor:
+            items.extend(self.reporter.iter(
+                executor.map(lambda job: self._update_one(*job, force=force), jobs),
+                desc="Refreshing providers",
+                total=len(jobs),
+                unit="run",
+            ))
+        return items
 
     def _current_remote_provider_targets(
         self,

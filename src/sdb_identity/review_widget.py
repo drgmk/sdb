@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .adapters import catalog_source_display_name
 from .adapters.review_metadata import normalize_review_payload
 from .assignment_review import build_measurement_assignment_review
 
@@ -65,12 +66,14 @@ class SkyPoint:
     ra_deg: float
     dec_deg: float
     separation_arcsec: float
+    source_display_name: str = ""
     score: float | None = None
     accepted: bool = False
     run_id: int | None = None
     raw_row_id: int | None = None
     candidate_id: int | None = None
     target_id: int | None = None
+    run_target_sdbid: str | None = None
     native_epoch: float | None = None
     native_ra_deg: float | None = None
     native_dec_deg: float | None = None
@@ -149,6 +152,7 @@ def build_review_sky_view(
             raise KeyError(f"target not found: {target_reference}")
         center = _target_center(session, target)
         solution = _target_solution(session, target)
+        motion_solution = _target_motion_solution(session, target, solution)
         points = [
             SkyPoint(
                 kind="target",
@@ -160,23 +164,48 @@ def build_review_sky_view(
                 separation_arcsec=0.0,
                 accepted=True,
                 target_id=target.id,
-                pm_ra_cosdec_masyr=None if solution is None else solution.pm_ra_cosdec_masyr,
-                pm_dec_masyr=None if solution is None else solution.pm_dec_masyr,
-                pm_source=None if solution is None else solution.source,
+                pm_ra_cosdec_masyr=(
+                    None
+                    if motion_solution is None
+                    else motion_solution.pm_ra_cosdec_masyr
+                ),
+                pm_dec_masyr=(
+                    None if motion_solution is None else motion_solution.pm_dec_masyr
+                ),
+                pm_source=(
+                    None if motion_solution is None else motion_solution.source
+                ),
                 note="canonical target position",
             )
         ]
-        points.extend(_identity_points(session, target, center))
-        points.extend(_catalog_points(session, target, center))
+        points.extend(
+            _identity_points(
+                session, target, center, motion_solution=motion_solution,
+            )
+        )
+        points.extend(
+            _catalog_points(
+                session, target, center, motion_solution=motion_solution,
+            )
+        )
         points.extend(_simbad_metadata_points(session, target, center))
         hierarchy_points, hierarchy_segments = _hierarchy_points(session, target, center)
         points.extend(hierarchy_points)
         points = _deduplicate_points(points)
         arrows = []
-        if solution is not None:
-            arrows.extend(_proper_motion_arrows(target, solution))
+        if motion_solution is not None:
+            arrows.extend(_proper_motion_arrows(target, motion_solution))
         segments = list(hierarchy_segments)
         system_context = HierarchyService(session_factory).system_context(target.sdbid)
+        points.extend(
+            _related_actionable_catalog_points(
+                session,
+                target,
+                center,
+                system_context=system_context,
+            )
+        )
+        points = _deduplicate_points(points)
         assignment_review = build_measurement_assignment_review(
             session_factory,
             target.sdbid,
@@ -296,6 +325,42 @@ def render_review_sky_html(
     grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
     for point in payload["points"]:
         grouped.setdefault((str(point["provider"]), str(point["status"])), []).append(point)
+    hierarchy_segment_by_candidate = {
+        segment["candidate_id"]: segment
+        for segment in payload["segments"]
+        if segment.get("candidate_id") is not None
+    }
+
+    def point_display_id(point: dict[str, object]) -> object:
+        return point.get("source_display_name") or point["source_id"]
+
+    def point_hover_text(point: dict[str, object]) -> str:
+        if (
+            point.get("kind") == "hierarchy"
+            and point.get("provider") in {"wds", "ccdm"}
+        ):
+            segment = hierarchy_segment_by_candidate.get(
+                point.get("candidate_id")
+            )
+            system = (
+                point["source_id"]
+                if segment is None
+                else segment.get("native_id") or point["source_id"]
+            )
+            component = (
+                None
+                if segment is None
+                else segment.get("component_label") or segment.get("label")
+            )
+            component_line = (
+                "" if not component else f"<br>component {component}"
+            )
+            return (
+                f"{point['provider']} {system}"
+                f"{component_line}<br>{point['status']}<br>"
+                f"separation {_compact_display_value(float(point['separation_arcsec']))}\""
+            )
+        return f"{point['provider']} {point_display_id(point)}"
 
     figure = go.Figure()
     for (provider, status), points in grouped.items():
@@ -305,7 +370,7 @@ def render_review_sky_html(
             y=[point["y_arcsec"] for point in points],
             mode="markers",
             name=f"{provider} / {status}",
-            text=[f"{point['provider']} {point['source_id']}" for point in points],
+            text=[point_hover_text(point) for point in points],
             customdata=[point["index"] for point in points],
             meta={"review_kind": "points"},
             marker={
@@ -431,11 +496,26 @@ def render_review_sky_html(
             line_width = 1 if relation_type == "cross_link" else 2
             line_dash = "dot" if relation_type == "cross_link" else ("solid" if relation_type == "internal" else "dash")
             line_opacity = 0.32 if relation_type == "cross_link" else 0.85
+            point = next(
+                (
+                    value for value in payload["points"]
+                    if value["index"] == segment.get("point_index")
+                ),
+                None,
+            )
+            separation = (
+                ""
+                if point is None
+                else (
+                    f"<br>separation "
+                    f"{_compact_display_value(float(point['separation_arcsec']))}\""
+                )
+            )
             label = (
-                f"{segment['provider']} {segment['source_id']}<br>"
-                f"{segment.get('component_label') or segment['label']} ({relation_type})<br>"
-                f"{segment['status']}<br>"
-                f"{segment['note']}"
+                f"{segment['provider']} "
+                f"{segment.get('native_id') or segment['source_id']}<br>"
+                f"component {segment.get('component_label') or segment['label']}<br>"
+                f"{segment['status']}{separation}"
             )
             figure.add_trace(go.Scatter(
                 x=[segment["x_start_arcsec"], segment["x_end_arcsec"]],
@@ -512,7 +592,7 @@ def render_review_sky_html(
         {
             "x": point["x_arcsec"],
             "y": point["y_arcsec"],
-            "text": f"{point['provider']} {point['source_id']}",
+            "text": f"{point['provider']} {point_display_id(point)}",
             "showarrow": False,
             "xanchor": "left",
             "yanchor": "bottom",
@@ -610,6 +690,7 @@ def render_review_sky_html(
     .matrix-cell.differs {{ background: #fee2e2; color: #991b1b; }}
     .matrix-cell.candidate {{ background: #f1f5f9; color: #64748b; }}
     .matrix-info {{ cursor: help; font-weight: 700; color: #475569; }}
+    .matrix-warning {{ color: #92400e; font-weight: 700; }}
     .details-panel {{ margin-top: 16px; }}
     .details-columns {{ display: grid; grid-template-columns: minmax(210px, 0.8fr) minmax(300px, 1.35fr); gap: 12px; }}
     .detail-list {{ margin: 0; min-width: 0; }}
@@ -618,6 +699,7 @@ def render_review_sky_html(
     @media (max-width: 700px) {{ .details-columns {{ grid-template-columns: 1fr; }} }}
     .point-row.dimmed {{ opacity: 0.35; }}
     .point-row.selected {{ outline: 1px solid var(--grid); border-radius: 5px; background: color-mix(in srgb, var(--panel) 78%, var(--grid)); }}
+    .point-list-controls {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }}
     .tree-group {{ margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--grid); }}
     .tree-title {{ font-weight: 700; margin-bottom: 5px; }}
     .tree-link {{ margin: 5px 0 5px 12px; padding-left: 12px; border-left: 2px solid var(--grid); cursor: pointer; }}
@@ -625,7 +707,8 @@ def render_review_sky_html(
     .tree-link.dimmed {{ opacity: 0.35; }}
     .system-section {{ margin-top: 0; padding-top: 0; border-top: 0; }}
     .system-row {{ margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--grid); }}
-    .system-row.current {{ border-left-color: #111827; }}
+    .system-name {{ font-weight: 700; }}
+    .system-properties {{ margin-top: 3px; }}
     .system-list {{ margin: 6px 0 10px 18px; padding: 0; }}
     .system-list li {{ margin: 4px 0; }}
     .relative-review {{ width: 100%; margin: 4px 0 10px; }}
@@ -644,12 +727,12 @@ def render_review_sky_html(
   </header>
   <main class="layout">
     <aside class="panel context-panel">
+      <h2>Current target</h2>
+      <div id="current-target" class="muted">No current target summary.</div>
       <h2>System context</h2>
       <div id="system-context" class="muted">No system context for this target.</div>
-      <h2>Hierarchy</h2>
+      <h2>Catalog hierarchy &amp; components</h2>
       <div id="hierarchy-tree" class="muted">No hierarchy links for this target.</div>
-      <h2>Components</h2>
-      <div id="component-context" class="muted">No provider components for this target.</div>
     </aside>
     <section class="plot-column">
       <div class="controls plot-controls">
@@ -665,6 +748,7 @@ def render_review_sky_html(
     </section>
     <aside class="panel items-panel">
       <h2>Plotted items</h2>
+      <div class="point-list-controls"><button id="toggle-point-list" type="button">Show all plotted items</button><span id="point-list-summary" class="muted"></span></div>
       <div id="points"></div>
     </aside>
     <aside class="panel photometry-panel">
@@ -680,7 +764,9 @@ def render_review_sky_html(
     let beamsVisible = false;
     let selectedPointIndex = null;
     let clickedPlotItem = false;
+    let pointListExpanded = false;
     function escapeHtml(value) {{ return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }}
+    function pointDisplayId(point) {{ return point.source_display_name || point.source_id; }}
     function pointColor(point) {{ if (point.kind === "identity" && !point.accepted) return statusColors.candidate; return statusColors[point.status] || "#64748b"; }}
     function defaultPointOpacity(point) {{ return point.status === "no_match" || point.status === "review_neighbour" ? 0.55 : 0.95; }}
     function defaultLineOpacity(trace) {{ return trace.meta && trace.meta.relation_type === "cross_link" ? 0.32 : 0.95; }}
@@ -707,18 +793,23 @@ def render_review_sky_html(
     function linkedTargetValue(point) {{
       return point.linked_target_sdbids && point.linked_target_sdbids.length ? ` → ${{point.linked_target_sdbids.join(", ")}}` : "";
     }}
-    function firstUsefulIdentifier(target) {{
-      const ids = target.identifiers || [];
-      return ids.find(value => !String(value).startsWith("sdbid-v3-")) || "";
+    function catalogRunTargetValue(point) {{
+      if (!point.run_target_sdbid || point.run_target_sdbid === view.sdbid) return "";
+      return ` · catalog query for ${{targetMainId(point.run_target_sdbid)}}`;
     }}
-    function compactBands(measurements) {{
-      if (!measurements || !measurements.length) return "no current photometry";
-      const providers = {{}};
-      for (const row of measurements) {{
-        if (!providers[row.provider]) providers[row.provider] = [];
-        providers[row.provider].push(row.band);
-      }}
-      return Object.entries(providers).map(([provider, bands]) => `${{provider}}: ${{bands.length}} band${{bands.length === 1 ? "" : "s"}}`).join("; ");
+    function targetReviewLink(sdbid, label) {{
+      return `<a href="/target/${{encodeURIComponent(sdbid)}}" target="_top">${{escapeHtml(String(label || sdbid))}}</a>`;
+    }}
+    function targetMainId(sdbid, fallback) {{
+      const context = view.system_context || {{}};
+      const displayIds = context.simbad_main_id_by_target || {{}};
+      if (displayIds[sdbid]) return displayIds[sdbid];
+      const metadata = (context.simbad_metadata_by_target || {{}})[sdbid] || {{}};
+      if (metadata.main_id) return metadata.main_id;
+      const relative = (context.simbad_relative_preview || []).find(
+        row => row.matched_sdbid === sdbid && row.action !== "context_only"
+      );
+      return relative && relative.main_id ? relative.main_id : (fallback || sdbid);
     }}
     function componentKey(provider, nativeId, component) {{
       return `${{provider}}|${{nativeId}}|${{component}}`;
@@ -731,49 +822,107 @@ def render_review_sky_html(
       }}
       return result;
     }}
-    function componentTargetLabel(row) {{
-      if (!row) return "";
-      const role = row.component_target_role || "unknown";
-      if (role === "current_target") return "current target";
-      if (role === "sibling_target") return `SDB target ${{row.linked_sdbid}}`;
-      if (role === "known_unimported_component") return "no SDB target";
-      if (role === "conflicted_component_assignment") return `conflict: ${{row.linked_sdbid || "unassigned"}}`;
-      return role;
-    }}
     function componentTargetDetail(row) {{
       if (!row) return "";
       const bits = [];
-      bits.push(componentTargetLabel(row));
+      const role = row.component_target_role || "unknown";
+      if (!row.linked_sdbid && role === "known_unimported_component") bits.push("no SDB target");
+      else if (!row.linked_sdbid && role === "conflicted_component_assignment") bits.push("conflict: unassigned");
+      else if (!row.linked_sdbid && role !== "current_target" && role !== "sibling_target") bits.push(role);
       if (row.component_match_basis && row.component_match_basis !== "none") bits.push(row.component_match_basis);
       if (row.component_match_separation_arcsec != null) bits.push(`${{displayNumber(row.component_match_separation_arcsec)}}"`);
       if (row.component_match_conflict) bits.push(row.component_match_conflict);
       return bits.filter(Boolean).join(" · ");
     }}
+    function componentTargetHtml(row) {{
+      if (!row) return "";
+      const detail = componentTargetDetail(row);
+      if (!row.linked_sdbid) return escapeHtml(detail);
+      const suffix = detail ? ` <span class="muted">· ${{escapeHtml(detail)}}</span>` : "";
+      return `${{targetReviewLink(row.linked_sdbid, targetMainId(row.linked_sdbid))}}${{suffix}}`;
+    }}
     function renderSystemContext() {{
+      const currentTargetElement = document.getElementById("current-target");
       const element = document.getElementById("system-context");
-      const componentElement = document.getElementById("component-context");
       const photometryElement = document.getElementById("photometry-context");
       const context = view.system_context;
       if (!context) return;
+      currentTargetElement.classList.remove("muted");
       element.classList.remove("muted");
-      componentElement.classList.remove("muted");
       photometryElement.classList.remove("muted");
-      const photometry = context.photometry_by_target || {{}};
       const semantics = context.simbad_semantic_by_target || {{}};
-      const candidateCounts = context.hierarchy_candidates_by_target || {{}};
+      const simbadMetadata = context.simbad_metadata_by_target || {{}};
       const targets = context.nearby_sdb_targets || [];
-      const components = context.component_positions || [];
       const cross = context.identity_cross_candidates || [];
       const matrix = context.measurement_assignment_matrix || {{columns: [], rows: [], summary: {{}}}};
       const relatives = context.simbad_relative_preview || [];
-      const componentItems = components.map(row => `<li><code>${{escapeHtml(row.provider)}} ${{escapeHtml(row.native_id)}} ${{escapeHtml(row.component)}}</code> <span class="muted">${{displayNumber(row.separation_from_target_arcsec)}}" from target</span><br><span>${{escapeHtml(componentTargetDetail(row))}}</span></li>`).join("");
-      const targetRows = targets.map(target => {{
-        const semantic = semantics[target.sdbid] || {{}};
-        const id = firstUsefulIdentifier(target);
-        const pm = target.canonical_astrometry && target.canonical_astrometry.proper_motion_available ? `; PM ${{displayNumber(target.canonical_astrometry.pm_ra_cosdec_masyr)}}, ${{displayNumber(target.canonical_astrometry.pm_dec_masyr)}} mas/yr` : "";
-        const current = target.is_requested_target ? " current" : "";
-        return `<div class="system-row${{current}}"><code>${{escapeHtml(target.sdbid)}}</code> <span class="muted">${{displayNumber(target.separation_arcsec)}}"</span><br>${{id ? escapeHtml(id) + "<br>" : ""}}<span class="muted">${{escapeHtml(semantic.main_id || "")}} ${{escapeHtml(semantic.kind || "")}}${{pm}}</span><br><span>${{escapeHtml(compactBands(photometry[target.sdbid]))}}</span><br><span class="muted">${{(candidateCounts[target.sdbid] || []).length}} hierarchy candidates</span></div>`;
+      const targetBySdbid = Object.fromEntries(targets.map(target => [target.sdbid, target]));
+      const currentTarget = targets.find(target => target.is_requested_target) || null;
+      const relativeTargetIds = new Set(
+        relatives
+          .filter(row => row.action !== "context_only")
+          .map(row => row.matched_sdbid)
+          .filter(Boolean)
+      );
+      const nearbyTargetCount = targets.filter(target => !target.is_requested_target).length;
+      const otherTargets = targets.filter(
+        target => !target.is_requested_target && !relativeTargetIds.has(target.sdbid)
+      );
+      const relevanceLabel = value => ({{
+        stellar_or_substellar_component: "stellar",
+        planetary_or_disk: "planet",
+        contextual_group: "contextual group",
+      }})[value] || String(value || "unknown").replaceAll("_", " ");
+      const relativeActionLabel = value => ({{
+        import: "ready to import",
+        reconcile: "needs reconciliation",
+        complete: "already reconciled",
+        context_only: "context only",
+        review_required: "review required",
+      }})[value] || value;
+      const targetFacts = (target, relative) => {{
+        const simbad = target ? (simbadMetadata[target.sdbid] || {{}}) : {{}};
+        const semantic = target ? (semantics[target.sdbid] || {{}}) : {{}};
+        const pm = target && target.canonical_astrometry && target.canonical_astrometry.proper_motion_available ? `; PM ${{displayNumber(target.canonical_astrometry.pm_ra_cosdec_masyr)}}, ${{displayNumber(target.canonical_astrometry.pm_dec_masyr)}} mas/yr` : "";
+        const distance = simbad.distance_pc == null ? "" : (
+          simbad.distance_error_pc == null
+            ? `${{displayNumber(simbad.distance_pc)}} pc`
+            : `${{displayNumber(simbad.distance_pc)}} ± ${{displayNumber(simbad.distance_error_pc)}} pc`
+        );
+        const properties = [
+          distance ? `d = ${{distance}}` : "",
+          simbad.spectral_type || (relative && relative.spectral_type) ? `SpT ${{simbad.spectral_type || relative.spectral_type}}` : "",
+          simbad.primary_object_type || (relative && relative.object_type) ? `type ${{simbad.primary_object_type || relative.object_type}}` : "",
+        ].filter(Boolean).join(" · ");
+        return {{properties, semantic: String(semantic.kind || "").replaceAll("_", " "), pm}};
+      }};
+      const targetRow = (target, relative, footer, linkName = true) => {{
+        const facts = targetFacts(target, relative);
+        const fallback = relative && relative.main_id ? relative.main_id : target.sdbid;
+        const name = targetMainId(target.sdbid, fallback);
+        const displayedName = linkName
+          ? targetReviewLink(target.sdbid, name)
+          : escapeHtml(String(name));
+        const separation = !target.is_requested_target && Number(target.separation_arcsec) > 0.005
+          ? `<div class="muted">${{displayNumber(target.separation_arcsec)}}" from target</div>`
+          : "";
+        return `<div class="system-row"><div class="system-name">${{displayedName}}</div>${{separation}}${{facts.properties ? `<div class="system-properties">${{escapeHtml(facts.properties)}}</div>` : ""}}${{facts.semantic || facts.pm ? `<div class="muted">${{escapeHtml(facts.semantic || "unknown")}}${{facts.pm}}</div>` : ""}}${{footer ? `<div class="muted">${{escapeHtml(footer)}}</div>` : ""}}</div>`;
+      }};
+      const relativeRows = relatives.map(row => {{
+        const references = row.bibcodes && row.bibcodes.length ? ` · ${{row.bibcodes.length}} reference${{row.bibcodes.length === 1 ? "" : "s"}}` : "";
+        const status = `${{row.direction}} · ${{relativeActionLabel(row.action)}} · ${{relevanceLabel(row.component_relevance)}}${{references}}`;
+        if (row.action === "context_only") {{
+          return `<div class="system-row"><div class="system-name">${{escapeHtml(row.main_id)}}</div><div class="muted">${{escapeHtml(status)}}</div></div>`;
+        }}
+        const target = row.matched_sdbid ? targetBySdbid[row.matched_sdbid] : null;
+        if (target) return targetRow(target, row, status);
+        const facts = targetFacts(null, row);
+        const separation = Number(row.separation_arcsec) > 0.005
+          ? `<div class="muted">${{displayNumber(row.separation_arcsec)}}" from target</div>`
+          : "";
+        return `<div class="system-row"><div class="system-name">${{escapeHtml(row.main_id)}}</div>${{separation}}${{facts.properties ? `<div class="system-properties">${{escapeHtml(facts.properties)}}</div>` : ""}}<div class="muted">${{escapeHtml(status)}}</div></div>`;
       }}).join("");
+      const targetRows = otherTargets.map(target => targetRow(target, null)).join("");
       const crossItems = cross.map(row => {{
         const linked = (row.matched_nearby_targets || []).map(target => target.sdbid).join(", ");
         return `<li><code>${{escapeHtml(row.provider)}} ${{escapeHtml(row.source_id)}}</code> ${{row.accepted ? "accepted" : "rejected"}} <span class="muted">${{displayNumber(row.separation_arcsec)}}"</span> → ${{escapeHtml(linked)}}</li>`;
@@ -788,53 +937,62 @@ def render_review_sky_html(
           if (row.comparison_to_current) details.push(row.comparison_to_current);
           if (cell.current_roles && cell.current_roles.length) details.push(`current ${{cell.current_roles.join(", ")}}`);
           if (cell.proposed_roles && cell.proposed_roles.length) details.push(`proposed ${{cell.proposed_roles.join(", ")}}`);
+          if (cell.mixed_band_assignments) details.push("bands have different assignments");
+          const bandStates = Object.entries(cell.band_statuses || {{}}).map(([band, status]) => `${{band}}: ${{status}}`);
+          if (bandStates.length) details.push(`band states ${{bandStates.join(", ")}}`);
           if (cell.separation_arcsec != null) details.push(`${{displayNumber(cell.separation_arcsec)}} arcsec`);
           if (cell.identifier_match) details.push("identifier match");
           if (cell.duplicate_proposal_conflict) details.push("duplicate stored rows propose different ownership");
           return `<td class="matrix-cell ${{cell.status}}" title="${{escapeHtml(details.join(" · "))}}">${{matrixSymbol(cell.status)}}</td>`;
         }}).join("");
-        const resolution = row.resolution_major_arcsec == null ? "" : ` · ${{displayNumber(row.resolution_major_arcsec)}}&quot;`;
-        const value = row.value == null ? "" : `${{displayNumber(row.value)}} ${{escapeHtml(row.unit || "")}}`;
-        const duplicate = row.stored_measurement_count > 1 ? ` ×${{row.stored_measurement_count}}${{row.duplicate_proposal_conflict ? " ⚠" : ""}}` : "";
+        const bands = row.bands || [];
+        const bandNames = bands.map(value => value.band);
+        const bandCount = row.band_count || bandNames.length;
+        const duplicate = row.stored_measurement_count > bandCount ? ` · ${{row.stored_measurement_count}} stored measurements${{row.duplicate_proposal_conflict ? " ⚠" : ""}}` : "";
+        const mixed = row.mixed_band_assignments ? ' · <span class="matrix-warning">mixed assignments</span>' : "";
         const encounters = (row.encounter_sdbids || []).join(", ");
         const encounterText = encounters ? `<br><span class="muted">seen by ${{escapeHtml(encounters)}}</span>` : "";
-        const proposalDetails = [`${{row.provider}} ${{row.band}}`, `source ${{row.source_id}}`];
+        const proposalDetails = [`${{row.provider}} detection`, `ID ${{row.source_display_name || row.source_id}}`];
+        if (bandNames.length) proposalDetails.push(`bands ${{bandNames.join(", ")}}`);
+        for (const band of bands) {{
+          proposalDetails.push(`${{band.band}}: ${{band.comparison_to_current}}${{band.excluded ? "; excluded" : ""}}`);
+        }}
         if (row.proposal_confidence) proposalDetails.push(`proposal confidence ${{row.proposal_confidence}}`);
         if (row.proposal_reason) proposalDetails.push(row.proposal_reason);
         if (row.comparison_to_current) proposalDetails.push(row.comparison_to_current);
         const sourceName = row.source_display_name || row.source_id;
-        return `<tr><td><code>${{escapeHtml(row.band)}}</code>${{duplicate}} <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source muted">${{escapeHtml(sourceName)}}</span><span class="muted">${{value}}${{resolution}}</span>${{encounterText}}</td>${{cells}}</tr>`;
+        const bandSummary = `${{bandCount}} band${{bandCount === 1 ? "" : "s"}}${{bandNames.length ? `: ${{bandNames.join(", ")}}` : ""}}`;
+        return `<tr><td><code>${{escapeHtml(row.provider)}}</code> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source">${{escapeHtml(sourceName)}}</span><span class="muted">${{escapeHtml(bandSummary)}}${{duplicate}}${{mixed}}</span>${{encounterText}}</td>${{cells}}</tr>`;
       }}).join("");
-      const matrixHtml = matrixRows ? `<div class="matrix-wrap"><table class="assignment-matrix"><thead><tr><th>measurement</th>${{matrixHeader}}</tr></thead><tbody>${{matrixRows}}</tbody></table></div><div class="muted">✓ current agrees · + proposed · ● current only · ! differs · · candidate</div>` : '<div class="muted">No current measurements.</div>';
-      const relativeItems = relatives.map(row => {{
-        const target = row.matched_sdbid ? ` → ${{row.matched_sdbid}}` : "";
-        return `<li><code>${{escapeHtml(row.direction)}} ${{escapeHtml(row.main_id)}}</code>${{escapeHtml(target)}}<br><span class="muted">${{escapeHtml(row.action)}} · ${{escapeHtml(row.component_relevance)}} · ${{escapeHtml(row.component_label || "unlabelled")}}</span></li>`;
-      }}).join("");
+      const matrixHtml = matrixRows ? `<div class="matrix-wrap"><table class="assignment-matrix"><thead><tr><th>detection</th>${{matrixHeader}}</tr></thead><tbody>${{matrixRows}}</tbody></table></div><div class="muted">✓ current agrees · + proposed · ● current only · ! differs or mixed · · candidate</div>` : '<div class="muted">No current measurements.</div>';
+      const relativeChanges = relatives.some(row => row.action === "import" || row.action === "reconcile");
       const relativeControl = document.body.classList.contains("embedded") && relatives.length
-        ? `<button id="review-relatives" class="relative-review" type="button">Review or import SIMBAD relatives</button>`
+        ? `<button id="review-relatives" class="relative-review" type="button">${{relativeChanges ? "Review or reconcile SIMBAD relatives" : "View SIMBAD relatives"}}</button>`
         : "";
+      currentTargetElement.innerHTML = currentTarget
+        ? targetRow(currentTarget, null, "", false)
+        : '<div class="muted">Unavailable.</div>';
       element.innerHTML = `
-        <div class="muted">radius ${{displayNumber(context.radius_arcsec)}}" · ${{targets.length}} nearby SDB target${{targets.length === 1 ? "" : "s"}}</div>
-        <h3>Nearby SDB targets</h3>
+        <div class="muted">radius ${{displayNumber(context.radius_arcsec)}}" · ${{nearbyTargetCount}} nearby SDB target${{nearbyTargetCount === 1 ? "" : "s"}}</div>
+        <h3>Immediate SIMBAD relatives</h3>
+        ${{relativeRows || '<div class="muted">None or no current SIMBAD metadata.</div>'}}
+        ${{relativeControl}}
+        <h3>Other nearby SDB targets</h3>
         ${{targetRows || '<div class="muted">None.</div>'}}
         <h3>Identity cross-candidates</h3>
         <ul class="system-list">${{crossItems || '<li class="muted">None.</li>'}}</ul>
-        <h3>Immediate SIMBAD relatives</h3>
-        <ul class="system-list">${{relativeItems || '<li class="muted">None or no current SIMBAD metadata.</li>'}}</ul>
-        ${{relativeControl}}
       `;
       const relativeButton = document.getElementById("review-relatives");
       if (relativeButton) relativeButton.addEventListener("click", () => {{
         window.parent.postMessage({{type: "sdb-review-relatives"}}, window.location.origin);
       }});
-      componentElement.innerHTML = `<ul class="system-list">${{componentItems || '<li class="muted">None.</li>'}}</ul>`;
       photometryElement.innerHTML = `<h3>System photometry matrix</h3>${{matrixHtml}}`;
     }}
     function showDetails(point) {{
       const pm = point.pm_ra_cosdec_masyr == null || point.pm_dec_masyr == null ? "" : `${{displayNumber(point.pm_ra_cosdec_masyr)}}, ${{displayNumber(point.pm_dec_masyr)}} mas/yr (${{point.pm_source || "unknown"}})`;
       const uncertainty = point.uncertainty_major_arcsec == null ? "" : `${{displayNumber(point.uncertainty_major_arcsec)}} × ${{displayNumber(point.uncertainty_minor_arcsec ?? point.uncertainty_major_arcsec)}} arcsec`;
       const shortRows = [["provider", point.provider], ["status", point.status], ["separation", `${{displayNumber(point.separation_arcsec)}} arcsec`], ["score", point.score == null ? "" : displayNumber(point.score)], ["offset", `${{displayNumber(point.x_arcsec)}}\" east, ${{displayNumber(point.y_arcsec)}}\" north`], ["native epoch", point.native_epoch == null ? "" : displayNumber(point.native_epoch)], ["display epoch", point.display_epoch == null ? "" : displayNumber(point.display_epoch)], ["kind", point.kind], ["accepted", point.accepted ? "yes" : "no"], ["target ID", point.target_id ?? ""], ["run ID", point.run_id ?? ""], ["raw row ID", point.raw_row_id ?? ""], ["candidate ID", point.candidate_id ?? ""]];
-      const longRows = [["source", point.source_id], ["linked targets", listValue(point.linked_target_sdbids)], ["cross-match reason", point.cross_candidate_reason || ""], ["photometry", listValue(point.photometry)], ["photometry beams", beamValue(point.photometry_beams)], ["attributes", listValue(point.attributes)], ["proper motion", pm], ["position uncertainty", uncertainty], ["note", point.note || ""]];
+      const longRows = [["ID", pointDisplayId(point)], ["catalog query target", point.run_target_sdbid ? targetMainId(point.run_target_sdbid) : ""], ["linked targets", listValue(point.linked_target_sdbids)], ["cross-match reason", point.cross_candidate_reason || ""], ["photometry", listValue(point.photometry)], ["photometry beams", beamValue(point.photometry_beams)], ["attributes", listValue(point.attributes)], ["proper motion", pm], ["position uncertainty", uncertainty], ["note", point.note || ""]];
       const column = rows => `<dl class="detail-list">${{rows.filter(([,value]) => value !== "" && value != null).map(([key,value]) => `<div class="detail-row"><dt><code>${{escapeHtml(String(key))}}</code></dt><dd>${{escapeHtml(String(value))}}</dd></div>`).join("")}}</dl>`;
       document.getElementById("details").innerHTML = `<div class="details-columns">${{column(shortRows)}}${{column(longRows)}}</div>`;
     }}
@@ -851,6 +1009,7 @@ def render_review_sky_html(
     }}
     function applySelection(index) {{
       selectedPointIndex = index;
+      renderPointList();
       const plot = document.getElementById("sky");
       for (let traceIndex = 0; traceIndex < plot.data.length; traceIndex++) {{
         const trace = plot.data[traceIndex];
@@ -864,11 +1023,6 @@ def render_review_sky_html(
         }}
       }}
       updateBeamVisibility();
-      for (const row of document.querySelectorAll(".point-row")) {{
-        const rowIndex = Number(row.dataset.pointIndex);
-        row.classList.toggle("selected", index != null && rowIndex === index);
-        row.classList.toggle("dimmed", index != null && rowIndex !== index);
-      }}
       for (const row of document.querySelectorAll(".tree-link")) {{
         const rowIndex = row.dataset.pointIndex === "" ? null : Number(row.dataset.pointIndex);
         row.classList.toggle("selected", index != null && rowIndex === index);
@@ -898,17 +1052,48 @@ def render_review_sky_html(
       }}, 0);
     }});
     const points = document.getElementById("points");
-    for (const point of [...view.points].sort((a, b) => a.separation_arcsec - b.separation_arcsec || a.provider.localeCompare(b.provider) || a.source_id.localeCompare(b.source_id))) {{
-      const row = document.createElement("div");
-      row.className = "point-row" + (point.accepted ? " accepted" : "");
-      row.dataset.pointIndex = point.index;
-      const color = pointColor(point);
-      const linked = linkedTargetValue(point);
-      const borderColor = point.linked_target_sdbids && point.linked_target_sdbids.length ? "#7c3aed" : color;
-      row.innerHTML = `<span class="swatch" style="background:${{point.status === "no_match" ? "transparent" : color}}; border-color:${{borderColor}}"></span><span><code>${{escapeHtml(point.provider)}}</code> ${{escapeHtml(point.status)}} ${{escapeHtml(point.source_id)}}${{linked ? `<span class="muted">${{escapeHtml(linked)}}</span>` : ""}} <span class="muted">${{displayNumber(point.separation_arcsec)}}\"</span></span>`;
-      row.addEventListener("click", () => {{ applySelection(point.index); showDetails(point); }});
-      points.appendChild(row);
+    const memberships = (view.system_context && view.system_context.system_memberships_by_target) || {{}};
+    const requestedSystemIds = new Set(
+      (memberships[view.sdbid] || []).map(row => String(row.system_id))
+    );
+    const explicitSystemMembers = new Set(
+      Object.entries(memberships)
+        .filter(([, rows]) => rows.some(row => requestedSystemIds.has(String(row.system_id))))
+        .map(([sdbid]) => sdbid)
+    );
+    function pointIsDefaultRelevant(point) {{
+      if (point.status === "target") return true;
+      if (point.accepted || ["ambiguous", "transient_failure", "permanent_failure"].includes(point.status)) return true;
+      if (point.linked_target_sdbids && point.linked_target_sdbids.length) return true;
+      return point.provider === "sdb" && explicitSystemMembers.has(point.source_id);
     }}
+    function renderPointList() {{
+      points.innerHTML = "";
+      const ordered = [...view.points].sort((a, b) => a.separation_arcsec - b.separation_arcsec || a.provider.localeCompare(b.provider) || a.source_id.localeCompare(b.source_id));
+      const visible = ordered.filter(point => pointListExpanded || pointIsDefaultRelevant(point) || point.index === selectedPointIndex);
+      for (const point of visible) {{
+        const row = document.createElement("div");
+        row.className = "point-row" + (point.accepted ? " accepted" : "");
+        row.dataset.pointIndex = point.index;
+        row.classList.toggle("selected", selectedPointIndex != null && point.index === selectedPointIndex);
+        row.classList.toggle("dimmed", selectedPointIndex != null && point.index !== selectedPointIndex);
+        const color = pointColor(point);
+        const linked = linkedTargetValue(point);
+        const runTarget = catalogRunTargetValue(point);
+        const borderColor = point.linked_target_sdbids && point.linked_target_sdbids.length ? "#7c3aed" : color;
+        row.innerHTML = `<span class="swatch" style="background:${{point.status === "no_match" ? "transparent" : color}}; border-color:${{borderColor}}"></span><span><code>${{escapeHtml(point.provider)}}</code> ${{escapeHtml(point.status)}} ${{escapeHtml(pointDisplayId(point))}}${{linked ? `<span class="muted">${{escapeHtml(linked)}}</span>` : ""}}${{runTarget ? `<span class="muted">${{escapeHtml(runTarget)}}</span>` : ""}} <span class="muted">${{displayNumber(point.separation_arcsec)}}\"</span></span>`;
+        row.addEventListener("click", () => {{ applySelection(point.index); showDetails(point); }});
+        points.appendChild(row);
+      }}
+      const hiddenCount = ordered.length - ordered.filter(point => pointIsDefaultRelevant(point)).length;
+      document.getElementById("toggle-point-list").textContent = pointListExpanded ? "Show relevant items" : `Show all plotted items (${{hiddenCount}} more)`;
+      document.getElementById("point-list-summary").textContent = pointListExpanded ? `${{ordered.length}} items` : `${{visible.length}} relevant item${{visible.length === 1 ? "" : "s"}}`;
+    }}
+    document.getElementById("toggle-point-list").addEventListener("click", () => {{
+      pointListExpanded = !pointListExpanded;
+      renderPointList();
+    }});
+    renderPointList();
     const tree = document.getElementById("hierarchy-tree");
     if (view.hierarchy_tree && view.hierarchy_tree.length) {{
       tree.classList.remove("muted");
@@ -927,8 +1112,9 @@ def render_review_sky_html(
           row.className = "tree-link";
           row.dataset.pointIndex = link.point_index == null ? "" : String(link.point_index);
           row.title = link.note || "";
-          const targetLabel = componentTargetDetail(componentTarget);
-          row.innerHTML = `<span><strong>${{escapeHtml(String(link.component_label))}}</strong> <span class="muted">← ${{escapeHtml(String(link.reference_label))}}</span></span><br><span>${{escapeHtml(targetLabel)}}</span><br><span class="muted">${{escapeHtml(String(link.relation_type || "component"))}} · ${{escapeHtml(String(link.structural_role || "non_structural"))}} · ${{escapeHtml(String(link.status))}} candidate ${{link.candidate_id ?? ""}}</span>`;
+          const targetHtml = componentTargetHtml(componentTarget);
+          const structural = link.structural_role && link.structural_role !== "non_structural" ? ` · ${{String(link.structural_role).replaceAll("_", " ")}}` : "";
+          row.innerHTML = `<span><strong>${{escapeHtml(String(link.component_label))}}</strong> <span class="muted">relative to ${{escapeHtml(String(link.reference_label))}}</span></span>${{targetHtml ? `<br><span>${{targetHtml}}</span>` : ""}}<br><span class="muted">${{escapeHtml(String(link.status).replaceAll("_", " "))}} · ${{escapeHtml(String(link.relation_type || "component").replaceAll("_", " "))}}${{escapeHtml(structural)}}</span>`;
           if (link.point_index != null) {{
             row.addEventListener("click", () => {{ applySelection(link.point_index); showDetails(view.points[link.point_index]); }});
           }}
@@ -1136,6 +1322,7 @@ def _deduplicate_points(points: list[SkyPoint]) -> list[SkyPoint]:
             point.status,
             point.source_id,
             point.accepted,
+            point.target_id,
             round(point.ra_deg, 9),
             round(point.dec_deg, 9),
         )
@@ -1168,6 +1355,7 @@ def _merge_duplicate_point(first: SkyPoint, second: SkyPoint) -> SkyPoint:
         raw_row_id=first.raw_row_id if first.raw_row_id is not None else second.raw_row_id,
         candidate_id=first.candidate_id if first.candidate_id is not None else second.candidate_id,
         target_id=first.target_id if first.target_id is not None else second.target_id,
+        run_target_sdbid=first.run_target_sdbid or second.run_target_sdbid,
         native_epoch=first.native_epoch if first.native_epoch is not None else second.native_epoch,
         native_ra_deg=first.native_ra_deg if first.native_ra_deg is not None else second.native_ra_deg,
         native_dec_deg=first.native_dec_deg if first.native_dec_deg is not None else second.native_dec_deg,
@@ -1248,9 +1436,41 @@ def _target_solution(session: Session, target: Target) -> AstrometricSolution | 
     return session.get(AstrometricSolution, target.canonical_astrometry_id)
 
 
+def _target_motion_solution(
+    session: Session,
+    target: Target,
+    solution: AstrometricSolution | None = None,
+) -> AstrometricSolution | Astrometry | None:
+    solution = solution if solution is not None else _target_solution(session, target)
+    if solution is not None and solution.proper_motion_available:
+        return solution
+    metadata = session.scalar(
+        select(SimbadMetadata)
+        .where(
+            SimbadMetadata.target_id == target.id,
+            SimbadMetadata.pm_ra_cosdec_masyr.is_not(None),
+            SimbadMetadata.pm_dec_masyr.is_not(None),
+        )
+        .order_by(SimbadMetadata.id.desc())
+        .limit(1)
+    )
+    if metadata is None:
+        return solution
+    return Astrometry(
+        metadata.ra_deg,
+        metadata.dec_deg,
+        2000.0,
+        pm_ra_cosdec_masyr=metadata.pm_ra_cosdec_masyr,
+        pm_dec_masyr=metadata.pm_dec_masyr,
+        source="simbad metadata",
+        source_id=metadata.main_id,
+        proper_motion_bibcode=metadata.proper_motion_bibcode,
+    )
+
+
 def _proper_motion_arrows(
     target: Target,
-    solution: AstrometricSolution,
+    solution: AstrometricSolution | Astrometry,
     *,
     years: float = 10.0,
 ) -> list[SkyArrow]:
@@ -1260,13 +1480,20 @@ def _proper_motion_arrows(
         or solution.pm_dec_masyr is None
     ):
         return []
+    if isinstance(solution, AstrometricSolution):
+        ra2000 = solution.derived_ra2000_deg
+        dec2000 = solution.derived_dec2000_deg
+    else:
+        position = propagate_to_epoch(solution, 2000.0)
+        ra2000 = position.ra_deg
+        dec2000 = position.dec_deg
     return [
         SkyArrow(
             kind="proper_motion",
             provider=solution.source,
             source_id=solution.source_id or target.sdbid,
-            ra_deg=solution.derived_ra2000_deg,
-            dec_deg=solution.derived_dec2000_deg,
+            ra_deg=ra2000,
+            dec_deg=dec2000,
             pm_ra_cosdec_masyr=solution.pm_ra_cosdec_masyr,
             pm_dec_masyr=solution.pm_dec_masyr,
             years=years,
@@ -1299,6 +1526,7 @@ def _nearby_target_points(
         if separation > radius_arcsec:
             continue
         solution = _target_solution(session, nearby)
+        motion_solution = _target_motion_solution(session, nearby, solution)
         points.append(
             SkyPoint(
                 kind="nearby_target",
@@ -1309,19 +1537,34 @@ def _nearby_target_points(
                 dec_deg=nearby.dec2000_deg,
                 separation_arcsec=separation,
                 target_id=nearby.id,
-                pm_ra_cosdec_masyr=None if solution is None else solution.pm_ra_cosdec_masyr,
-                pm_dec_masyr=None if solution is None else solution.pm_dec_masyr,
-                pm_source=None if solution is None else solution.source,
+                pm_ra_cosdec_masyr=(
+                    None
+                    if motion_solution is None
+                    else motion_solution.pm_ra_cosdec_masyr
+                ),
+                pm_dec_masyr=(
+                    None if motion_solution is None else motion_solution.pm_dec_masyr
+                ),
+                pm_source=(
+                    None if motion_solution is None else motion_solution.source
+                ),
                 note="nearby SDB target",
             )
         )
-        if solution is not None:
-            arrows.extend(_proper_motion_arrows(nearby, solution))
+        if motion_solution is not None:
+            arrows.extend(_proper_motion_arrows(nearby, motion_solution))
     return points, arrows
 
 
-def _identity_points(session: Session, target: Target, center: tuple[float, float]) -> list[SkyPoint]:
-    solution = _target_solution(session, target)
+def _identity_points(
+    session: Session,
+    target: Target,
+    center: tuple[float, float],
+    *,
+    motion_solution: AstrometricSolution | Astrometry | None = None,
+) -> list[SkyPoint]:
+    if motion_solution is None:
+        motion_solution = _target_motion_solution(session, target)
     rows = session.execute(
         select(MatchCandidate, Submission)
         .join(Submission, Submission.id == MatchCandidate.submission_id)
@@ -1351,7 +1594,7 @@ def _identity_points(session: Session, target: Target, center: tuple[float, floa
             candidate.ra_deg,
             candidate.dec_deg,
             candidate.epoch,
-            solution,
+            motion_solution,
             native_pm=native_pm,
             base_note=f"identity candidate from submission {submission.id}{pm_note}",
         )
@@ -1361,12 +1604,16 @@ def _identity_points(session: Session, target: Target, center: tuple[float, floa
                 provider=candidate.provider,
                 status=status,
                 source_id=candidate.source_id,
+                source_display_name=catalog_source_display_name(
+                    candidate.provider, candidate.source_id
+                ),
                 ra_deg=ra2000,
                 dec_deg=dec2000,
                 separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
                 score=candidate.score,
                 accepted=candidate.accepted,
                 candidate_id=candidate.id,
+                target_id=target.id,
                 native_epoch=candidate.epoch,
                 native_ra_deg=candidate.ra_deg,
                 native_dec_deg=candidate.dec_deg,
@@ -1379,13 +1626,39 @@ def _identity_points(session: Session, target: Target, center: tuple[float, floa
     return points
 
 
-def _catalog_points(session: Session, target: Target, center: tuple[float, float]) -> list[SkyPoint]:
-    solution = _target_solution(session, target)
-    runs = session.scalars(
+def _catalog_points(
+    session: Session,
+    target: Target,
+    center: tuple[float, float],
+    *,
+    motion_solution: AstrometricSolution | Astrometry | None = None,
+    run_statuses: set[str] | None = None,
+) -> list[SkyPoint]:
+    if motion_solution is None:
+        motion_solution = _target_motion_solution(session, target)
+    all_runs = list(session.scalars(
         select(CatalogRun)
-        .where(CatalogRun.target_id == target.id, CatalogRun.is_current.is_(True))
+        .where(CatalogRun.target_id == target.id)
         .order_by(CatalogRun.provider, CatalogRun.id)
-    )
+    ))
+    runs_by_provider: dict[str, list[CatalogRun]] = {}
+    for run in all_runs:
+        runs_by_provider.setdefault(run.provider, []).append(run)
+    runs = []
+    for provider_runs in runs_by_provider.values():
+        current = next((run for run in provider_runs if run.is_current), None)
+        latest = provider_runs[-1]
+        if current is not None and (
+            run_statuses is None or current.status in run_statuses
+        ):
+            runs.append(current)
+        if (
+            latest.status in {"transient_failure", "permanent_failure"}
+            and (current is None or latest.id != current.id)
+            and (run_statuses is None or latest.status in run_statuses)
+        ):
+            runs.append(latest)
+    runs.sort(key=lambda run: (run.provider, run.id))
     points = []
     for run in runs:
         rows = list(session.scalars(
@@ -1393,7 +1666,43 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
             .where(RawCatalogRow.run_id == run.id)
             .order_by(RawCatalogRow.accepted.desc(), RawCatalogRow.score.desc(), RawCatalogRow.id)
         ))
+        if not rows:
+            if run.status not in {"transient_failure", "permanent_failure"}:
+                continue
+            ra2000, dec2000, pm_ra, pm_dec, pm_source, note = (
+                _display_position_2000(
+                    run.query_ra_deg,
+                    run.query_dec_deg,
+                    run.query_epoch,
+                    motion_solution,
+                    base_note=(
+                        f"catalog run {run.id}; provider status {run.status}"
+                        f"{f'; {run.error}' if run.error else ''}"
+                    ),
+                )
+            )
+            points.append(SkyPoint(
+                kind="catalog",
+                provider=run.provider,
+                status=run.status,
+                source_id="provider failure",
+                ra_deg=ra2000,
+                dec_deg=dec2000,
+                separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
+                run_id=run.id,
+                target_id=target.id,
+                run_target_sdbid=target.sdbid,
+                native_epoch=run.query_epoch,
+                native_ra_deg=run.query_ra_deg,
+                native_dec_deg=run.query_dec_deg,
+                pm_ra_cosdec_masyr=pm_ra,
+                pm_dec_masyr=pm_dec,
+                pm_source=pm_source,
+                note=note,
+            ))
+            continue
         for row in rows:
+            payload = _catalog_payload(row.payload_json)
             association = _catalog_association(row.payload_json)
             review_only = bool(association.get("review_only"))
             status = "accepted" if row.accepted else (
@@ -1412,7 +1721,7 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
                 row.ra_deg,
                 row.dec_deg,
                 row.epoch,
-                solution,
+                motion_solution,
                 native_pm=native_pm,
                 base_note=f"catalog run {run.id}; provider status {run.status}",
             )
@@ -1425,6 +1734,9 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
                     provider=run.provider,
                     status=status,
                     source_id=row.source_id,
+                    source_display_name=catalog_source_display_name(
+                        run.provider, row.source_id, payload
+                    ),
                     ra_deg=ra2000,
                     dec_deg=dec2000,
                     separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
@@ -1432,6 +1744,8 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
                     accepted=row.accepted,
                     run_id=run.id,
                     raw_row_id=row.id,
+                    target_id=target.id,
+                    run_target_sdbid=target.sdbid,
                     native_epoch=row.epoch,
                     native_ra_deg=row.ra_deg,
                     native_dec_deg=row.dec_deg,
@@ -1446,6 +1760,57 @@ def _catalog_points(session: Session, target: Target, center: tuple[float, float
                     note=note,
                 )
             )
+    return points
+
+
+def _related_actionable_catalog_points(
+    session: Session,
+    target: Target,
+    center: tuple[float, float],
+    *,
+    system_context: dict[str, object],
+) -> list[SkyPoint]:
+    """Project unresolved catalog candidates from nearby review targets.
+
+    Catalog runs remain owned by the target they were queried for.  Projecting
+    only ambiguous rows makes system/component evidence visible from either
+    target page without duplicating all accepted photometry in the sky view.
+    """
+    radius_arcsec = float(system_context.get("radius_arcsec") or 60.0)
+    related_target_ids = {
+        int(row["target_id"])
+        for row in system_context.get("nearby_sdb_targets") or []
+        if (
+            int(row["target_id"]) != target.id
+            and float(row.get("separation_arcsec") or 0.0) <= radius_arcsec
+        )
+    }
+    if not related_target_ids:
+        return []
+    related_targets = session.scalars(
+        select(Target)
+        .where(Target.id.in_(related_target_ids))
+        .order_by(Target.id)
+    )
+    points = []
+    for related in related_targets:
+        related_motion = _target_motion_solution(session, related)
+        for point in _catalog_points(
+            session,
+            related,
+            center,
+            motion_solution=related_motion,
+            run_statuses={"ambiguous"},
+        ):
+            if point.status != "ambiguous":
+                continue
+            points.append(replace(
+                point,
+                note=(
+                    f"{point.note}; shown from nearby catalog query target "
+                    f"{related.sdbid}"
+                ),
+            ))
     return points
 
 
@@ -1982,7 +2347,7 @@ def _display_position_2000(
     ra_deg: float,
     dec_deg: float,
     epoch: float,
-    solution: AstrometricSolution | None,
+    solution: AstrometricSolution | Astrometry | None,
     *,
     native_pm: tuple[float, float, str] | None = None,
     base_note: str,
@@ -2101,12 +2466,19 @@ def _measurement_beams(session: Session, raw_row_id: int, *, limit: int = 12) ->
     return tuple(beams)
 
 
-def _catalog_association(payload_json: str) -> dict[str, object]:
+def _catalog_payload(payload_json: str) -> dict[str, object] | None:
     try:
         payload = json.loads(payload_json or "{}")
     except json.JSONDecodeError:
-        return {}
+        return None
     if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _catalog_association(payload_json: str) -> dict[str, object]:
+    payload = _catalog_payload(payload_json)
+    if payload is None:
         return {}
     association = payload.get("_sdb_association")
     return association if isinstance(association, dict) else {}

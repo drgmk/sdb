@@ -49,6 +49,9 @@ def assignment_readiness_report(
         relative_counts = Counter(
             str(relative["action"]) for relative in relatives
         )
+        already_imported_relative_count = (
+            relative_counts["reconcile"] + relative_counts["complete"]
+        )
         imported_physical = _imported_physical_relatives(
             target, physical_by_system,
         )
@@ -58,7 +61,7 @@ def assignment_readiness_report(
             role,
             imported_physical_count=len(imported_physical),
             importable_relative_count=relative_counts["import"],
-            already_imported_relative_count=relative_counts["already_imported"],
+            already_imported_relative_count=already_imported_relative_count,
         )
         rows.append({
             "target_id": target_id,
@@ -82,7 +85,9 @@ def assignment_readiness_report(
             "systems": target["systems"],
             "imported_physical_relatives": imported_physical,
             "importable_relative_count": relative_counts["import"],
-            "already_imported_relative_count": relative_counts["already_imported"],
+            "already_imported_relative_count": already_imported_relative_count,
+            "reconcilable_relative_count": relative_counts["reconcile"],
+            "reconciled_relative_count": relative_counts["complete"],
             "context_only_relative_count": relative_counts["context_only"],
             "relative_review_required_count": relative_counts["review_required"],
             "relative_preview_error": relative_error,

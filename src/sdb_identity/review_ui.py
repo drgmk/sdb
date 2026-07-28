@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .assignment_readiness import assignment_readiness_report
 from .decisions import DecisionContext
 from .fitting_groups import fitting_group_report
-from .models import RawCatalogRow
+from .hierarchy import HierarchyService
+from .models import CatalogRun, RawCatalogRow, Target
 from .review_actions import (
     review_detection_decision,
     review_photometry_eligibility_decision,
@@ -35,6 +36,7 @@ from .system_expansion import (
 def create_review_app(
     session_factory: sessionmaker[Session], *, sample: str | None = None,
     identity_service_factory: Callable[[], IdentityService] | None = None,
+    catalog_service_factory: Callable[[str, str], object] | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -97,17 +99,39 @@ def create_review_app(
             graph = fitting_group_report(
                 session_factory, target_reference=sdbid,
             )
+            system_context = HierarchyService(session_factory).system_context(sdbid)
+            simbad_main_ids = dict(
+                system_context.get("simbad_main_id_by_target", {})
+            )
+            for relative in system_context.get("simbad_relative_preview", []):
+                if (
+                    relative.get("action") != "context_only"
+                    and relative.get("matched_sdbid")
+                    and relative.get("main_id")
+                ):
+                    simbad_main_ids.setdefault(
+                        str(relative["matched_sdbid"]),
+                        str(relative["main_id"]),
+                    )
             raw_row_detections = _raw_row_detection_map(session_factory, graph)
             navigation = None
+            display_name = None
             if sample is not None:
                 queue_report = review_dashboard_report(
                     session_factory, sample=sample,
                 )
+                display_name = next((
+                    str(row["display_name"])
+                    for row in queue_report["rows"]
+                    if row["sdbid"] == sdbid and row.get("display_name")
+                ), None)
                 navigation = _queue_navigation(
                     queue_report, sdbid, filters, position,
                 )
+            display_name = display_name or simbad_main_ids.get(sdbid)
             return _target_page(
                 sdbid, readiness, graph, raw_row_detections, navigation,
+                display_name, simbad_main_ids,
             )
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -200,6 +224,36 @@ def create_review_app(
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    @app.post("/api/provider-result/preview")
+    async def provider_result_preview(payload: dict[str, object]):
+        try:
+            value = _provider_result_from_payload(
+                session_factory,
+                catalog_service_factory,
+                payload,
+                apply=False,
+            )
+            return _with_human_summary(
+                value, _provider_result_summary(value),
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/provider-result/apply")
+    async def provider_result_apply(payload: dict[str, object]):
+        try:
+            value = _provider_result_from_payload(
+                session_factory,
+                catalog_service_factory,
+                payload,
+                apply=True,
+            )
+            return _with_human_summary(
+                value, _provider_result_summary(value),
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/api/relatives/preview")
     async def relatives_preview(payload: dict[str, object]):
         try:
@@ -235,6 +289,7 @@ def serve_review_ui(
     port: int = 8765,
     open_browser: bool = False,
     identity_service_factory: Callable[[], IdentityService] | None = None,
+    catalog_service_factory: Callable[[str, str], object] | None = None,
 ) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("the review UI currently binds to localhost only")
@@ -250,6 +305,7 @@ def serve_review_ui(
         session_factory,
         sample=sample,
         identity_service_factory=identity_service_factory,
+        catalog_service_factory=catalog_service_factory,
     )
     url = f"http://{host}:{port}/"
     if open_browser:
@@ -332,10 +388,187 @@ def _eligibility_from_payload(
     )
 
 
+def _provider_result_from_payload(
+    session_factory: sessionmaker[Session],
+    catalog_service_factory: Callable[[str, str], object] | None,
+    payload: dict[str, object],
+    *,
+    apply: bool,
+) -> dict[str, object]:
+    action = str(payload["action"])
+    if action not in {"accept_candidate", "reviewed_no_match", "retry"}:
+        raise ValueError(f"unknown provider-result action: {action}")
+    run_id = int(payload["run_id"])
+    raw_row_id = (
+        None if payload.get("raw_row_id") is None
+        else int(payload["raw_row_id"])
+    )
+    with session_factory() as session:
+        run = session.get(CatalogRun, run_id)
+        if run is None:
+            raise KeyError(f"catalog run not found: {run_id}")
+        target = session.get(Target, run.target_id)
+        if target is None:
+            raise KeyError(f"target not found for catalog run: {run_id}")
+        raw = None if raw_row_id is None else session.get(
+            RawCatalogRow, raw_row_id,
+        )
+        if action == "accept_candidate":
+            if raw is None or raw.run_id != run.id:
+                raise ValueError("selected catalog candidate is not from this run")
+            if run.status != "ambiguous" or not run.is_current:
+                raise ValueError("candidate acceptance requires a current ambiguous run")
+        elif action == "reviewed_no_match":
+            if run.status != "ambiguous" or not run.is_current:
+                raise ValueError("reviewed no-match requires a current ambiguous run")
+        else:
+            if run.status not in {"transient_failure", "permanent_failure"}:
+                raise ValueError("retry requires a failed catalog run")
+            latest_id = session.scalar(
+                select(CatalogRun.id)
+                .where(
+                    CatalogRun.target_id == run.target_id,
+                    CatalogRun.provider == run.provider,
+                )
+                .order_by(CatalogRun.id.desc())
+                .limit(1)
+            )
+            if latest_id != run.id:
+                raise ValueError("catalog failure has already been superseded")
+        token_state = {
+            "action": action,
+            "run_id": run.id,
+            "run_status": run.status,
+            "run_is_current": run.is_current,
+            "raw_row_id": None if raw is None else raw.id,
+            "source_id": None if raw is None else raw.source_id,
+        }
+        state_token = hashlib.sha256(
+            json.dumps(token_state, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        source_id = None if raw is None else raw.source_id
+        base = {
+            "action": action,
+            "has_changes": True,
+            "state_token": state_token,
+            "suggested_reason": {
+                "accept_candidate": (
+                    f"Selected {run.provider} source {source_id} for {target.sdbid}"
+                ),
+                "reviewed_no_match": (
+                    f"Reviewed {run.provider} candidates for {target.sdbid}; "
+                    "none is the target"
+                ),
+                "retry": (
+                    f"Retried failed {run.provider} result for {target.sdbid}"
+                ),
+            }[action],
+            "target": {"id": target.id, "sdbid": target.sdbid},
+            "run": {
+                "id": run.id,
+                "provider": run.provider,
+                "status": run.status,
+                "error": run.error,
+            },
+            "candidate": (
+                None if raw is None else {
+                    "raw_row_id": raw.id,
+                    "source_id": raw.source_id,
+                    "separation_arcsec": raw.separation_arcsec,
+                    "score": raw.score,
+                }
+            ),
+        }
+        provider = run.provider
+
+    if not apply:
+        if (
+            action in {"accept_candidate", "retry"}
+            and catalog_service_factory is None
+        ):
+            raise RuntimeError(
+                f"{action.replace('_', ' ')} is unavailable in this review server"
+            )
+        if action in {"accept_candidate", "retry"}:
+            catalog_service_factory(provider, action)
+        return {**base, "mode": "preview"}
+
+    expected_token = str(payload.get("state_token", ""))
+    if expected_token != state_token:
+        raise ValueError("provider result changed after preview; preview again")
+    actor = _optional_text(payload.get("actor"))
+    reason = _optional_text(payload.get("reason"))
+    if action == "reviewed_no_match":
+        from .catalogs import CatalogService
+
+        result = CatalogService(session_factory, {}).override_no_match(
+            run_id, actor=actor, reason=reason,
+        )
+    else:
+        if catalog_service_factory is None:
+            raise RuntimeError(
+                f"{action.replace('_', ' ')} is unavailable in this review server"
+            )
+        service = catalog_service_factory(provider, action)
+        if action == "accept_candidate":
+            result = service.override_candidate(
+                raw_row_id, actor=actor, reason=reason,
+            )
+        else:
+            result = service.retry_failed_run(
+                run_id, actor=actor, reason=reason,
+            )
+    return {
+        **base,
+        "mode": "applied",
+        "applied": result.__dict__,
+    }
+
+
 def _with_human_summary(
     value: dict[str, object], summary: dict[str, object],
 ) -> dict[str, object]:
     return {**value, "human_summary": summary}
+
+
+def _provider_result_summary(value: dict[str, object]) -> dict[str, object]:
+    action = str(value["action"])
+    provider = str(value["run"]["provider"])
+    candidate = value.get("candidate")
+    if action == "accept_candidate":
+        change = (
+            f"Accept {provider} source {candidate['source_id']} as the catalog match."
+        )
+    elif action == "reviewed_no_match":
+        change = (
+            f"Record that none of the reviewed {provider} candidates matches."
+        )
+    else:
+        change = f"Retry the failed {provider} provider request."
+    applied = value.get("applied") or {}
+    title = (
+        f"Provider action applied: {applied.get('status', action)}"
+        if value["mode"] == "applied"
+        else {
+            "accept_candidate": "Catalog candidate ready to accept",
+            "reviewed_no_match": "Reviewed no-match ready to record",
+            "retry": "Provider retry ready",
+        }[action]
+    )
+    warnings = []
+    if action == "retry":
+        warnings.append(
+            "Retry performs a provider request and records its new versioned result."
+        )
+    return {
+        "title": title,
+        "facts": [
+            f"Target: {value['target']['sdbid']}",
+            f"Current result: {provider} — {value['run']['status']}",
+        ],
+        "changes": [change],
+        "warnings": warnings,
+    }
 
 
 def _decision_summary(value: dict[str, object]) -> dict[str, object]:
@@ -383,7 +616,8 @@ def _decision_summary(value: dict[str, object]) -> dict[str, object]:
     return {
         "title": title,
         "facts": [
-            f"Detection: {detection['provider']} {detection['source_id']}",
+            f"Detection: {detection['provider']} "
+            f"{detection.get('source_display_name') or detection['source_id']}",
             f"Selected bands: {', '.join(bands)}",
             f"Scope target: {value['scope_target']['sdbid']}",
         ],
@@ -432,10 +666,14 @@ def _eligibility_summary(value: dict[str, object]) -> dict[str, object]:
     ]
     applied = value.get("applied") or {}
     title = (
-        f"Applied {int(applied.get('overrides_added', 0))} fit-eligibility override"
+        f"Applied {int(applied.get('overrides_added', 0))} fit include/exclude change"
         f"{'s' if int(applied.get('overrides_added', 0)) != 1 else ''}"
         if value.get("mode") == "applied"
-        else ("Fit-eligibility changes ready" if changed else "No eligibility changes")
+        else (
+            "Fit include/exclude changes ready"
+            if changed
+            else "No fit include/exclude changes"
+        )
     )
     return {
         "title": title,
@@ -497,10 +735,11 @@ def _relative_preview_payload(
 ) -> dict[str, object]:
     rows = preview_immediate_relatives(session_factory, target_reference)
     token_rows = [{
-        "relationship_id": row["relationship_id"],
+        "relationship_ids": row["relationship_ids"],
         "action": row["action"],
         "matched_target_id": row["matched_target_id"],
         "component_label": row["component_label"],
+        "reconciliation_missing": row.get("reconciliation_missing", []),
         "suggested_role": row["suggested_role"],
         "suggested_state": row["suggested_state"],
     } for row in rows]
@@ -509,13 +748,16 @@ def _relative_preview_payload(
     ).hexdigest()
     counts = {
         action: sum(row["action"] == action for row in rows)
-        for action in ("import", "already_imported", "context_only", "review_required")
+        for action in (
+            "import", "reconcile", "complete",
+            "context_only", "review_required",
+        )
     }
     value = {
         "mode": "preview",
         "target": str(target_reference),
         "state_token": token,
-        "has_changes": bool(counts["import"] or counts["already_imported"]),
+        "has_changes": bool(counts["import"] or counts["reconcile"]),
         "counts": counts,
         "relatives": rows,
         "suggested_reason": (
@@ -544,20 +786,38 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
                 f"Imported {label} as {row['suggested_role']}{component}: "
                 f"{row['matched_sdbid']}."
             )
-        elif row["action"] == "already_imported":
+        elif row["action"] == "reconcile":
             changes.append(
                 f"Reconcile existing {row['matched_sdbid']} with {label}{component}."
+            )
+        elif row["action"] == "reconciled":
+            changes.append(
+                f"Reconciled existing {row['matched_sdbid']} with {label}{component}."
+            )
+        elif row["action"] == "complete":
+            changes.append(
+                f"No change for {row['matched_sdbid']}; {label}{component} is "
+                "already reconciled."
             )
         elif row["action"] == "review_required":
             warnings.append(f"Review required: {label} — {row['reason']}")
         elif row["action"] == "context_only":
-            warnings.append(f"Context only: {label} — {row['component_relevance']}")
+            relevance = {
+                "contextual_group": "contextual group",
+                "planetary_or_disk": "planet",
+                "stellar_or_substellar_component": "stellar",
+            }.get(
+                str(row["component_relevance"]),
+                str(row["component_relevance"]).replace("_", " "),
+            )
+            warnings.append(f"Context only: {label} — {relevance}")
         elif row["action"] == "failed":
             warnings.append(f"Import failed: {label} — {row.get('error', 'unknown error')}")
     if value.get("mode") == "applied":
         title = (
             f"Relative import finished: {int(value.get('imported', 0))} imported, "
-            f"{int(value.get('already_imported', 0))} already present, "
+            f"{int(value.get('reconciled', 0))} reconciled, "
+            f"{int(value.get('already_complete', 0))} already complete, "
             f"{int(value.get('failed', 0))} failed"
         )
     else:
@@ -566,7 +826,7 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
         "title": title,
         "facts": [
             f"Target: {value['target']}",
-            "Only immediate stellar/substellar relatives are imported; expansion is not recursive.",
+            "Only immediate stellar relatives are imported; expansion is not recursive.",
         ],
         "changes": changes or ["No immediate stellar relatives need importing or reconciliation."],
         "warnings": warnings,
@@ -607,6 +867,7 @@ def _filtered_queue_rows(
         needle = filters["search"].casefold()
         rows = [row for row in rows if needle in " ".join([
             str(row["sdbid"]),
+            str(row.get("display_name") or ""),
             str(row["recommended_action"]),
             str(row["classification"]),
             *(str(value["provider"]) for value in row["providers"]),
@@ -691,10 +952,16 @@ def _queue_page(
             for value in row["providers"]
         )
         target_query = _queue_query(filters, position)
+        display_name_html = (
+            f"<span>{_e(row['display_name'])}</span><br>"
+            if row.get("display_name") else ""
+        )
         rows.append(
             f"<tr class='priority-{_e(row['priority'])}' data-classification='{_e(row['classification'])}'>"
             f"<td>{_e(row['priority'])}</td>"
-            f"<td><a href='/target/{quote(str(row['sdbid']))}{_e(target_query)}'><code>{_e(row['sdbid'])}</code></a></td>"
+            f"<td><a href='/target/{quote(str(row['sdbid']))}{_e(target_query)}'>"
+            f"{display_name_html}"
+            f"<code>{_e(row['sdbid'])}</code></a></td>"
             f"<td>{_e(str(row['classification']).replace('_', ' '))}</td>"
             f"<td>{_e(row['role'])}</td><td>{row['detection_count']} / {row['measurement_count']} bands</td>"
             f"<td>{row['unassigned_detection_count']} / {row['mixed_detection_count']}</td>"
@@ -731,7 +998,7 @@ def _queue_page(
     <label>Role <select name="role">{_select_options(roles, filters.get('role', ''), empty_label='all roles')}</select></label>
     <label>Classification <select name="classification">{_select_options(classifications, filters.get('classification', ''), empty_label='all classifications')}</select></label>
     <label>Provider <select name="provider">{_select_options(providers, filters.get('provider', ''), empty_label='all providers')}</select></label>
-    <label>Search <input name="search" value="{_e(filters.get('search', ''))}" placeholder="target, band, action"></label>
+    <label>Search <input name="search" value="{_e(filters.get('search', ''))}" placeholder="name, target, band, action"></label>
     <div class="filter-actions"><button type="submit">Apply filters</button><a href="/">Clear</a></div>
   </form>
   <p class="muted queue-count">Showing <strong>{len(filtered_rows)}</strong> of {len(all_rows)} sample targets.</p>
@@ -747,6 +1014,8 @@ def _target_page(
     graph: dict[str, object],
     raw_row_detections: dict[int, int],
     navigation: dict[str, object] | None = None,
+    display_name: str | None = None,
+    simbad_main_ids: dict[str, str] | None = None,
 ) -> str:
     default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
@@ -756,6 +1025,13 @@ def _target_page(
     if target is None:
         raise KeyError(f"target is not present in its fitting graph: {sdbid}")
     targets = sorted(graph["targets"], key=lambda row: str(row["sdbid"]))
+    simbad_main_ids = simbad_main_ids or {}
+
+    def target_label(row: dict[str, object]) -> str:
+        target_sdbid = str(row["sdbid"])
+        return simbad_main_ids.get(target_sdbid, target_sdbid)
+
+    requested_target_label = simbad_main_ids.get(sdbid, display_name or sdbid)
     detection_rows: dict[int, list[dict[str, object]]] = defaultdict(list)
     for measurement in graph["measurements"]:
         detection_rows[int(measurement["detection_id"])].append(measurement)
@@ -788,7 +1064,7 @@ def _target_page(
             f"<label><input type='checkbox' class='contributor' "
             f"value='{_e(row['sdbid'])}'"
             f"{' checked' if row['sdbid'] in current_contributors else ''}> "
-            f"<code>{_e(row['sdbid'])}</code> ({_e(row['role'])})</label>"
+            f"<code>{_e(target_label(row))}</code> ({_e(row['role'])})</label>"
             for row in targets
             if row["model_target"] or row["sdbid"] in all_current_contributors
         )
@@ -798,38 +1074,61 @@ def _target_page(
                 sdbid if sdbid in all_current_scopes
                 else str(first["origin_sdbid"] or sdbid)
             )
+        has_combined_system = len(targets) > 1
         scope_choices = "".join(
             f"<option value='{_e(row['sdbid'])}'"
             f"{' selected' if row['sdbid'] == default_scope else ''}>"
-            f"{_e(row['sdbid'])} ({_e(row['role'])})</option>"
+            f"{_e(target_label(row))} ({_e(row['role'])})</option>"
             for row in targets
         )
-        bands = "".join(
-            f"<div class='band-row'><label><input type='checkbox' class='measurement' "
-            f"value='{row['measurement_id']}' checked> "
-            f"{_e(row['band'])}: {_display_number(row['value'])} ± "
-            f"{_display_number(row['error'])} {_e(row['unit'])}</label>"
-            f"<span class='eligibility-state {'excluded' if row['fit_excluded'] else 'included'}'>"
-            f"{'excluded' if row['fit_excluded'] else 'included'} · "
-            f"{_e(str(row['exclusion_basis']).replace('_', ' '))}</span>"
-            f"<select class='eligibility' data-target='{_e(row['origin_sdbid'])}' "
-            f"data-provider='{_e(row['provider'])}' data-band='{_e(row['band'])}' "
-            f"aria-label='Fit eligibility for {_e(row['band'])}'>"
-            f"<option value=''>Leave unchanged</option>"
-            f"<option value='include'>Include in fit/export</option>"
-            f"<option value='exclude'>Show but exclude from fit</option></select></div>"
-            for row in measurements
+        combined_system_control = (
+            "<div class='combined-system-control'>"
+            "<label><input type='checkbox' class='composite-scope'"
+            f"{' checked' if default_scope in current_scopes else ''}> "
+            "Measurement applies to the combined system</label>"
+            f"<label class='scope-target-field'"
+            f"{'' if default_scope in current_scopes else ' hidden'}>"
+            f"System target <select class='scope-target'>{scope_choices}</select></label>"
+            "</div>"
+            if has_combined_system
+            else ""
         )
+        band_rows = []
+        for row in measurements:
+            excluded = bool(row["fit_excluded"])
+            basis = str(row["exclusion_basis"] or "")
+            status = "Excluded from fit" if excluded else "Included in fit"
+            basis_label = {
+                "provider_excluded": "provider default",
+                "manual_exclude_override": "manual override",
+                "manual_include_override": "manual override",
+            }.get(basis, "")
+            if basis_label:
+                status += f" · {basis_label}"
+            band_rows.append(
+                f"<div class='band-row'><label><input type='checkbox' "
+                f"class='measurement' value='{row['measurement_id']}' checked> "
+                f"{_e(row['band'])}: {_display_number(row['value'])} ± "
+                f"{_display_number(row['error'])} {_e(row['unit'])}</label>"
+                f"<span class='eligibility-state {'excluded' if excluded else 'included'}'"
+                f" data-current-label='{_e(status)}'>{_e(status)}</span>"
+                f"<button type='button' class='eligibility-toggle' "
+                f"data-current-excluded='{str(excluded).lower()}' "
+                f"data-desired-excluded='{str(excluded).lower()}' "
+                f"data-target='{_e(row['origin_sdbid'])}' "
+                f"data-provider='{_e(row['provider'])}' "
+                f"data-band='{_e(row['band'])}' aria-pressed='false'>"
+                f"{'Include in fit' if excluded else 'Exclude from fit'}</button></div>"
+            )
+        bands = "".join(band_rows)
         cards.append(f"""
 <section class="detection" data-detection="{detection_id}">
-  <h3>{_e(first['provider'])} · {_e(first['source_id'])}</h3>
+  <h3>{_e(first['provider'])} · {_e(first.get('source_display_name') or first['source_id'])}</h3>
   <div class="bands">{bands}</div>
   {"<p class='warning'>Bands currently have different assignments. Their common assignments are selected below; preview carefully before applying.</p>" if mixed_assignments else ""}
   <h4>Contributors</h4><div class="choices">{target_choices}</div>
-  <label>Composite scope target <select class="scope-target">{scope_choices}</select></label>
-  <label><input type="checkbox" class="composite-scope"{' checked' if default_scope in current_scopes else ''}> retain selected target as composite scope</label>
-  <div><button class="preview">Preview decision</button></div>
-  <div><button class="preview-eligibility" type="button">Preview fit eligibility</button></div>
+  {combined_system_control}
+  <div class="drawer-actions"><button class="preview">Preview decision</button><button class="preview-eligibility" type="button">Preview include/exclude</button></div>
 </section>""")
     readiness_text = (
         "No system-level blocker for this target."
@@ -864,39 +1163,51 @@ def _target_page(
 <main class="live-workspace">
   <header class="live-header">
     <span><a href="{_e(back_url)}">← readiness queue</a></span>
-    <strong><code>{_e(sdbid)}</code></strong>
+    <strong>{f'{_e(display_name)} · ' if display_name else ''}<code>{_e(sdbid)}</code></strong>
     <span class="muted">{_e(target['role'])}/{_e(target['state'])} · {readiness_text}</span>
     {navigation_html}
     <button id="classify-target" class="{'needs-decision' if target['role'] == 'unspecified' else ''}" type="button">{'Decide target role' if target['role'] == 'unspecified' else 'Change target role'}</button>
   </header>
   <iframe id="sky-review" title="Sky and system review for {_e(sdbid)}" src="/target/{quote(sdbid)}/sky"></iframe>
   <aside id="assignment-drawer" class="assignment-drawer" hidden>
-    <div class="drawer-header"><div><h2>Photometry assignment</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close assignment editor">×</button></div>
+    <div class="drawer-header"><div><h2 id="drawer-title">Photometry assignment</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close review drawer">×</button></div>
     <p id="assignment-prompt" class="muted">Select a plotted catalog source with normalized photometry.</p>
-    <section class="decision-meta"><label>Actor <input id="actor" value="{_e(default_actor)}"></label><label>Reason <input id="reason"></label></section>
+    <section class="decision-meta"><label>Actor <input id="actor" value="{_e(default_actor)}"></label><label>Reason <input id="reason" placeholder="Preview suggests a reason"></label></section>
     <div id="detection-editors">{''.join(cards) or '<p>No current measurements.</p>'}</div>
-    <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
-    <section class="preview-panel"><h2>Fit eligibility preview</h2><p class="muted">Include/exclude is independent of component ownership. It applies to the measurement's origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band setting, then preview.</div><button id="apply-eligibility" disabled>Apply eligibility overrides</button></section>
+    <section id="provider-result-editor" class="detection" hidden>
+      <h3>Provider result</h3>
+      <p id="provider-result-context" class="muted"></p>
+      <div class="drawer-actions">
+        <button type="button" class="preview-provider-result" data-action="accept_candidate">Preview accept candidate</button>
+        <button type="button" class="preview-provider-result" data-action="reviewed_no_match">Preview no match</button>
+        <button type="button" class="preview-provider-result" data-action="retry">Preview retry</button>
+      </div>
+    </section>
+    <section id="provider-result-preview-panel" class="preview-panel" hidden><h2>Provider result preview</h2><div id="provider-result-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-provider-result" disabled>Apply provider result action</button></section>
+    <div class="preview-grid">
+      <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
+      <section class="preview-panel"><h2>Fit include/exclude preview</h2><p class="muted">Fit inclusion is independent of component ownership. Changes apply by origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band action, then preview.</div><button id="apply-eligibility" disabled>Apply include/exclude changes</button></section>
+    </div>
   </aside>
   <dialog id="lifecycle-dialog">
-    <form method="dialog" class="dialog-header"><div><h2>Target modelling role</h2><code>{_e(sdbid)}</code></div><button value="cancel" aria-label="Close target role dialog">×</button></form>
+    <form method="dialog" class="dialog-header"><div><h2>Target modelling role</h2><code>{_e(requested_target_label)}</code></div><button value="cancel" aria-label="Close target role dialog">×</button></form>
     <p>This decision describes how the target participates in fitting; it does not assert whether the object is single or multiple.</p>
     <label class="role-choice"><input type="radio" name="lifecycle-role" value="physical"{' checked' if target['role'] != 'composite' else ''}> <strong>Physical / fitted model</strong><span>Fit one photospheric model for this target. Use this for an unresolved combined-light AB system when A and B are not separately modelled; WDS multiplicity remains recorded.</span></label>
     <label class="role-choice"><input type="radio" name="lifecycle-role" value="composite"{' checked' if target['role'] == 'composite' else ''}> <strong>Composite / measurement scope</strong><span>Do not fit this target itself. Its measurements must be assigned to separately imported physical contributors such as A and B.</span></label>
     <p id="lifecycle-warning" class="warning" hidden>A composite without imported physical contributors will remain unresolved for joint fitting. Choose physical if one combined-light model is the intended approximation.</p>
-    <section class="decision-meta"><label>Actor <input id="lifecycle-actor" value="{_e(default_actor)}"></label><label>Reason <input id="lifecycle-reason"></label></section>
+    <section class="decision-meta"><label>Actor <input id="lifecycle-actor" value="{_e(default_actor)}"></label><label>Reason <input id="lifecycle-reason" placeholder="Preview suggests a reason"></label></section>
     <div class="dialog-actions"><button id="preview-lifecycle" type="button">Preview role decision</button><button id="apply-lifecycle" type="button" disabled>Apply audited decision</button></div>
     <div id="lifecycle-preview" class="change-summary muted">Choose a role, then preview.</div>
   </dialog>
   <dialog id="relatives-dialog">
-    <form method="dialog" class="dialog-header"><div><h2>Immediate SIMBAD relatives</h2><code>{_e(sdbid)}</code></div><button value="cancel" aria-label="Close relative import dialog">×</button></form>
-    <p>Preview or import only immediate stellar/substellar parents and children. Contextual groups, planets, disks, and unknown object types are retained for review but are not imported; newly imported targets are not expanded recursively.</p>
-    <section class="decision-meta"><label>Actor <input id="relatives-actor" value="{_e(default_actor)}"></label><label>Reason <input id="relatives-reason"></label></section>
+    <form method="dialog" class="dialog-header"><div><h2>Immediate SIMBAD relatives</h2><code>{_e(requested_target_label)}</code></div><button value="cancel" aria-label="Close relative import dialog">×</button></form>
+    <p>Preview or import only immediate stellar parents and children. Contextual groups, planets, and unknown object types are retained for review but are not imported; newly imported targets are not expanded recursively.</p>
+    <section class="decision-meta"><label>Actor <input id="relatives-actor" value="{_e(default_actor)}"></label><label>Reason <input id="relatives-reason" placeholder="Preview suggests a reason"></label></section>
     <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
     <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
   </dialog>
 </main>
-<script>window.SDB_TARGET={json.dumps(sdbid)};window.SDB_RAW_ROW_DETECTIONS={json.dumps(raw_row_detections, sort_keys=True)};</script>
+<script>window.SDB_TARGET={json.dumps(sdbid)};window.SDB_TARGET_NAMES={json.dumps(simbad_main_ids, sort_keys=True)};window.SDB_RAW_ROW_DETECTIONS={json.dumps(raw_row_detections, sort_keys=True)};</script>
 <script>{_WORKSPACE_JS}</script>"""
     return _page(f"SDB review: {sdbid}", body, body_class="live-review")
 
@@ -950,6 +1261,7 @@ def _display_number(value: object) -> str:
 
 _CSS = """
 body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:18px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{overflow:hidden;text-overflow:ellipsis}.live-header button{margin-left:auto;white-space:nowrap}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header .queue-navigation+button{margin-left:0}.live-header button.needs-decision{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
+.live-review{--drawer-width:min(420px,38vw)}.band-row .eligibility-state{grid-column:1}.band-row .eligibility-toggle{grid-column:2;grid-row:1/3;align-self:center;min-width:124px}.band-row .eligibility-state.pending{color:#9a5b00;font-weight:600}.combined-system-control{display:grid;gap:8px;margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #dce3ec;border-radius:6px}.scope-target-field[hidden],.preview-grid[hidden]{display:none}.scope-target-field select{box-sizing:border-box;width:100%;margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.preview-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;margin-top:12px}.preview-grid .preview-panel{margin-top:0}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
 """
 
 
@@ -958,7 +1270,14 @@ let currentPayload=null;
 let currentPreview=null;
 let currentEligibilityPayload=null;
 let currentEligibilityPreview=null;
+let currentProviderPayload=null;
+let currentProviderPreview=null;
 const drawer=document.getElementById('assignment-drawer');
+function pointDisplayId(point){return point.source_display_name||point.source_id;}
+function pointRunTarget(point){
+  if(!point.run_target_sdbid) return '';
+  return window.SDB_TARGET_NAMES[point.run_target_sdbid]||point.run_target_sdbid;
+}
 function closeDrawer(){
   drawer.hidden=true;
   document.body.classList.remove('drawer-open');
@@ -966,24 +1285,63 @@ function closeDrawer(){
   currentPreview=null;
   currentEligibilityPayload=null;
   currentEligibilityPreview=null;
+  currentProviderPayload=null;
+  currentProviderPreview=null;
   document.getElementById('apply').disabled=true;
   document.getElementById('apply-eligibility').disabled=true;
+  document.getElementById('apply-provider-result').disabled=true;
   document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
 }
 function showDetection(point,detectionId){
   const section=document.querySelector(`.detection[data-detection="${detectionId}"]`);
   if(!section){closeDrawer();return;}
   document.querySelectorAll('.detection').forEach(value=>value.classList.toggle('active',value===section));
-  document.getElementById('selected-source').textContent=`${point.provider} ${point.source_id} · ${Number(point.separation_arcsec).toFixed(2)} arcsec`;
+  document.getElementById('detection-editors').hidden=false;
+  document.querySelector('.preview-grid').hidden=false;
+  document.getElementById('provider-result-editor').hidden=true;
+  document.getElementById('provider-result-preview-panel').hidden=true;
+  document.getElementById('drawer-title').textContent='Photometry assignment';
+  resetEligibilityControls(section);
+  const combinedSystem=section.querySelector('.composite-scope');
+  if(combinedSystem) updateCombinedSystemControl(combinedSystem);
+  document.getElementById('selected-source').textContent=`${point.provider} · ${pointDisplayId(point)} · ${Number(point.separation_arcsec).toFixed(2)} arcsec`;
   document.getElementById('assignment-prompt').textContent='Review the selected catalog detection. All bands are selected by default.';
   document.getElementById('preview').textContent='Choose assignments, then preview.';
-  document.getElementById('eligibility-preview').textContent='Choose a band setting, then preview.';
+  document.getElementById('eligibility-preview').textContent='Choose a band action, then preview.';
   document.getElementById('apply').disabled=true;
   document.getElementById('apply-eligibility').disabled=true;
   currentPayload=null;
   currentPreview=null;
   currentEligibilityPayload=null;
   currentEligibilityPreview=null;
+  currentProviderPayload=null;
+  currentProviderPreview=null;
+  drawer.hidden=false;
+  document.body.classList.add('drawer-open');
+}
+function showProviderReview(point){
+  document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
+  document.getElementById('detection-editors').hidden=true;
+  document.querySelector('.preview-grid').hidden=true;
+  const editor=document.getElementById('provider-result-editor');
+  editor.hidden=false;
+  editor.classList.add('active');
+  document.getElementById('provider-result-preview-panel').hidden=false;
+  document.getElementById('drawer-title').textContent='Provider result review';
+  const runTarget=pointRunTarget(point);
+  document.getElementById('selected-source').textContent=`${point.provider} · ${pointDisplayId(point)} · ${Number(point.separation_arcsec).toFixed(2)} arcsec${runTarget?` · catalog query for ${runTarget}`:''}`;
+  document.getElementById('assignment-prompt').textContent='Review this catalog provider result.';
+  document.getElementById('provider-result-context').textContent=`${point.provider} · ${point.status}${runTarget?` · result belongs to the catalog run for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
+  for(const button of editor.querySelectorAll('.preview-provider-result')){
+    const action=button.dataset.action;
+    button.hidden=!((point.status==='ambiguous' && ['accept_candidate','reviewed_no_match'].includes(action))||(['transient_failure','permanent_failure'].includes(point.status)&&action==='retry'));
+    button.dataset.runId=point.run_id;
+    button.dataset.rawRowId=point.raw_row_id??'';
+  }
+  document.getElementById('provider-result-preview').textContent='Choose an action, then preview.';
+  document.getElementById('apply-provider-result').disabled=true;
+  currentProviderPayload=null;
+  currentProviderPreview=null;
   drawer.hidden=false;
   document.body.classList.add('drawer-open');
 }
@@ -996,32 +1354,62 @@ window.addEventListener('message',event=>{
   if(event.data?.type!=='sdb-review-selection') return;
   const point=event.data.point;
   if(!point){closeDrawer();return;}
+  if(point.kind==='catalog'&&(point.status==='ambiguous'||['transient_failure','permanent_failure'].includes(point.status))){
+    showProviderReview(point);
+    return;
+  }
   const detectionId=point.raw_row_id==null?null:window.SDB_RAW_ROW_DETECTIONS[String(point.raw_row_id)];
   if(detectionId==null){closeDrawer();return;}
   showDetection(point,detectionId);
 });
 document.getElementById('close-drawer').addEventListener('click',closeDrawer);
 function payloadFor(section){
+  const combinedSystem=section.querySelector('.composite-scope');
+  const scopeTarget=section.querySelector('.scope-target');
   return {
     detection_id:Number(section.dataset.detection),
-    scope_target:section.querySelector('.scope-target').value,
+    scope_target:scopeTarget?.value||window.SDB_TARGET,
     contributors:[...section.querySelectorAll('.contributor:checked')].map(x=>x.value),
-    include_composite_scope:section.querySelector('.composite-scope').checked,
+    include_composite_scope:Boolean(combinedSystem?.checked),
     measurement_ids:[...section.querySelectorAll('.measurement:checked')].map(x=>Number(x.value)),
     target_role:'',
     target_state:'',
   };
 }
 function eligibilityPayloadFor(section){
-  const changes=[...section.querySelectorAll('.eligibility')]
-    .filter(value=>value.value)
-    .map(value=>({
-      target:value.dataset.target,
-      provider:value.dataset.provider,
-      band:value.dataset.band,
-      excluded:value.value==='exclude',
+  const changes=[...section.querySelectorAll('.eligibility-toggle')]
+    .filter(button=>button.dataset.desiredExcluded!==button.dataset.currentExcluded)
+    .map(button=>({
+      target:button.dataset.target,
+      provider:button.dataset.provider,
+      band:button.dataset.band,
+      excluded:button.dataset.desiredExcluded==='true',
     }));
   return {changes};
+}
+function updateCombinedSystemControl(checkbox){
+  const field=checkbox.closest('.combined-system-control')?.querySelector('.scope-target-field');
+  if(field) field.hidden=!checkbox.checked;
+}
+function updateEligibilityControl(button){
+  const current=button.dataset.currentExcluded==='true';
+  const desired=button.dataset.desiredExcluded==='true';
+  const changed=current!==desired;
+  const state=button.closest('.band-row').querySelector('.eligibility-state');
+  state.classList.toggle('pending',changed);
+  state.textContent=changed
+    ? (desired?'Will be excluded from fit':'Will be included in fit')
+    : state.dataset.currentLabel;
+  button.textContent=changed
+    ? (current?'Keep excluded':'Keep included')
+    : (current?'Include in fit':'Exclude from fit');
+  button.setAttribute('aria-pressed',String(changed));
+}
+function resetEligibilityControls(section){
+  section.querySelectorAll('.eligibility-toggle').forEach(button=>{
+    button.dataset.desiredExcluded=button.dataset.currentExcluded;
+    updateEligibilityControl(button);
+  });
 }
 async function request(url,payload){
   const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
@@ -1079,10 +1467,23 @@ document.querySelectorAll('.preview').forEach(button=>button.addEventListener('c
     document.getElementById('apply').disabled=!currentPreview.has_changes;
   }catch(error){renderRequestError(document.getElementById('preview'),error);}
 }));
-document.querySelectorAll('.eligibility').forEach(select=>select.addEventListener('change',()=>{
+document.querySelectorAll('.composite-scope').forEach(checkbox=>checkbox.addEventListener('change',()=>{
+  updateCombinedSystemControl(checkbox);
+}));
+document.querySelectorAll('.contributor,.measurement,.composite-scope,.scope-target').forEach(control=>control.addEventListener('change',()=>{
+  currentPayload=null;
+  currentPreview=null;
+  document.getElementById('preview').textContent='Assignment changed; preview again.';
+  document.getElementById('apply').disabled=true;
+}));
+document.querySelectorAll('.eligibility-toggle').forEach(button=>button.addEventListener('click',()=>{
+  const current=button.dataset.currentExcluded==='true';
+  const desired=button.dataset.desiredExcluded==='true';
+  button.dataset.desiredExcluded=String(desired===current?!current:current);
+  updateEligibilityControl(button);
   currentEligibilityPayload=null;
   currentEligibilityPreview=null;
-  document.getElementById('eligibility-preview').textContent='Eligibility changed; preview again.';
+  document.getElementById('eligibility-preview').textContent='Include/exclude changed; preview again.';
   document.getElementById('apply-eligibility').disabled=true;
 }));
 document.querySelectorAll('.preview-eligibility').forEach(button=>button.addEventListener('click',async()=>{
@@ -1090,7 +1491,7 @@ document.querySelectorAll('.preview-eligibility').forEach(button=>button.addEven
   currentEligibilityPayload=eligibilityPayloadFor(section);
   if(!currentEligibilityPayload.changes.length){
     currentEligibilityPreview=null;
-    document.getElementById('eligibility-preview').textContent='Choose Include or Exclude for at least one band.';
+    document.getElementById('eligibility-preview').textContent='Use Include or Exclude for at least one band.';
     document.getElementById('apply-eligibility').disabled=true;
     return;
   }
@@ -1100,6 +1501,23 @@ document.querySelectorAll('.preview-eligibility').forEach(button=>button.addEven
     prefillReason('reason',currentEligibilityPreview);
     document.getElementById('apply-eligibility').disabled=!currentEligibilityPreview.has_changes;
   }catch(error){renderRequestError(document.getElementById('eligibility-preview'),error);}
+}));
+document.querySelectorAll('.preview-provider-result').forEach(button=>button.addEventListener('click',async()=>{
+  currentProviderPayload={
+    action:button.dataset.action,
+    run_id:Number(button.dataset.runId),
+    raw_row_id:button.dataset.rawRowId===''?null:Number(button.dataset.rawRowId),
+  };
+  try{
+    currentProviderPreview=await request('/api/provider-result/preview',currentProviderPayload);
+    renderHumanSummary(document.getElementById('provider-result-preview'),currentProviderPreview);
+    prefillReason('reason',currentProviderPreview);
+    document.getElementById('apply-provider-result').disabled=!currentProviderPreview.has_changes;
+  }catch(error){
+    currentProviderPreview=null;
+    renderRequestError(document.getElementById('provider-result-preview'),error);
+    document.getElementById('apply-provider-result').disabled=true;
+  }
 }));
 document.getElementById('apply').addEventListener('click',async()=>{
   if(!currentPayload||!currentPreview) return;
@@ -1120,7 +1538,7 @@ document.getElementById('apply-eligibility').addEventListener('click',async()=>{
   const actor=document.getElementById('actor').value;
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed fit-eligibility overrides?'))return;
+  if(!confirm('Apply the displayed fit include/exclude changes?'))return;
   const payload={...currentEligibilityPayload,actor,reason,state_token:currentEligibilityPreview.state_token};
   try{
     const value=await request('/api/eligibility/apply',payload);
@@ -1128,6 +1546,20 @@ document.getElementById('apply-eligibility').addEventListener('click',async()=>{
     document.getElementById('apply-eligibility').disabled=true;
     setTimeout(()=>location.reload(),700);
   }catch(error){renderRequestError(document.getElementById('eligibility-preview'),error);}
+});
+document.getElementById('apply-provider-result').addEventListener('click',async()=>{
+  if(!currentProviderPayload||!currentProviderPreview)return;
+  const actor=document.getElementById('actor').value;
+  const reason=document.getElementById('reason').value;
+  if(!actor||!reason){alert('Actor and reason are required.');return;}
+  if(!confirm('Apply the displayed provider result action?'))return;
+  const payload={...currentProviderPayload,actor,reason,state_token:currentProviderPreview.state_token};
+  try{
+    const value=await request('/api/provider-result/apply',payload);
+    renderHumanSummary(document.getElementById('provider-result-preview'),value);
+    document.getElementById('apply-provider-result').disabled=true;
+    setTimeout(()=>location.reload(),700);
+  }catch(error){renderRequestError(document.getElementById('provider-result-preview'),error);}
 });
 const lifecycleDialog=document.getElementById('lifecycle-dialog');
 let lifecyclePreview=null;

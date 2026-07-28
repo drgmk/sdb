@@ -367,3 +367,64 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
         assert session.scalar(select(ExternalIdentifier).where(
             ExternalIdentifier.source == "allwise"
         )) is None
+
+
+def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    ambiguous_adapter = FakeCatalog([
+        candidate("one", ra=10.00010),
+        candidate("two", ra=10.00011),
+    ])
+    service = CatalogService(
+        session_factory, {"2mass": ambiguous_adapter},
+    )
+    ambiguous = service.refresh(target.sdbid, "2mass")
+    assert ambiguous.status == "ambiguous"
+
+    reviewed = service.override_no_match(
+        ambiguous.run_id,
+        actor="reviewer",
+        reason="neither candidate is the target",
+    )
+    assert reviewed.status == "no_match"
+    with session_factory() as session:
+        action = session.scalar(
+            select(CatalogMatchOverride)
+            .where(CatalogMatchOverride.action == "reviewed_no_match")
+        )
+        assert action.selected_source_id is None
+        assert action.replacement_run_id == reviewed.run_id
+        copied = list(session.scalars(
+            select(RawCatalogRow).where(RawCatalogRow.run_id == reviewed.run_id)
+        ))
+        assert len(copied) == 2
+        assert not any(row.accepted for row in copied)
+
+    failing_adapter = FakeCatalog(
+        [], error=ProviderError("temporary outage", transient=True),
+    )
+    retry_service = CatalogService(
+        session_factory, {"2mass": failing_adapter},
+    )
+    failed = retry_service.refresh(target.sdbid, "2mass")
+    assert failed.status == "transient_failure"
+    failing_adapter.error = None
+    failing_adapter.candidates = [
+        candidate(measurements=[measurement()]),
+    ]
+
+    retried = retry_service.retry_failed_run(
+        failed.run_id,
+        actor="reviewer",
+        reason="provider is available again",
+    )
+    assert retried.status == "match"
+    with session_factory() as session:
+        action = session.scalar(
+            select(CatalogMatchOverride)
+            .where(CatalogMatchOverride.action == "retry")
+        )
+        assert action.previous_run_id == failed.run_id
+        assert action.replacement_run_id == retried.run_id

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from sqlalchemy import select
 
 from sdb_identity.hierarchy import HierarchyService
@@ -32,6 +33,7 @@ def _system_snapshot():
                 None, "2000A&A...000....1A", 3.38,
                 related_object_type="Star",
                 related_object_types=("Star", "PM*"),
+                related_spectral_type="K0V",
             ),
             RelationshipValue(
                 "parent", 301, "Moving Group 1", 10.1, -20.1,
@@ -89,11 +91,89 @@ def test_relative_preview_separates_importable_context_and_unknown(session_facto
     assert by_name["HD 1B"]["action"] == "import"
     assert by_name["HD 1B"]["component_label"] == "B"
     assert by_name["HD 1B"]["suggested_role"] == "physical"
+    assert by_name["HD 1B"]["spectral_type"] == "K0V"
     assert by_name["Moving Group 1"]["action"] == "context_only"
     assert by_name["Moving Group 1"]["component_relevance"] == "contextual_group"
     assert by_name["HD 1 b"]["action"] == "context_only"
     assert by_name["HD 1 b"]["component_relevance"] == "planetary_or_disk"
     assert by_name["Unclassified 1"]["action"] == "review_required"
+
+
+def test_relative_preview_groups_same_simbad_object_and_keeps_provenance(
+    session_factory,
+):
+    value = _system_snapshot()
+    duplicate_parent = RelationshipValue(
+        "parent", 301, "Moving Group 1", 10.1, -20.1,
+        90, "2024A&A...000....9Z", 490.0,
+        related_object_type="MGr",
+        related_object_types=("MGr",),
+    )
+    value = replace(
+        value,
+        relationships=(*value.relationships, duplicate_parent),
+    )
+    root = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    MetadataService(
+        session_factory,
+        FakeMetadataProvider(MetadataQueryResult("match", (value,))),
+    ).refresh(root.sdbid)
+
+    rows = preview_immediate_relatives(session_factory, root.sdbid)
+    parent = next(row for row in rows if row["main_id"] == "Moving Group 1")
+
+    assert sum(row["main_id"] == "Moving Group 1" for row in rows) == 1
+    assert parent["relationship_count"] == 2
+    assert len(parent["relationship_ids"]) == 2
+    assert parent["bibcodes"] == [
+        "2000A&A...000....2B",
+        "2024A&A...000....9Z",
+    ]
+
+
+def test_existing_relative_is_reconciled_once_then_reported_complete(
+    session_factory,
+):
+    root = _root_with_metadata(session_factory)
+    identity = IdentityService(
+        session_factory,
+        simbad=FakeSimbad({
+            "HD 1B": simbad_result(
+                "HD 1B",
+                astrometry(10.001, -20.0, source="simbad"),
+                ("WDS J00400-2000B",),
+            ),
+        }),
+    )
+    component = identity.add(AddRequest(name="HD 1B"))
+
+    before = {
+        row["main_id"]: row
+        for row in preview_immediate_relatives(session_factory, root.sdbid)
+    }
+    assert before["HD 1B"]["action"] == "reconcile"
+    assert before["HD 1B"]["matched_sdbid"] == component.sdbid
+    assert "shared system membership" in before["HD 1B"]["reconciliation_missing"]
+
+    result = import_immediate_relatives(
+        session_factory,
+        root.sdbid,
+        identity_service=identity,
+        actor="reviewer",
+        reason="reconcile existing component",
+    )
+    after = {
+        row["main_id"]: row
+        for row in preview_immediate_relatives(session_factory, root.sdbid)
+    }
+
+    assert (result.imported, result.reconciled, result.already_complete) == (
+        0, 1, 0,
+    )
+    assert after["HD 1B"]["action"] == "complete"
+    assert after["HD 1B"]["reconciliation_missing"] == []
 
 
 def test_import_relatives_is_bounded_reconciles_system_and_is_idempotent(
@@ -128,6 +208,7 @@ def test_import_relatives_is_bounded_reconciles_system_and_is_idempotent(
 
     assert (first.imported, first.context_only, first.review_required, first.failed) == (1, 2, 1, 0)
     assert (second.imported, second.already_imported, second.failed) == (0, 1, 0)
+    assert (second.reconciled, second.already_complete) == (0, 1)
     with session_factory() as session:
         targets = list(session.scalars(select(Target).order_by(Target.id)))
         assert len(targets) == 2
@@ -159,8 +240,27 @@ def test_import_relatives_is_bounded_reconciles_system_and_is_idempotent(
     ]
     context = HierarchyService(session_factory).system_context(root.sdbid)
     preview = {row["main_id"]: row for row in context["simbad_relative_preview"]}
-    assert preview["HD 1B"]["action"] == "already_imported"
+    assert preview["HD 1B"]["action"] == "complete"
     assert preview["HD 1B"]["matched_sdbid"] == component.sdbid
+    simbad = context["simbad_metadata_by_target"][root.sdbid]
+    assert simbad["main_id"] == "HD 1 AB"
+    assert simbad["spectral_type"] == "F5V"
+    assert simbad["primary_object_type"] == "Star"
+    assert simbad["distance_pc"] == pytest.approx(1000.0 / 12.3)
+    assert simbad["distance_error_pc"] == pytest.approx(
+        1000.0 * 0.2 / (12.3 * 12.3)
+    )
+    assert context["simbad_main_id_by_target"] == {
+        root.sdbid: "HD 1 AB",
+        component.sdbid: "HD 1B",
+    }
+    component_context = HierarchyService(session_factory).system_context(
+        component.sdbid
+    )
+    assert component_context["simbad_main_id_by_target"] == {
+        root.sdbid: "HD 1 AB",
+        component.sdbid: "HD 1B",
+    }
 
 
 def test_importing_component_first_promotes_composite_parent_and_system_name(

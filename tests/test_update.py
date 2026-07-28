@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from sqlalchemy import select
+
 from sdb_identity.catalogs import CatalogService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
+from sdb_identity.models import ExternalIdentifier
 from sdb_identity.reference import ReferenceStore
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateService
 from tests.test_catalog import FakeBulkCatalog, FakeCatalog
-from tests.test_metadata import FakeBulkMetadataProvider, FakeMetadataProvider
+from tests.test_metadata import (
+    FakeBulkMetadataProvider,
+    FakeMetadataProvider,
+    snapshot,
+)
 
 
 def service(session_factory, tmp_path):
@@ -117,3 +126,48 @@ def test_update_all_uses_bulk_capable_simbad_metadata(session_factory, tmp_path)
     assert (first.target_count, first.refreshed, first.skipped, first.failed) == (2, 2, 0, 0)
     assert (second.refreshed, second.skipped, second.failed) == (0, 2, 0)
     assert [context.target_id for context in provider.contexts] == [1, 2]
+
+
+def test_update_all_stores_simbad_aliases_before_applying_snapshots(
+    session_factory,
+    tmp_path,
+    monkeypatch,
+):
+    IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
+    updater = UpdateService(
+        session_factory,
+        ReferenceStore(tmp_path / "reference.sqlite"),
+        metadata_factory=lambda: MetadataService(
+            session_factory,
+            FakeMetadataProvider(MetadataQueryResult("match", (snapshot(),))),
+        ),
+        catalog_factory=lambda: CatalogService(session_factory, {}),
+        workers=2,
+    )
+    monkeypatch.setattr(
+        updater.reference_store, "current_snapshot", lambda _provider: object()
+    )
+    observed_aliases = []
+
+    def apply_after_metadata(_service, provider, *, force=False):
+        with session_factory() as session:
+            observed_aliases.extend(session.scalars(
+                select(ExternalIdentifier.value).where(
+                    ExternalIdentifier.source == "simbad_metadata"
+                )
+            ))
+        return SimpleNamespace(
+            unchanged=False,
+            targets=1,
+            refreshed=1,
+        )
+
+    monkeypatch.setattr(
+        "sdb_identity.update.ReferenceApplicationService.apply",
+        apply_after_metadata,
+    )
+
+    result = updater.update_all(providers=("hip2", "simbad"))
+
+    assert result.failed == 0
+    assert "TYC 1-2-3" in observed_aliases

@@ -701,6 +701,10 @@ class HierarchyService:
             measurement_assignments = _system_measurement_assignments(session, target_ids)
             target_lifecycle = _system_target_lifecycle(session, target_ids)
             system_memberships = _system_memberships(session, target_ids)
+            simbad_metadata = _system_simbad_metadata(session, target_ids)
+            simbad_main_ids = _system_simbad_main_ids(
+                session, target_ids, metadata_by_target=simbad_metadata,
+            )
             catalog_neighbourhood = _system_catalog_neighbourhood(session, target_ids)
             identity_cross_candidates = _identity_cross_candidates(
                 session,
@@ -731,6 +735,8 @@ class HierarchyService:
                 "component_positions": component_positions,
                 "nearby_sdb_targets": nearby_targets,
                 "simbad_semantic_by_target": semantic,
+                "simbad_metadata_by_target": simbad_metadata,
+                "simbad_main_id_by_target": simbad_main_ids,
                 "hierarchy_candidates_by_target": hierarchy_candidates,
                 "identity_cross_candidates": identity_cross_candidates,
                 "photometry_by_target": photometry,
@@ -2098,6 +2104,103 @@ def _system_target_review_row(
         },
         "identifiers": identifiers,
     }
+
+
+def _system_simbad_metadata(
+    session: Session,
+    target_ids: list[int],
+) -> dict[str, dict[str, object]]:
+    if not target_ids:
+        return {}
+    targets = {
+        target.id: target.sdbid
+        for target in session.scalars(
+            select(Target).where(Target.id.in_(target_ids))
+        )
+    }
+    result: dict[str, dict[str, object]] = {}
+    rows = session.execute(
+        select(MetadataRun, SimbadMetadata)
+        .join(SimbadMetadata, SimbadMetadata.run_id == MetadataRun.id)
+        .where(
+            MetadataRun.target_id.in_(target_ids),
+            MetadataRun.provider == "simbad",
+            MetadataRun.is_current.is_(True),
+            MetadataRun.status == "match",
+        )
+        .order_by(MetadataRun.target_id, MetadataRun.id.desc())
+    )
+    for run, metadata in rows:
+        sdbid = targets.get(run.target_id)
+        if sdbid is None or sdbid in result:
+            continue
+        parallax = metadata.parallax_mas
+        parallax_error = metadata.parallax_error_mas
+        distance_pc = (
+            None
+            if parallax is None or parallax <= 0
+            else 1000.0 / parallax
+        )
+        distance_error_pc = (
+            None
+            if distance_pc is None
+            or parallax_error is None
+            or parallax_error < 0
+            else 1000.0 * parallax_error / (parallax * parallax)
+        )
+        result[sdbid] = {
+            "run_id": run.id,
+            "main_id": metadata.main_id,
+            "spectral_type": metadata.spectral_type,
+            "primary_object_type": metadata.primary_object_type,
+            "parallax_mas": parallax,
+            "parallax_error_mas": parallax_error,
+            "distance_pc": distance_pc,
+            "distance_error_pc": distance_error_pc,
+        }
+    return result
+
+
+def _system_simbad_main_ids(
+    session: Session,
+    target_ids: list[int],
+    *,
+    metadata_by_target: dict[str, dict[str, object]],
+) -> dict[str, str]:
+    """Return stable SIMBAD display IDs, including imported relatives.
+
+    Identity imports store SIMBAD's main ID first among their SIMBAD-sourced
+    identifiers even before a metadata refresh creates a current
+    ``SimbadMetadata`` row. Current metadata remains authoritative when both
+    forms are available.
+    """
+    result = {
+        sdbid: str(metadata["main_id"])
+        for sdbid, metadata in metadata_by_target.items()
+        if metadata.get("main_id")
+    }
+    if not target_ids:
+        return result
+    targets = {
+        target.id: target.sdbid
+        for target in session.scalars(
+            select(Target).where(Target.id.in_(target_ids))
+        )
+    }
+    for source in ("simbad_main_id", "simbad"):
+        rows = session.execute(
+            select(ExternalIdentifier.target_id, ExternalIdentifier.value)
+            .where(
+                ExternalIdentifier.target_id.in_(target_ids),
+                ExternalIdentifier.source == source,
+            )
+            .order_by(ExternalIdentifier.target_id, ExternalIdentifier.id)
+        )
+        for target_id, value in rows:
+            sdbid = targets.get(target_id)
+            if sdbid is not None:
+                result.setdefault(sdbid, value)
+    return result
 
 
 def _system_hierarchy_candidates(

@@ -785,6 +785,7 @@ class CatalogService:
                 provider=previous.provider,
                 previous_run_id=previous.id,
                 replacement_run_id=replacement.id,
+                action="accept_candidate",
                 selected_source_id=candidate.source_id,
                 actor=decision.actor,
                 reason=decision.reason,
@@ -808,6 +809,144 @@ class CatalogService:
                 measurement_count,
                 candidate.source_id,
             )
+
+    def override_no_match(
+        self,
+        run_id: int,
+        *,
+        actor: str | None,
+        reason: str | None = None,
+    ) -> CatalogRefreshResult:
+        """Replace one current ambiguous result with an audited reviewed no-match."""
+        with self.sessions() as session, session.begin():
+            previous = session.get(CatalogRun, run_id)
+            if previous is None:
+                raise KeyError(f"catalog run not found: {run_id}")
+            if not previous.is_current:
+                raise ValueError("catalog run is no longer current")
+            if previous.status != "ambiguous":
+                raise ValueError("reviewed no-match requires a current ambiguous result")
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Reviewed {previous.provider} candidates for target "
+                    f"{previous.target_id}; none is the target"
+                ),
+            )
+            replacement = CatalogRun(
+                target_id=previous.target_id,
+                provider=previous.provider,
+                release=previous.release,
+                status="no_match",
+                is_current=True,
+                query_ra_deg=previous.query_ra_deg,
+                query_dec_deg=previous.query_dec_deg,
+                query_epoch=previous.query_epoch,
+                candidate_count=previous.candidate_count,
+                completed_at=datetime.now(timezone.utc),
+            )
+            session.add(replacement)
+            session.flush()
+            for raw in session.scalars(
+                select(RawCatalogRow)
+                .where(RawCatalogRow.run_id == previous.id)
+                .order_by(RawCatalogRow.id)
+            ):
+                session.add(RawCatalogRow(
+                    run_id=replacement.id,
+                    detection_id=raw.detection_id,
+                    source_id=raw.source_id,
+                    ra_deg=raw.ra_deg,
+                    dec_deg=raw.dec_deg,
+                    epoch=raw.epoch,
+                    separation_arcsec=raw.separation_arcsec,
+                    score=raw.score,
+                    accepted=False,
+                    payload_json=raw.payload_json,
+                ))
+            previous.is_current = False
+            if previous.provider in {"iras_psc", "iras_fsc"}:
+                from .iras import reconcile_iras_target
+
+                reconcile_iras_target(session, previous.target_id)
+            action = CatalogMatchOverride(
+                target_id=previous.target_id,
+                provider=previous.provider,
+                previous_run_id=previous.id,
+                replacement_run_id=replacement.id,
+                action="reviewed_no_match",
+                selected_source_id=None,
+                actor=decision.actor,
+                reason=decision.reason,
+            )
+            session.add(action)
+            session.flush()
+            mark_export_dirty(
+                session,
+                previous.target_id,
+                source_type="catalog_override",
+                source_id=action.id,
+                reason="reviewed catalog no-match",
+            )
+            return CatalogRefreshResult(
+                replacement.id,
+                previous.target_id,
+                previous.provider,
+                "no_match",
+                previous.candidate_count,
+                0,
+            )
+
+    def retry_failed_run(
+        self,
+        run_id: int,
+        *,
+        actor: str | None,
+        reason: str | None = None,
+    ) -> CatalogRefreshResult:
+        """Retry a failed provider attempt and audit the operator request."""
+        with self.sessions() as session:
+            previous = session.get(CatalogRun, run_id)
+            if previous is None:
+                raise KeyError(f"catalog run not found: {run_id}")
+            if previous.status not in {"transient_failure", "permanent_failure"}:
+                raise ValueError("retry requires a failed catalog run")
+            latest_id = session.scalar(
+                select(CatalogRun.id)
+                .where(
+                    CatalogRun.target_id == previous.target_id,
+                    CatalogRun.provider == previous.provider,
+                )
+                .order_by(CatalogRun.id.desc())
+                .limit(1)
+            )
+            if latest_id != previous.id:
+                raise ValueError("catalog failure has already been superseded")
+            target_id = previous.target_id
+            provider = previous.provider
+            decision = DecisionContext.resolve(
+                actor=actor,
+                reason=reason,
+                suggested_reason=(
+                    f"Retried failed {provider} provider result for target {target_id}"
+                ),
+            )
+
+        result = self.refresh(target_id, provider)
+        with self.sessions() as session, session.begin():
+            action = CatalogMatchOverride(
+                target_id=target_id,
+                provider=provider,
+                previous_run_id=run_id,
+                replacement_run_id=result.run_id,
+                action="retry",
+                selected_source_id=result.selected_source_id,
+                actor=decision.actor,
+                reason=decision.reason,
+            )
+            session.add(action)
+        return result
 
     @staticmethod
     def _mark_shared_detection(

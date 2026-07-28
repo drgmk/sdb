@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import os
@@ -62,6 +63,14 @@ def parser() -> argparse.ArgumentParser:
             "Manage the Python SDB identity, catalog, sample, and export "
             "database. Commands are designed to preserve provenance and record "
             "reviewable decisions rather than editing provider results in place."
+        ),
+    )
+    result.add_argument(
+        "--config",
+        default=os.environ.get("SDB_CONFIG"),
+        help=(
+            "TOML configuration file; defaults to SDB_CONFIG, then "
+            "~/.config/sdb/config.toml plus ./sdb.toml"
         ),
     )
     result.add_argument("--database", default=os.environ.get("SDB_DATABASE", "sdb.sqlite"))
@@ -230,9 +239,9 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_status = _add_parser(hierarchy_commands, "status", "Show hierarchy context for a target.", "Reports hierarchy context for one target. --scope basic (default) reports systems, memberships, and relationships; --scope provider adds matched WDS/CCDM systems, derived component geometry, and graph diagnostics; --scope system adds nearby SDB targets, identity cross-candidates, and current photometry for a full read-only review report.")
     hierarchy_status.add_argument("target")
     hierarchy_status.add_argument("--scope", choices=["basic", "provider", "system"], default="basic")
-    hierarchy_relatives = _add_parser(hierarchy_commands, "relatives", "Preview immediate SIMBAD relatives and whether they should become targets.", "Classifies current parent/child rows as already imported, importable stellar/substellar structure, contextual-only, or review-required. This is read-only and never follows relationships recursively.")
+    hierarchy_relatives = _add_parser(hierarchy_commands, "relatives", "Preview immediate SIMBAD relatives and whether they should become targets.", "Classifies current parent/child rows as already imported, importable stellar structure, contextual-only, or review-required. This is read-only and never follows relationships recursively.")
     hierarchy_relatives.add_argument("target")
-    hierarchy_import_relatives = _add_parser(hierarchy_commands, "import-relatives", "Import immediate stellar SIMBAD relatives and reconcile one target system.", "Imports only current immediate stellar/substellar parents and children, then records component membership, lifecycle roles, and SIMBAD parent/child evidence. Clusters, moving groups, planets, disks, unknown types, and relatives of newly added targets are not expanded.")
+    hierarchy_import_relatives = _add_parser(hierarchy_commands, "import-relatives", "Import immediate stellar SIMBAD relatives and reconcile one target system.", "Imports only current immediate stellar parents and children, then records component membership, lifecycle roles, and SIMBAD parent/child evidence. Clusters, moving groups, planets, unknown types, and relatives of newly added targets are not expanded.")
     hierarchy_import_relatives.add_argument("target")
     _add_actor_argument(hierarchy_import_relatives)
     _add_reason_argument(hierarchy_import_relatives)
@@ -353,7 +362,7 @@ def parser() -> argparse.ArgumentParser:
         _add_reason_argument(sample_action)
     sample_members = _add_parser(sample_commands, "members", "List current members of a sample.", "Outputs the targets currently assigned to the sample. This is the membership source used by sample readiness and sample export.")
     sample_members.add_argument("name")
-    sample_readiness = _add_parser(sample_commands, "readiness", "Check whether a sample is ready for export or review.", "Reports missing, ambiguous, failed, and dirty provider state across all sample members. The command exits non-zero when blockers remain.")
+    sample_readiness = _add_parser(sample_commands, "readiness", "Check whether a sample is ready for export or review.", "Reports missing, ambiguous, failed, dirty, and sample-relevant unresolved curated state. Database-wide unresolved curated rows remain a diagnostic count and do not block an unrelated sample. The command exits non-zero when blockers remain.")
     sample_readiness.add_argument("name")
     sample_readiness.add_argument(
         "--providers",
@@ -443,6 +452,10 @@ def parser() -> argparse.ArgumentParser:
     photometry_assignment_history.add_argument("target")
     photometry_proposals = _add_parser(photometry_commands, "proposals", "Propose system-level measurement contributors without changing the database.", "Uses exact identifiers, catalog positions, per-band resolution, hierarchy semantics, and target lifecycle state. Ambiguous rows remain review-required; use photometry assign separately to accept a proposal.")
     photometry_proposals.add_argument("target")
+    photometry_proposals.add_argument(
+        "--details", action="store_true",
+        help="include per-measurement proposals; the default is summary-first",
+    )
     photometry_apply_proposals = _add_parser(
         photometry_commands,
         "apply-proposals",
@@ -465,6 +478,10 @@ def parser() -> argparse.ArgumentParser:
         "--reason",
         default="accepted high-confidence automatic assignment proposal",
         help="audit reason prefix used for newly applied assignments",
+    )
+    photometry_apply_proposals.add_argument(
+        "--details", action="store_true",
+        help="include per-measurement results; the default is summary-first",
     )
     photometry_fitting_groups = _add_parser(
         photometry_commands,
@@ -530,6 +547,26 @@ def parser() -> argparse.ArgumentParser:
     assert reference_fetch is not None
     reference_fetch.add_argument("--refresh-cache", action="store_true", help="download a fresh raw-provider snapshot before importing")
     reference_fetch.add_argument("--no-cache", action="store_true", help="fetch directly into the reference database without using the snapshot cache")
+    reference_ensure = _add_parser(
+        reference_commands,
+        "ensure",
+        "Fetch missing or stale configured reference snapshots.",
+        "Checks the configured reference provider list, reports current, missing, "
+        "and stale snapshots, and fetches only missing or stale providers. With no "
+        "provider arguments the [reference] providers list is used; its default is all.",
+    )
+    reference_ensure.add_argument(
+        "providers", nargs="*", choices=REFERENCE_ADAPTERS,
+        help="optional provider override; defaults to the configured provider list",
+    )
+    reference_ensure.add_argument(
+        "--max-age-days", type=float,
+        help="override reference.max_age_days from configuration",
+    )
+    reference_ensure.add_argument(
+        "--check", action="store_true",
+        help="report current, missing, and stale snapshots without fetching",
+    )
     reference_describe = _add_parser(reference_commands, "describe", "Describe tables and columns in a reference snapshot.", "Shows VizieR-derived table metadata, column descriptions, units, and stable local table names. Add a table name to focus on one table.")
     reference_describe.add_argument("adapter", choices=REFERENCE_ADAPTERS)
     reference_describe.add_argument("table", nargs="?")
@@ -651,6 +688,23 @@ def _format_json(args, value, **kwargs) -> str:
     else:
         kwargs["indent"] = kwargs.get("indent", 2)
     return json.dumps(value, **kwargs)
+
+
+@contextmanager
+def _provider_output_to_stderr():
+    """Keep unstructured dependency output out of the CLI JSON channel.
+
+    Several remote clients print service notices directly instead of using
+    logging. Redirect stdout process-wide while provider work is active so
+    worker-thread notices follow stderr and the final CLI result remains the
+    only stdout payload.
+    """
+    output = sys.stdout
+    try:
+        sys.stdout = sys.stderr
+        yield
+    finally:
+        sys.stdout = output
 
 
 def _photometry_review_priority_rank(priority: str) -> int:
@@ -969,6 +1023,10 @@ def _is_json_record_stream(args) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        from .config import load_config
+
+        args.sdb_config = load_config(args.config)
+        args.sdb_config.apply_environment_defaults()
         _prepare_operator_audit(args)
     except ValueError as error:
         print(str(error), file=sys.stderr)
@@ -1063,12 +1121,35 @@ def main(argv: list[str] | None = None) -> int:
         store = ReferenceStore(args.reference_database)
         try:
             if args.reference_command == "fetch":
-                value = store.fetch(
-                    args.adapter,
-                    cache_path=None if args.no_cache else args.cache_database,
-                    refresh_cache=args.refresh_cache,
-                )
+                with _provider_output_to_stderr():
+                    value = store.fetch(
+                        args.adapter,
+                        cache_path=None if args.no_cache else args.cache_database,
+                        refresh_cache=args.refresh_cache,
+                    )
                 print(_format_json(args, value.__dict__, sort_keys=True))
+            elif args.reference_command == "ensure":
+                from .reference_ensure import ensure_reference_snapshots
+
+                providers = (
+                    tuple(args.providers)
+                    if args.providers
+                    else args.sdb_config.reference_providers(REFERENCE_ADAPTERS)
+                )
+                max_age_days = (
+                    args.max_age_days
+                    if args.max_age_days is not None
+                    else args.sdb_config.reference_max_age_days()
+                )
+                with _provider_output_to_stderr():
+                    value = ensure_reference_snapshots(
+                        store,
+                        providers,
+                        cache_path=args.cache_database,
+                        max_age_days=max_age_days,
+                        check_only=args.check,
+                    )
+                print(_format_json(args, value, sort_keys=True))
             elif args.reference_command == "status":
                 value = store.current_snapshot(args.adapter)
                 if value is None:
@@ -1196,26 +1277,27 @@ def main(argv: list[str] | None = None) -> int:
             if args.alma_command == "sync":
                 if args.offline:
                     raise ValueError("ALMA sync is unavailable in offline mode")
-                from .alma import AstroqueryAlmaArchive
+                with _provider_output_to_stderr():
+                    from .alma import AstroqueryAlmaArchive
 
-                service = AlmaArchiveService(
-                    sessions, AstroqueryAlmaArchive(
-                        args.archive_url, timeout_seconds=args.timeout,
-                    ),
-                )
-                if args.bootstrap:
-                    summary = service.bootstrap(
-                        args.start_year, args.end_year, args.chunk_months,
+                    service = AlmaArchiveService(
+                        sessions, AstroqueryAlmaArchive(
+                            args.archive_url, timeout_seconds=args.timeout,
+                        ),
                     )
-                elif args.incremental:
-                    summary = service.incremental()
-                else:
-                    summary = service.resume(
-                        args.resume,
-                        start_year=args.start_year,
-                        end_year=args.end_year,
-                        chunk_months=args.chunk_months,
-                    )
+                    if args.bootstrap:
+                        summary = service.bootstrap(
+                            args.start_year, args.end_year, args.chunk_months,
+                        )
+                    elif args.incremental:
+                        summary = service.incremental()
+                    else:
+                        summary = service.resume(
+                            args.resume,
+                            start_year=args.start_year,
+                            end_year=args.end_year,
+                            chunk_months=args.chunk_months,
+                        )
                 print(_format_json(args, asdict(summary), sort_keys=True))
             elif args.alma_command == "projects":
                 # Project lookup is local and deliberately requires no archive client.
@@ -1365,21 +1447,22 @@ def main(argv: list[str] | None = None) -> int:
             elif args.hierarchy_command == "import-relatives":
                 if args.offline:
                     raise ValueError("hierarchy import-relatives is unavailable in offline mode")
-                from .live_providers import AstroqueryGaia, AstroquerySimbad
-                from .system_expansion import import_immediate_relatives
+                with _provider_output_to_stderr():
+                    from .live_providers import AstroqueryGaia, AstroquerySimbad
+                    from .system_expansion import import_immediate_relatives
 
-                identity = IdentityService(
-                    sessions,
-                    simbad=AstroquerySimbad(),
-                    gaia=AstroqueryGaia(),
-                )
-                value = import_immediate_relatives(
-                    sessions,
-                    args.target,
-                    identity_service=identity,
-                    actor=args.actor,
-                    reason=args.reason,
-                )
+                    identity = IdentityService(
+                        sessions,
+                        simbad=AstroquerySimbad(),
+                        gaia=AstroqueryGaia(),
+                    )
+                    value = import_immediate_relatives(
+                        sessions,
+                        args.target,
+                        identity_service=identity,
+                        actor=args.actor,
+                        reason=args.reason,
+                    )
                 print(_format_json(args, value.as_dict(), sort_keys=True))
             elif args.hierarchy_command == "source":
                 if args.source_command == "fetch":
@@ -1393,13 +1476,14 @@ def main(argv: list[str] | None = None) -> int:
                             note=args.note,
                         )
                     else:
-                        value = service.fetch_snapshot(
-                            args.provider,
-                            cache_path=None if args.no_cache else args.cache_database,
-                            refresh_cache=args.refresh_cache,
-                            release=args.release,
-                            note=args.note,
-                        )
+                        with _provider_output_to_stderr():
+                            value = service.fetch_snapshot(
+                                args.provider,
+                                cache_path=None if args.no_cache else args.cache_database,
+                                refresh_cache=args.refresh_cache,
+                                release=args.release,
+                                note=args.note,
+                            )
                     print(_format_json(args, asdict(value), sort_keys=True))
                 elif args.source_command == "list":
                     for value in service.sources(args.provider):
@@ -1714,29 +1798,32 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         try:
-            service = _update_service(
-                sessions,
-                args.reference_database,
-                workers=args.workers,
-                bulk_chunk_size=args.chunk_size,
-                offline=args.offline,
-                reporter=reporter,
-            )
-            if args.update_all:
-                summary = service.update_all(force=args.force, providers=providers)
-            elif args.sample is not None:
-                from .samples import SampleService
+            with _provider_output_to_stderr():
+                service = _update_service(
+                    sessions,
+                    args.reference_database,
+                    workers=args.workers,
+                    bulk_chunk_size=args.chunk_size,
+                    offline=args.offline,
+                    reporter=reporter,
+                )
+                if args.update_all:
+                    summary = service.update_all(
+                        force=args.force, providers=providers,
+                    )
+                elif args.sample is not None:
+                    from .samples import SampleService
 
-                members = SampleService(sessions).members(args.sample)
-                summary = service.update_targets(
-                    [target.id for target in members],
-                    force=args.force,
-                    providers=providers,
-                )
-            else:
-                summary = service.update_target(
-                    args.target, force=args.force, providers=providers
-                )
+                    members = SampleService(sessions).members(args.sample)
+                    summary = service.update_targets(
+                        [target.id for target in members],
+                        force=args.force,
+                        providers=providers,
+                    )
+                else:
+                    summary = service.update_target(
+                        args.target, force=args.force, providers=providers
+                    )
             exported = []
             if args.export_dir:
                 output_dir = Path(args.export_dir)
@@ -1775,16 +1862,27 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
     if args.command == "add":
-        if args.offline:
-            service = IdentityService(sessions)
-        else:
-            # Astroquery's Gaia module performs service-status setup at import
-            # time; keep it out of offline and database-inspection commands.
-            from .live_providers import AstroqueryGaia, AstroquerySimbad
-
-            service = IdentityService(sessions, simbad=AstroquerySimbad(), gaia=AstroqueryGaia())
         try:
-            added = service.add(AddRequest(name=args.name, ra_deg=args.ra, dec_deg=args.dec, epoch=args.epoch, command=" ".join(sys.argv)))
+            with _provider_output_to_stderr():
+                if args.offline:
+                    service = IdentityService(sessions)
+                else:
+                    # Astroquery's Gaia module performs service-status setup at
+                    # import time; treat those notices like provider output.
+                    from .live_providers import AstroqueryGaia, AstroquerySimbad
+
+                    service = IdentityService(
+                        sessions,
+                        simbad=AstroquerySimbad(),
+                        gaia=AstroqueryGaia(),
+                    )
+                added = service.add(AddRequest(
+                    name=args.name,
+                    ra_deg=args.ra,
+                    dec_deg=args.dec,
+                    epoch=args.epoch,
+                    command=" ".join(sys.argv),
+                ))
         except (ValueError, UnresolvedTarget) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -1863,36 +1961,43 @@ def main(argv: list[str] | None = None) -> int:
             print("remote refresh is unavailable in offline mode", file=sys.stderr)
             return 2
         try:
-            if args.provider in {"2mass", "allwise", "gaia_dr3", "tycho2", *REFERENCE_ADAPTERS}:
-                from .catalogs import CatalogService
-                if args.provider in REFERENCE_ADAPTERS:
-                    from .reference import ReferenceStore, snapshot_adapter
-                    adapters = {
-                        args.provider: snapshot_adapter(
-                            args.provider, ReferenceStore(args.reference_database)
-                        )
-                    }
+            with _provider_output_to_stderr():
+                if args.provider in {
+                    "2mass", "allwise", "gaia_dr3", "tycho2",
+                    *REFERENCE_ADAPTERS,
+                }:
+                    from .catalogs import CatalogService
+                    if args.provider in REFERENCE_ADAPTERS:
+                        from .reference import ReferenceStore, snapshot_adapter
+                        adapters = {
+                            args.provider: snapshot_adapter(
+                                args.provider,
+                                ReferenceStore(args.reference_database),
+                            )
+                        }
+                    else:
+                        from .adapters.allwise import AllWiseAdapter
+                        from .adapters.gaia import GaiaDr3Adapter
+                        from .adapters.twomass import TwoMassAdapter
+                        from .adapters.tycho2 import Tycho2Adapter
+                        adapters = {
+                            "gaia_dr3": GaiaDr3Adapter(),
+                            "tycho2": Tycho2Adapter(),
+                            "2mass": TwoMassAdapter(),
+                            "allwise": AllWiseAdapter(),
+                        }
+                    refreshed = CatalogService(
+                        sessions, adapters,
+                    ).refresh(
+                        args.target, args.provider
+                    )
                 else:
-                    from .adapters.allwise import AllWiseAdapter
-                    from .adapters.gaia import GaiaDr3Adapter
-                    from .adapters.twomass import TwoMassAdapter
-                    from .adapters.tycho2 import Tycho2Adapter
-                    adapters = {
-                        "gaia_dr3": GaiaDr3Adapter(),
-                        "tycho2": Tycho2Adapter(),
-                        "2mass": TwoMassAdapter(),
-                        "allwise": AllWiseAdapter(),
-                    }
-                refreshed = CatalogService(
-                    sessions, adapters,
-                ).refresh(
-                    args.target, args.provider
-                )
-            else:
-                from .metadata import MetadataService
-                from .simbad_metadata import AstroquerySimbadMetadata
+                    from .metadata import MetadataService
+                    from .simbad_metadata import AstroquerySimbadMetadata
 
-                refreshed = MetadataService(sessions, AstroquerySimbadMetadata()).refresh(args.target)
+                    refreshed = MetadataService(
+                        sessions, AstroquerySimbadMetadata(),
+                    ).refresh(args.target)
         except (KeyError, RuntimeError) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -2165,25 +2270,34 @@ def main(argv: list[str] | None = None) -> int:
                 )], sort_keys=True))
             elif args.photometry_command == "proposals":
                 from .assignment_proposals import measurement_assignment_proposals
+                from .proposal_reporting import proposal_summary_report
 
                 print(_format_json(
                     args,
-                    measurement_assignment_proposals(sessions, args.target),
+                    proposal_summary_report(
+                        measurement_assignment_proposals(sessions, args.target),
+                        target=args.target,
+                        include_details=args.details,
+                    ),
                     sort_keys=True,
                 ))
             elif args.photometry_command == "apply-proposals":
                 from .proposal_application import apply_measurement_assignment_proposals
+                from .proposal_reporting import without_proposal_items
 
                 print(_format_json(
                     args,
-                    apply_measurement_assignment_proposals(
-                        sessions,
-                        target_reference=args.target,
-                        sample=args.sample,
-                        apply=args.apply,
-                        actor=args.actor,
-                        reason=args.reason,
-                        reporter=reporter,
+                    without_proposal_items(
+                        apply_measurement_assignment_proposals(
+                            sessions,
+                            target_reference=args.target,
+                            sample=args.sample,
+                            apply=args.apply,
+                            actor=args.actor,
+                            reason=args.reason,
+                            reporter=reporter,
+                        ),
+                        include_details=args.details,
                     ),
                     sort_keys=True,
                 ))
@@ -2389,15 +2503,16 @@ def main(argv: list[str] | None = None) -> int:
             print("remote refresh is unavailable in offline mode", file=sys.stderr)
             return 2
         try:
-            workers = _worker_settings(args.workers)
-            service = _batch_service(
-                sessions,
-                workers=workers,
-                offline=args.offline,
-                reporter=reporter,
-            )
-            created = service.create(args.file, refresh=refresh)
-            summary = service.execute(created.run_id)
+            with _provider_output_to_stderr():
+                workers = _worker_settings(args.workers)
+                service = _batch_service(
+                    sessions,
+                    workers=workers,
+                    offline=args.offline,
+                    reporter=reporter,
+                )
+                created = service.create(args.file, refresh=refresh)
+                summary = service.execute(created.run_id)
         except (OSError, ValueError, KeyError) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -2425,12 +2540,13 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("remote batch stages cannot be resumed in offline mode")
                 if not workers:
                     workers = json.loads(run.workers_json)
-            summary = _batch_service(
-                sessions,
-                workers=workers,
-                offline=args.offline,
-                reporter=reporter,
-            ).execute(args.run_id)
+            with _provider_output_to_stderr():
+                summary = _batch_service(
+                    sessions,
+                    workers=workers,
+                    offline=args.offline,
+                    reporter=reporter,
+                ).execute(args.run_id)
         except (ValueError, KeyError) as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -2448,6 +2564,7 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_json(args, {"run_id": args.run_id, "reset_jobs": count}, sort_keys=True))
         return 0
     if args.command == "review" and args.kind == "serve":
+        from .catalog_setup import catalog_service_for_provider
         from .review_ui import serve_review_ui
 
         try:
@@ -2467,6 +2584,15 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 open_browser=args.open,
                 identity_service_factory=identity_service_factory,
+                catalog_service_factory=lambda provider, action: (
+                    catalog_service_for_provider(
+                        sessions,
+                        provider,
+                        reference_database=args.reference_database,
+                        offline=args.offline,
+                        action=action,
+                    )
+                ),
             )
         except (RuntimeError, ValueError) as error:
             print(str(error), file=sys.stderr)
@@ -2586,19 +2712,21 @@ def main(argv: list[str] | None = None) -> int:
                 }, sort_keys=True))
         elif args.kind == "catalog-matches":
             candidates = session.execute(
-                select(RawCatalogRow, CatalogRun)
+                select(RawCatalogRow, CatalogRun, Target)
                 .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
+                .join(Target, Target.id == CatalogRun.target_id)
                 .where(
                     CatalogRun.is_current.is_(True),
                     CatalogRun.status == "ambiguous",
                 )
                 .order_by(CatalogRun.id, RawCatalogRow.score.desc())
             )
-            for candidate, run in candidates:
+            for candidate, run, target in candidates:
                 print(_format_json(args, {
                     "candidate_id": candidate.id,
                     "run_id": run.id,
                     "target_id": run.target_id,
+                    "sdbid": target.sdbid,
                     "provider": run.provider,
                     "source_id": candidate.source_id,
                     "separation_arcsec": candidate.separation_arcsec,

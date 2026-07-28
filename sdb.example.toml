@@ -1,0 +1,14 @@
+# Copy to ./sdb.toml for project-local settings, or to
+# ~/.config/sdb/config.toml for user-wide settings.
+
+[reference]
+# "all" expands to every registered whole-catalog reference provider.
+providers = ["all"]
+max_age_days = 30
+
+[operator]
+# actor = "your name"
+
+[mirrors]
+# simbad = "simbad.harvard.edu"
+# vizier = "vizier.nao.ac.jp"

@@ -340,6 +340,9 @@ def test_paunzen_native_indices_use_spatial_limit_not_aperture(tmp_path):
     candidate = Paunzen15SnapshotAdapter(store).query(CatalogQueryContext(
         1, "sdbid", Astrometry(10.0, -20.0, 2000.0), ("TYC 123-456-1",),
     ))[0]
+    assert candidate.payload["_sdb_association"]["catalog_identifiers"] == [
+        "TYC 123-456-1"
+    ]
     values = {value.band: value for value in candidate.measurements}
     assert set(values) == {"BS_YS", "STROMM1", "STROMC1"}
     assert values["BS_YS"].resolution_major_arcsec == 0.8

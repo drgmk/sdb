@@ -146,6 +146,16 @@ def apply_measurement_assignment_proposals(
     skipped = sum(
         value for key, value in counts.items() if key.startswith("skipped_")
     )
+    provider_counts = Counter(str(row["provider"]) for row in items)
+    confidence_counts = Counter(
+        str(row["proposal_confidence"]) for row in items
+    )
+    targets_requiring_review = sorted({
+        target
+        for row in items
+        if row["status"] == "skipped"
+        for target in row["encountered_from_targets"]
+    })
     return {
         "mode": "apply" if apply else "dry_run",
         "selection": {
@@ -157,7 +167,11 @@ def apply_measurement_assignment_proposals(
         "summary": {
             **dict(sorted(counts.items())),
             "skipped_measurements": skipped,
+            "providers": dict(sorted(provider_counts.items())),
+            "confidence": dict(sorted(confidence_counts.items())),
+            "targets_requiring_review": len(targets_requiring_review),
         },
+        "targets_requiring_review": targets_requiring_review,
         "items": items,
         "notes": [
             "high-confidence proposals are eligible even when the measurement is excluded",

@@ -21,6 +21,7 @@ from .models import (
     SimbadRelationship,
     StructuralEdge,
     Target,
+    TargetLifecycleAction,
     TargetSystem,
     TargetSystemMember,
 )
@@ -35,14 +36,21 @@ class RelativeImportResult:
     system_id: int | None
     system_name: str | None
     imported: int
-    already_imported: int
+    reconciled: int
+    already_complete: int
     context_only: int
     review_required: int
     failed: int
     relatives: tuple[dict[str, object], ...]
 
+    @property
+    def already_imported(self) -> int:
+        """Compatibility total for callers predating explicit reconcile state."""
+        return self.reconciled + self.already_complete
+
     def as_dict(self) -> dict[str, object]:
         value = asdict(self)
+        value["already_imported"] = self.already_imported
         value["relatives"] = list(self.relatives)
         return value
 
@@ -81,28 +89,68 @@ def preview_immediate_relatives(
             )
         ))
         result = []
-        for relationship in relationships:
-            object_types = json.loads(relationship.related_object_types_json or "[]")
+        for relationship_group in _group_simbad_relationships(relationships):
+            relationship = _most_informative_relationship(relationship_group)
+            object_types = list(dict.fromkeys(
+                value
+                for row in relationship_group
+                for value in (
+                    *json.loads(row.related_object_types_json or "[]"),
+                    row.related_object_type,
+                )
+                if value
+            ))
             relevance = _simbad_component_relevance(
                 relationship.related_object_type, object_types,
             )
             matched = _find_related_target(session, relationship)
             component = _component_label_from_identifier(relationship.related_main_id)
             role = _suggested_role(relationship.direction, component)
-            if relevance in {"contextual_group", "planetary_or_disk"}:
+            reconciliation_missing: list[str] = []
+            if relevance == "contextual_group":
                 action = "context_only"
-                reason = f"{relevance} relationships do not create SDB stellar targets"
+                reason = (
+                    "contextual-group relationships do not create SDB stellar targets"
+                )
+            elif relevance == "planetary_or_disk":
+                action = "context_only"
+                reason = "planet relationships do not create SDB stellar targets"
             elif relevance == "stellar_or_substellar_component" and matched is not None:
-                action = "already_imported"
-                reason = "SIMBAD OID/main identity or component-consistent position matches an SDB target"
+                reconciliation_missing = _relative_reconciliation_missing(
+                    session,
+                    requested=target,
+                    related=matched,
+                    relationship=relationship,
+                    component=component,
+                    related_role=role,
+                    related_state=(
+                        "system_only" if role == "composite" else "active"
+                    ),
+                )
+                if reconciliation_missing:
+                    action = "reconcile"
+                    reason = (
+                        "matching SDB target exists but still needs "
+                        + ", ".join(reconciliation_missing)
+                    )
+                else:
+                    action = "complete"
+                    reason = (
+                        "matching SDB target and structural reconciliation "
+                        "are already current"
+                    )
             elif relevance == "stellar_or_substellar_component":
                 action = "import"
-                reason = "immediate SIMBAD relative is stellar or substellar"
+                reason = "immediate SIMBAD relative is stellar"
             else:
                 action = "review_required"
                 reason = "SIMBAD object types do not establish a stellar structural component"
             result.append({
                 "relationship_id": relationship.id,
+                "relationship_ids": [
+                    row.id for row in relationship_group
+                ],
+                "relationship_count": len(relationship_group),
                 "direction": relationship.direction,
                 "related_oid": relationship.related_oid,
                 "main_id": relationship.related_main_id,
@@ -111,15 +159,26 @@ def preview_immediate_relatives(
                 "separation_arcsec": relationship.separation_arcsec,
                 "object_type": relationship.related_object_type,
                 "object_types": object_types,
+                "spectral_type": relationship.related_spectral_type,
                 "component_relevance": relevance,
                 "component_label": component,
                 "suggested_role": role,
                 "suggested_state": "system_only" if role == "composite" else "active",
                 "action": action,
                 "reason": reason,
+                "reconciliation_missing": reconciliation_missing,
                 "matched_target_id": None if matched is None else matched.id,
                 "matched_sdbid": None if matched is None else matched.sdbid,
-                "bibcode": relationship.link_bibcode,
+                "bibcode": next((
+                    row.link_bibcode
+                    for row in relationship_group
+                    if row.link_bibcode
+                ), None),
+                "bibcodes": list(dict.fromkeys(
+                    row.link_bibcode
+                    for row in relationship_group
+                    if row.link_bibcode
+                )),
             })
         return result
 
@@ -161,15 +220,23 @@ def import_immediate_relatives(
     rows = []
     counts = {
         "imported": 0,
-        "already_imported": 0,
+        "reconciled": 0,
+        "already_complete": 0,
         "context_only": 0,
         "review_required": 0,
         "failed": 0,
     }
     for relative in preview:
         row = dict(relative)
-        if relative["action"] in {"context_only", "review_required"}:
-            counts[str(relative["action"])] += 1
+        if relative["action"] in {
+            "complete", "context_only", "review_required",
+        }:
+            count_key = (
+                "already_complete"
+                if relative["action"] == "complete"
+                else str(relative["action"])
+            )
+            counts[count_key] += 1
             rows.append(row)
             continue
         target_sdbid = relative.get("matched_sdbid")
@@ -188,8 +255,10 @@ def import_immediate_relatives(
             target_sdbid = added.sdbid
             row["matched_target_id"] = added.target_id
             row["matched_sdbid"] = added.sdbid
-            row["action"] = "imported" if added.created else "already_imported"
-        counts[str(row["action"])] += 1
+            row["action"] = "imported" if added.created else "reconcile"
+        applied_action = (
+            "imported" if row["action"] == "imported" else "reconciled"
+        )
         hierarchy.add_member(
             system.name,
             target_sdbid,
@@ -217,6 +286,8 @@ def import_immediate_relatives(
             system.name = _promote_system_primary(
                 session_factory, system.id, target_sdbid,
             )
+        row["action"] = applied_action
+        counts[applied_action] += 1
         rows.append(row)
 
     return RelativeImportResult(
@@ -224,11 +295,122 @@ def import_immediate_relatives(
         system_id=system.id,
         system_name=system.name,
         imported=counts["imported"],
-        already_imported=counts["already_imported"],
+        reconciled=counts["reconciled"],
+        already_complete=counts["already_complete"],
         context_only=counts["context_only"],
         review_required=counts["review_required"],
         failed=counts["failed"],
         relatives=tuple(rows),
+    )
+
+
+def _group_simbad_relationships(
+    relationships: list[SimbadRelationship],
+) -> list[list[SimbadRelationship]]:
+    grouped: dict[tuple[str, int], list[SimbadRelationship]] = {}
+    for relationship in relationships:
+        grouped.setdefault(
+            (relationship.direction, relationship.related_oid), []
+        ).append(relationship)
+    return list(grouped.values())
+
+
+def _most_informative_relationship(
+    relationships: list[SimbadRelationship],
+) -> SimbadRelationship:
+    return max(
+        relationships,
+        key=lambda row: (
+            row.related_ra_deg is not None and row.related_dec_deg is not None,
+            row.separation_arcsec is not None,
+            row.related_object_type is not None,
+            row.related_spectral_type is not None,
+            row.link_bibcode is not None,
+            -row.id,
+        ),
+    )
+
+
+def _relative_reconciliation_missing(
+    session: Session,
+    *,
+    requested: Target,
+    related: Target,
+    relationship: SimbadRelationship,
+    component: str | None,
+    related_role: str,
+    related_state: str,
+) -> list[str]:
+    requested_system_ids = set(session.scalars(
+        select(TargetSystemMember.system_id).where(
+            TargetSystemMember.target_id == requested.id
+        )
+    ))
+    related_system_ids = set(session.scalars(
+        select(TargetSystemMember.system_id).where(
+            TargetSystemMember.target_id == related.id
+        )
+    ))
+    shared_system_ids = requested_system_ids & related_system_ids
+    missing = []
+    if not shared_system_ids:
+        missing.append("shared system membership")
+    elif component and session.scalar(
+        select(TargetSystemMember.id).where(
+            TargetSystemMember.system_id.in_(shared_system_ids),
+            TargetSystemMember.target_id == related.id,
+            TargetSystemMember.component_label == component,
+        ).limit(1)
+    ) is None:
+        missing.append("component membership")
+
+    if relationship.direction == "child":
+        parent_id, child_id = requested.id, related.id
+        requested_role, requested_state = "composite", "system_only"
+    else:
+        parent_id, child_id = related.id, requested.id
+        requested_role, requested_state = "physical", "active"
+    if not _target_has_lifecycle(
+        session, requested.id, requested_role, requested_state,
+    ):
+        missing.append("requested-target lifecycle")
+    if not _target_has_lifecycle(
+        session, related.id, related_role, related_state,
+    ):
+        missing.append("relative lifecycle")
+
+    edge_query = select(StructuralEdge.id).where(
+        StructuralEdge.endpoint_a_target_id == parent_id,
+        StructuralEdge.endpoint_b_target_id == child_id,
+        StructuralEdge.direction == "a_parent_b",
+        StructuralEdge.relation_type == "simbad_parent_child",
+        StructuralEdge.status == "accepted",
+    )
+    if shared_system_ids:
+        edge_query = edge_query.where(
+            StructuralEdge.system_id.in_(shared_system_ids)
+        )
+    if session.scalar(edge_query.limit(1)) is None:
+        missing.append("parent/child relationship")
+    return missing
+
+
+def _target_has_lifecycle(
+    session: Session,
+    target_id: int,
+    role: str,
+    state: str,
+) -> bool:
+    action = session.scalar(
+        select(TargetLifecycleAction)
+        .where(TargetLifecycleAction.target_id == target_id)
+        .order_by(TargetLifecycleAction.id.desc())
+        .limit(1)
+    )
+    return (
+        action is not None
+        and action.role == role
+        and action.state == state
     )
 
 

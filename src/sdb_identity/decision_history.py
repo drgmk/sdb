@@ -121,9 +121,13 @@ def system_decision_history(
             .where(CatalogMatchOverride.target_id.in_(target_ids))
         ):
             rows.append(_row(
-                action, "catalog_match",
+                action, "catalog_result",
                 f"{targets[action.target_id]}:{action.provider}",
-                f"selected source {action.selected_source_id}",
+                (
+                    f"selected source {action.selected_source_id}"
+                    if action.action == "accept_candidate"
+                    else action.action.replace("_", " ")
+                ),
             ))
 
         for action in session.scalars(

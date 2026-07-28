@@ -39,6 +39,14 @@ def test_catalog_source_display_names_are_adapter_owned():
     assert catalog_source_display_name("allwise", "J231234.56-123456.7") == "AllWISE J231234.56-123456.7"
     assert catalog_source_display_name("gaia_dr3", "123456789") == "Gaia DR3 123456789"
     assert catalog_source_display_name("tycho2", "1234-567-1") == "TYC 1234-567-1"
+    assert catalog_source_display_name(
+        "hip2", "36948", {"HIP": 36948}
+    ) == "HIP 36948"
+    assert catalog_source_display_name(
+        "paunzen15",
+        "7109|TYC2=2638|TYC3=1",
+        {"TYC1": 7109, "TYC2": 2638, "TYC3": 1},
+    ) == "TYC 7109-2638-1"
 
 
 def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_points(session_factory):
@@ -68,7 +76,42 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
     assert ("identity", "gaia_dr3", "rejected", "gaia-b") in values
     assert ("catalog", "2mass", "ambiguous", "2mass-a") in values
     assert ("catalog", "2mass", "ambiguous", "2mass-b") in values
-    assert ("catalog", "empty", "no_match", "query-position") not in values
+    assert not any(
+        point.kind == "catalog" and point.provider == "empty"
+        for point in view.points
+    )
+
+
+def test_review_sky_view_projects_ambiguous_catalog_candidate_from_nearby_target(
+    session_factory,
+):
+    identity = IdentityService(session_factory)
+    catalog_target = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
+    component_target = identity.add(
+        AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
+    )
+    result = CatalogService(session_factory, {
+        "tycho2": FakeCatalog(
+            [candidate("9134-1714-2", ra=10.0 + 4.1 / 3600.0, dec=0.0)],
+            name="tycho2",
+            release="fake-tycho2",
+        ),
+    }).refresh(catalog_target.sdbid, "tycho2")
+    assert result.status == "ambiguous"
+
+    view = build_review_sky_view(session_factory, component_target.sdbid)
+    point = next(
+        point for point in view.points
+        if point.provider == "tycho2" and point.source_id == "9134-1714-2"
+    )
+    html = render_review_sky_html(view)
+
+    assert point.status == "ambiguous"
+    assert point.target_id == catalog_target.target_id
+    assert point.run_target_sdbid == catalog_target.sdbid
+    assert point.separation_arcsec == pytest.approx(0.1, abs=0.01)
+    assert "shown from nearby catalog query target" in point.note
+    assert "catalog query for" in html
 
 
 def test_review_sky_view_marks_identity_candidate_linked_to_sibling_target(session_factory):
@@ -196,6 +239,71 @@ def test_review_simbad_metadata_point_uses_metadata_pm_before_canonical_pm(sessi
     assert point.pm_source == "2021A&A...000....6P"
 
 
+def test_review_sky_view_uses_simbad_metadata_pm_when_canonical_pm_is_missing(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    with session_factory() as session:
+        run = MetadataRun(
+            target_id=target.target_id,
+            provider="simbad",
+            release="fake-simbad",
+            status="match",
+            is_current=True,
+            query_identifier="Barnard's star",
+            candidate_count=1,
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            SimbadMetadata(
+                run_id=run.id,
+                target_id=target.target_id,
+                oid=123,
+                main_id="NAME Barnard's star",
+                ra_deg=10,
+                dec_deg=-20,
+                pm_ra_cosdec_masyr=-801.551,
+                pm_dec_masyr=10362.394,
+                proper_motion_bibcode="2020yCat.1350....0G",
+            )
+        )
+        session.commit()
+    CatalogService(session_factory, {
+        "old": FakeCatalog([
+            CatalogCandidate(
+                source_id="old-a",
+                ra_deg=10.0,
+                dec_deg=-20.0,
+                epoch=1990.0,
+                payload={"id": "old-a"},
+                measurements=(measurement(),),
+            ),
+        ], name="old", release="fake-old"),
+    }).refresh(target.sdbid, "old")
+
+    view = build_review_sky_view(session_factory, target.sdbid)
+    arrow = next(arrow for arrow in view.arrows if arrow.target_id == target.target_id)
+    catalog_point = next(
+        point for point in view.points
+        if point.provider == "old" and point.source_id == "old-a"
+    )
+
+    assert arrow.provider == "simbad metadata"
+    assert arrow.source_id == "NAME Barnard's star"
+    assert arrow.pm_ra_cosdec_masyr == -801.551
+    assert arrow.pm_dec_masyr == 10362.394
+    assert catalog_point.ra_deg != 10.0
+    assert catalog_point.pm_source == "assumed target PM (simbad metadata)"
+    assert "using target PM as counterpart hypothesis" in catalog_point.note
+
+    html = render_review_sky_html(view)
+    assert "catalog epoch to 2000" in html
+    assert "proper motion \\u002f 10.00 yr" in html
+
+
 def test_review_sky_html_has_annotation_toggle_and_embedded_data(session_factory):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     view = build_review_sky_view(session_factory, target.sdbid)
@@ -314,12 +422,34 @@ def test_review_sky_html_renders_pm_vectors_as_plotly_trace():
     assert 'class="sky-frame"' in html
     assert ".sky-frame { box-sizing: border-box; width: 100%; aspect-ratio: 1 / 1; min-height: 0; background: var(--panel); border: 1px solid var(--grid); border-radius: 8px; }" in html
     assert "layoutHeight" in html
-    assert 'id="component-context"' in html
+    assert 'id="component-context"' not in html
+    assert "Catalog hierarchy &amp; components" in html
+    assert html.index("<h2>Current target</h2>") < html.index(
+        "<h2>System context</h2>"
+    )
+    assert '!target.is_requested_target && !relativeTargetIds.has(target.sdbid)' in html
+    assert "targetReviewLink" in html
+    assert "targetMainId" in html
+    assert "firstUsefulIdentifier" not in html
+    assert "simbad_main_id_by_target" in html
+    assert "simbad_metadata_by_target" in html
+    assert html.index("<h3>Immediate SIMBAD relatives</h3>") < html.index(
+        "<h3>Other nearby SDB targets</h3>"
+    )
+    assert 'stellar_or_substellar_component: "stellar"' in html
+    assert 'planetary_or_disk: "planet"' in html
+    assert "d = ${distance}" in html
+    assert "compactBands" not in html
+    assert "candidateCounts" not in html
     assert 'id="photometry-context"' in html
     assert 'class="plot-column"' in html
     assert 'class="details-columns"' in html
     assert "applySelection" in html
     assert "selectedPointIndex" in html
+    assert 'id="toggle-point-list"' in html
+    assert "pointIsDefaultRelevant" in html
+    assert "explicitSystemMembers" in html
+    assert "Show all plotted items (" in html
     assert "separation_arcsec - b.separation_arcsec" in html
     assert 'match: "#f59e0b"' in html
     assert 'accepted: "#16a34a"' in html
@@ -500,6 +630,51 @@ def test_review_sky_view_includes_photometry_for_accepted_catalog_row(session_fa
     assert "photometry" in html
     assert "nearest catalog source" in html
     assert '"source_display_name": "2MASS J2mass-a"' in html
+    assert "<th>detection</th>" in html
+    assert "row.band_count" in html
+    assert "mixed assignments" in html
+
+
+def test_review_sky_view_uses_snapshot_catalog_identifier_as_display_id(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    hp = MeasurementValue(
+        band="HP",
+        value=8.36,
+        resolution_major_arcsec=0.1,
+        resolution_minor_arcsec=0.1,
+        resolution_kind="test",
+        resolution_reference="test",
+    )
+    CatalogService(session_factory, {
+        "hip2": FakeCatalog(
+            [CatalogCandidate(
+                source_id="36948",
+                ra_deg=10.0,
+                dec_deg=-20.0,
+                epoch=1991.25,
+                payload={"HIP": 36948},
+                measurements=(hp,),
+            )],
+            name="hip2",
+            release="fake-hip2",
+            query_epoch=1991.25,
+        ),
+    }).refresh(target.sdbid, "hip2")
+
+    view = build_review_sky_view(session_factory, target.sdbid)
+    point = next(point for point in view.points if point.provider == "hip2")
+
+    assert point.source_id == "36948"
+    assert point.source_display_name == "HIP 36948"
+    matrix = view.system_context["measurement_assignment_matrix"]
+    assert matrix["rows"][0]["source_display_name"] == "HIP 36948"
+    html = render_review_sky_html(view)
+    assert '"source_display_name": "HIP 36948"' in html
+    assert '[["ID", pointDisplayId(point)]' in html
 
 
 

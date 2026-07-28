@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import defaultdict
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .adapters import catalog_source_display_name
 from .catalog_measurements import current_measurement_encounters
 from .dirty import find_target
 from .models import (
     MeasurementTargetAssociation,
     NormalizedMeasurement,
     PhotometryOverride,
+    RawCatalogRow,
     Target,
     TargetLifecycleAction,
     TargetSystem,
@@ -56,6 +59,20 @@ def fitting_group_report(
                 measurement_ids,
             )
         }
+        raw_payloads = {}
+        raw_row_ids = {
+            row.raw_row_id for row in measurements.values()
+            if row.raw_row_id is not None
+        }
+        for raw in _scalars_in(
+            session, RawCatalogRow, RawCatalogRow.id, raw_row_ids
+        ):
+            try:
+                payload = json.loads(raw.payload_json)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                raw_payloads[raw.id] = payload
         associations = _associations(session, measurement_ids)
         lifecycle = _lifecycle(session, context_target_ids)
         systems = _system_context(session, context_target_ids)
@@ -145,6 +162,11 @@ def fitting_group_report(
             ],
             "provider": measurement.provider,
             "source_id": measurement.source_id,
+            "source_display_name": catalog_source_display_name(
+                measurement.provider,
+                measurement.source_id,
+                raw_payloads.get(measurement.raw_row_id),
+            ),
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
