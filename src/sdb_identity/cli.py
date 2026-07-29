@@ -2566,6 +2566,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "review" and args.kind == "serve":
         from .catalog_setup import catalog_service_for_provider
         from .review_ui import serve_review_ui
+        from .update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
 
         try:
             identity_service_factory = None
@@ -2576,6 +2577,22 @@ def main(argv: list[str] | None = None) -> int:
                     sessions,
                     simbad=AstroquerySimbad(),
                     gaia=AstroqueryGaia(),
+                )
+            catalog_coverage_providers = args.sdb_config.catalog_providers(
+                DEFAULT_PROVIDERS[1:]
+            )
+            catalog_update_factory = None
+            if not (
+                args.offline
+                and any(
+                    provider in REMOTE_CATALOGS
+                    for provider in catalog_coverage_providers
+                )
+            ):
+                catalog_update_factory = lambda: _update_service(
+                    sessions,
+                    args.reference_database,
+                    offline=args.offline,
                 )
             serve_review_ui(
                 sessions,
@@ -2593,6 +2610,8 @@ def main(argv: list[str] | None = None) -> int:
                         action=action,
                     )
                 ),
+                catalog_coverage_providers=catalog_coverage_providers,
+                catalog_update_factory=catalog_update_factory,
             )
         except (RuntimeError, ValueError) as error:
             print(str(error), file=sys.stderr)

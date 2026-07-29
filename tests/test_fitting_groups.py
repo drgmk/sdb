@@ -9,8 +9,13 @@ from sdb_identity.assignment_readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report
 from sdb_identity.joint_fit_manifest import write_joint_fit_manifest
-from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.models import (
+    MeasurementTargetAssociation,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
 from sdb_identity.photometry import assign_measurement_target, set_photometry_override
+from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
 from tests.test_catalog import FakeCatalog, candidate
 from tests.test_system_photometry_foundation import _configured_system
@@ -98,14 +103,11 @@ def test_excluded_shared_measurement_is_context_until_manually_included(session_
     assert included["measurements"][0]["fit_enabled"] is True
 
 
-def test_composite_only_measurement_is_reported_unresolved(session_factory):
+def test_composite_source_association_derives_scope_without_stored_assignment(
+    session_factory,
+):
     system, component_a, component_b = _configured_system(session_factory)
     measurement = _measurement(session_factory, system)
-    assign_measurement_target(
-        session_factory, measurement.id, system.sdbid,
-        role="composite_scope", method="test", actor="test",
-        reason="scope known but contributors unresolved",
-    )
 
     report = fitting_group_report(session_factory, target_reference=system.sdbid)
 
@@ -115,9 +117,77 @@ def test_composite_only_measurement_is_reported_unresolved(session_factory):
     assert report["measurements"][0]["review_flags"] == [
         "composite_scope_without_physical_contributor"
     ]
+    assert report["measurements"][0]["assignments"] == [{
+        "target_id": system.target_id,
+        "sdbid": system.sdbid,
+        "role": "composite_scope",
+        "method": "catalog_association_default",
+        "weight": None,
+        "note": "Derived from one accepted catalog-source association",
+        "association_id": None,
+        "derived": True,
+    }]
     assert {row["sdbid"] for row in report["targets"] if row["model_target"]} == {
         component_a.sdbid, component_b.sdbid,
     }
+    with session_factory() as session:
+        assert session.query(MeasurementTargetAssociation).count() == 0
+
+
+def test_physical_source_association_derives_fit_contributor(session_factory):
+    _system, component_a, _component_b = _configured_system(session_factory)
+    measurement = _measurement(session_factory, component_a)
+
+    report = fitting_group_report(
+        session_factory,
+        target_reference=component_a.sdbid,
+    )
+
+    row = next(
+        value for value in report["measurements"]
+        if value["measurement_id"] == measurement.id
+    )
+    assert row["fit_enabled"] is True
+    assert row["contributor_sdbids"] == [component_a.sdbid]
+    assert row["assignments"][0]["derived"] is True
+    assert report["summary"]["unassigned_measurement_count"] == 0
+    with session_factory() as session:
+        assert session.query(MeasurementTargetAssociation).count() == 0
+
+
+def test_multiple_source_associations_remain_unassigned_for_review(session_factory):
+    system, component_a, _component_b = _configured_system(session_factory)
+    measurement = _measurement(session_factory, system)
+    with session_factory() as session:
+        raw = session.query(RawCatalogRow).one()
+    preview = review_catalog_target_association_decision(
+        session_factory,
+        target_reference=component_a.sdbid,
+        detection_id=measurement.detection_id,
+        action="accept",
+        reviewed_raw_row_id=raw.id,
+    )
+    review_catalog_target_association_decision(
+        session_factory,
+        target_reference=component_a.sdbid,
+        detection_id=measurement.detection_id,
+        action="accept",
+        reviewed_raw_row_id=raw.id,
+        apply=True,
+        actor="reviewer",
+        reason="deliberately retain two plausible source associations",
+        expected_token=preview["state_token"],
+    )
+
+    report = fitting_group_report(session_factory, target_reference=system.sdbid)
+
+    row = next(
+        value for value in report["measurements"]
+        if value["measurement_id"] == measurement.id
+    )
+    assert set(row["encounter_sdbids"]) == {system.sdbid, component_a.sdbid}
+    assert row["assignments"] == []
+    assert row["review_flags"] == ["no_current_assignment"]
 
 
 def test_unspecified_scope_requires_role_review_not_composite_resolution(

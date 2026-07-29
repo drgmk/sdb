@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .dirty import find_target
 from .models import (
     CatalogMatchOverride,
+    CatalogTargetAssociationAction,
+    CatalogDetection,
     CuratedAssociationAction,
     CuratedPhotometryOverride,
     HierarchyMatchAction,
@@ -128,6 +130,27 @@ def system_decision_history(
                     if action.action == "accept_candidate"
                     else action.action.replace("_", " ")
                 ),
+            ))
+
+        for action, detection in session.execute(
+            select(CatalogTargetAssociationAction, CatalogDetection)
+            .join(
+                CatalogDetection,
+                CatalogDetection.id
+                == CatalogTargetAssociationAction.detection_id,
+            )
+            .where(
+                CatalogTargetAssociationAction.target_id.in_(target_ids)
+            )
+        ):
+            rows.append(_row(
+                action,
+                "catalog_target_association",
+                (
+                    f"{targets[action.target_id]}:"
+                    f"{detection.provider}:{detection.source_id}"
+                ),
+                action.action,
             ))
 
         for action in session.scalars(

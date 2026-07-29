@@ -82,7 +82,7 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
     )
 
 
-def test_review_sky_view_projects_ambiguous_catalog_candidate_from_nearby_target(
+def test_review_sky_view_projects_reconciled_catalog_candidate_from_nearby_target(
     session_factory,
 ):
     identity = IdentityService(session_factory)
@@ -106,11 +106,13 @@ def test_review_sky_view_projects_ambiguous_catalog_candidate_from_nearby_target
     )
     html = render_review_sky_html(view)
 
-    assert point.status == "ambiguous"
-    assert point.target_id == catalog_target.target_id
+    assert point.status == "candidate"
+    assert point.target_id == component_target.target_id
     assert point.run_target_sdbid == catalog_target.sdbid
+    assert point.linked_target_sdbids == (component_target.sdbid,)
     assert point.separation_arcsec == pytest.approx(0.1, abs=0.01)
-    assert "shown from nearby catalog query target" in point.note
+    assert "catalog detection reconciles to" in point.note
+    assert f"encountered by {catalog_target.sdbid}" in point.note
     assert "catalog query for" in html
 
 
@@ -480,6 +482,13 @@ def test_review_sky_view_deduplicates_same_provider_source_position_for_display(
         separation_arcsec=0.0,
         accepted=True,
         raw_row_id=2,
+        provenance=({
+            "table_id": "I/355/gaiadr3",
+            "access_url": (
+                "https://vizier.cds.unistra.fr/viz-bin/VizieR-5?"
+                "-out.add=.&-source=I%2F355%2Fgaiadr3&Source===123"
+            ),
+        },),
         note="catalog row",
     )
 
@@ -489,6 +498,7 @@ def test_review_sky_view_deduplicates_same_provider_source_position_for_display(
     assert points[0].kind == "identity+catalog"
     assert points[0].candidate_id == 1
     assert points[0].raw_row_id == 2
+    assert points[0].provenance == second.provenance
 
 
 def test_review_sky_view_includes_nearby_targets_and_proper_motion_arrows(session_factory):
@@ -674,7 +684,7 @@ def test_review_sky_view_uses_snapshot_catalog_identifier_as_display_id(
     assert matrix["rows"][0]["source_display_name"] == "HIP 36948"
     html = render_review_sky_html(view)
     assert '"source_display_name": "HIP 36948"' in html
-    assert '[["ID", pointDisplayId(point)]' in html
+    assert '[["ID", sourceLink(pointDisplayId(point), point.provenance), true]' in html
 
 
 

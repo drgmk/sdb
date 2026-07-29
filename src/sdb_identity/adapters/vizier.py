@@ -13,51 +13,21 @@ from astroquery.vizier import Vizier
 from ..astroquery_config import configure_vizier_class
 from ..astrometry import angular_separation_arcsec
 from ..catalogs import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_provenance import (
+    CatalogProvenance,
+    vizier_access_url,
+    vizier_entry_url,
+    vizier_readme_url,
+    with_payload_provenance,
+)
 from ..providers import ProviderError
-
-
-def row_value(row: Any, *names: str):
-    columns = {str(name).lower(): name for name in getattr(row, "colnames", ())}
-    if isinstance(row, dict):
-        columns.update({str(name).lower(): name for name in row})
-    for name in names:
-        key = columns.get(name.lower())
-        if key is None:
-            continue
-        value = row[key]
-        mask = getattr(value, "mask", False)
-        try:
-            masked = bool(mask) if not hasattr(mask, "any") else bool(mask.any())
-        except ValueError:
-            masked = True
-        if masked or value is None:
-            # A provider may expose several aliases while masking its native
-            # field and populating a derived coordinate or identifier column.
-            continue
-        return value.item() if hasattr(value, "item") and getattr(value, "ndim", 0) == 0 else value
-    return None
-
-
-def row_text(row: Any, *names: str) -> str | None:
-    value = row_value(row, *names)
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        value = value.decode("utf-8")
-    return str(value).strip()
-
-
-def row_float(row: Any, *names: str) -> float | None:
-    value = row_value(row, *names)
-    if value is None:
-        return None
-    result = float(value)
-    return result if math.isfinite(result) else None
-
-
-# Re-exported from the shared serialization module (kept here for the many
-# call sites that import them from this adapter).
-from ..serialization import json_value as _json_value, row_payload  # noqa: E402,F401
+from ..serialization import (  # noqa: F401
+    json_value as _json_value,
+    row_float,
+    row_payload,
+    row_text,
+    row_value,
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +104,11 @@ class VizierConeAdapter(ABC):
             return []
         acceptance_radius_arcsec = self.acceptance_radius(context)
         expected = self.expected_source_ids(context.identifiers)
+        table = tables[0]
+        table_meta = getattr(table, "meta", {}) or {}
+        table_name = str(
+            table_meta.get("name") or table_meta.get("ID") or self.release
+        )
         return [
             self.annotate_candidate(
                 self.parse_row(row),
@@ -141,8 +116,9 @@ class VizierConeAdapter(ABC):
                 query_radius_arcsec=radius_arcsec,
                 acceptance_radius_arcsec=acceptance_radius_arcsec,
                 expected=expected,
+                query_catalog=table_name,
             )
-            for row in tables[0]
+            for row in table
         ]
 
     def query_many(
@@ -201,6 +177,10 @@ class VizierConeAdapter(ABC):
             if not tables:
                 continue
             for table in tables:
+                table_meta = getattr(table, "meta", {}) or {}
+                table_name = str(
+                    table_meta.get("name") or table_meta.get("ID") or self.release
+                )
                 for row in table:
                     query_index = row_value(row, "_q")
                     try:
@@ -217,6 +197,7 @@ class VizierConeAdapter(ABC):
                         acceptance_radius_arcsec=self.acceptance_radius(context),
                         expected=self.expected_source_ids(context.identifiers),
                         query_service="VizieR multi-cone",
+                        query_catalog=table_name,
                     ))
         return result
 
@@ -279,6 +260,55 @@ class VizierConeAdapter(ABC):
             "identifier_agreement": agreement,
         })
         payload["_sdb_association"] = association
+        table_id = self.release if query_catalog is None else query_catalog
+        identifier_column = next(
+            (
+                column for column in self.source_id_columns
+                if row_text(candidate.payload, column)
+            ),
+            self.source_id_columns[0] if self.source_id_columns else None,
+        )
+        identifier_value = (
+            row_text(candidate.payload, identifier_column)
+            if identifier_column
+            else None
+        ) or candidate.source_id
+        # Query transport is deliberately distinct from the operator-facing
+        # catalogue location. IRSA-backed rows still have canonical VizieR
+        # mirrors identified by ``release``.
+        browse_table_id = table_id if query_service.startswith("VizieR") else self.release
+        access_url = (
+            vizier_entry_url(
+                browse_table_id, identifier_column, identifier_value
+            )
+            if identifier_column and identifier_value
+            else vizier_access_url(browse_table_id)
+        )
+        if query_service.startswith("VizieR"):
+            provenance = candidate.provenance or (CatalogProvenance(
+                service=query_service,
+                catalog_id=self.release,
+                table_id=table_id,
+                identifier_column=identifier_column,
+                identifier_value=identifier_value,
+                access_url=access_url,
+                readme_url=vizier_readme_url(
+                    self.release.rsplit("/", 1)[0]
+                ),
+            ),)
+        else:
+            provenance = candidate.provenance or (CatalogProvenance(
+                service=query_service,
+                catalog_id=self.release,
+                table_id=table_id,
+                identifier_column=identifier_column,
+                identifier_value=identifier_value,
+                access_url=access_url,
+                readme_url=vizier_readme_url(
+                    self.release.rsplit("/", 1)[0]
+                ),
+            ),)
+        payload = with_payload_provenance(payload, provenance)
         return CatalogCandidate(
             source_id=candidate.source_id,
             ra_deg=candidate.ra_deg,
@@ -287,6 +317,8 @@ class VizierConeAdapter(ABC):
             payload=payload,
             measurements=candidate.measurements,
             attributes=candidate.attributes,
+            detection_key=candidate.detection_key,
+            provenance=provenance,
         )
 
     def candidate_separation(

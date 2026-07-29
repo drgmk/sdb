@@ -6,6 +6,10 @@
 providers = ["all"]
 max_age_days = 30
 
+[catalog]
+# Direct provider coverage expected for every target. "all" is the default.
+providers = ["all"]
+
 [operator]
 # actor = "your name"
 

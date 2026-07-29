@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 
+from sdb_identity.catalogs import CatalogService
 from sdb_identity.database import init_database
+from sdb_identity.database import make_session_factory
+from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.service import AddRequest, IdentityService
+from tests.test_catalog import FakeCatalog, candidate, measurement
 
 
 def test_migration_builds_schema_and_views(tmp_path):
@@ -78,7 +83,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0043_catalog_result_actions"
+    assert version == "0049_catalog_provenance_locator"
     assert {
         "photometry_overrides",
         "dataset_revisions", "curated_records",
@@ -100,6 +105,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "hierarchy_match_actions",
         "target_lifecycle_actions", "measurement_association_actions",
         "catalog_detections",
+        "catalog_target_association_actions",
         "structural_edges", "structural_edge_actions",
     } <= tables
     assert {
@@ -130,6 +136,88 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
     } <= views
 
 
+def test_provider_scope_migration_repairs_import_order_overwrite(tmp_path):
+    path = tmp_path / "scope-repair.sqlite"
+    init_database(path)
+    sessions = make_session_factory(path)
+    target = IdentityService(sessions).add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
+    CatalogService(sessions, {
+        "ubvmeans": FakeCatalog(
+            [candidate(
+                "+100000123|m_LID=D",
+                measurements=[measurement("VJ")],
+            )],
+            name="ubvmeans",
+            release="II/168",
+            query_epoch=2000.0,
+        ),
+    }).refresh(target.sdbid, "ubvmeans")
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE normalized_measurements "
+            "SET ownership_scope='shared', blend_state='blended', "
+            "blend_reason='duplicate_source'"
+        )
+        connection.execute(
+            "UPDATE alembic_version "
+            "SET version_num='0045_catalog_target_associations'"
+        )
+        connection.commit()
+
+    init_database(path)
+
+    with sessions() as session:
+        value = session.query(NormalizedMeasurement).one()
+        assert (
+            value.ownership_scope,
+            value.blend_state,
+            value.blend_reason,
+        ) == (
+            "system",
+            "blended",
+            "catalog_multiple_in_aperture",
+        )
+
+
+def test_tdsc_scope_migration_repairs_import_order_overwrite(tmp_path):
+    path = tmp_path / "tdsc-scope-repair.sqlite"
+    init_database(path)
+    sessions = make_session_factory(path)
+    target = IdentityService(sessions).add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
+    CatalogService(sessions, {
+        "tdsc": FakeCatalog(
+            [candidate(
+                "88|m_TDSC=A",
+                measurements=[measurement("VT")],
+            )],
+            name="tdsc",
+            release="I/276",
+            query_epoch=2000.0,
+        ),
+    }).refresh(target.sdbid, "tdsc")
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE normalized_measurements "
+            "SET ownership_scope='shared', blend_state='blended', "
+            "blend_reason='duplicate_source'"
+        )
+        connection.execute(
+            "UPDATE alembic_version "
+            "SET version_num='0046_restore_provider_photometry_scope'"
+        )
+        connection.commit()
+
+    init_database(path)
+
+    with sessions() as session:
+        value = session.query(NormalizedMeasurement).one()
+        assert (
+            value.ownership_scope,
+            value.blend_state,
+            value.blend_reason,
+        ) == ("component", "clear", None)
+
+
 def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
     path = tmp_path / "identifier-policy.sqlite"
     init_database(path, "0009_catalog_match_overrides")
@@ -157,5 +245,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0043_catalog_result_actions"
+    assert version == "0049_catalog_provenance_locator"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

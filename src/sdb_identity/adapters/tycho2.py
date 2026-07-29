@@ -7,6 +7,12 @@ from astropy.coordinates import SkyCoord
 
 from ..astrometry import propagate_to_epoch
 from ..catalogs import CatalogCandidate, MeasurementValue
+from ..catalog_provenance import (
+    CatalogProvenance,
+    vizier_access_url,
+    vizier_readme_url,
+    with_payload_provenance,
+)
 from ..catalogs import CatalogQueryContext
 from ..providers import Astrometry, ProviderError
 from .vizier import VizierConeAdapter, row_float, row_payload, row_text, row_value
@@ -24,6 +30,13 @@ class Tycho2Adapter(VizierConeAdapter):
     bibcode = "2000A&A...355L..27H"
     source_id_columns = ()
     identifier_prefixes = ("TYC ",)
+    # suppl_2 is retained by the upstream catalogue for completeness, but its
+    # ReadMe describes the entries as probably false or heavily disturbed.
+    # It is therefore intentionally not eligible for SDB matching/photometry.
+    science_tables = (
+        ("I/259/tyc2", 2000.0),
+        ("I/259/suppl_1", 1991.25),
+    )
     # Provider columns exposed directly to match review.
     review_fields = (
         ReviewField(
@@ -67,10 +80,14 @@ class Tycho2Adapter(VizierConeAdapter):
         client.TIMEOUT = self.timeout_seconds
         candidates = []
         expected = self.expected_source_ids(context.identifiers)
-        queries = (
-            ("I/259/tyc2", 2000.0, self.radius_arcsec),
-            ("I/259/suppl_1", 1991.25, max(10.0, self.radius_arcsec)),
-            ("I/259/suppl_2", 1991.25, max(10.0, self.radius_arcsec)),
+        queries = tuple(
+            (
+                catalog,
+                epoch,
+                self.radius_arcsec if catalog.endswith("/tyc2")
+                else max(10.0, self.radius_arcsec),
+            )
+            for catalog, epoch in self.science_tables
         )
         try:
             for catalog, epoch, radius in queries:
@@ -105,12 +122,14 @@ class Tycho2Adapter(VizierConeAdapter):
                             payload=payload,
                             measurements=candidate.measurements,
                             attributes=candidate.attributes,
+                            detection_key=candidate.detection_key,
+                            provenance=candidate.provenance,
                         ))
         except Exception as error:
             raise ProviderError(
                 f"{self.display_name} VizieR query failed: {error}", transient=True
             ) from error
-        return list({candidate.source_id: candidate for candidate in candidates}.values())
+        return self._merge_duplicate_sources(candidates)
 
     def query_many(
         self, contexts: tuple[CatalogQueryContext, ...]
@@ -119,11 +138,14 @@ class Tycho2Adapter(VizierConeAdapter):
         result: dict[int, list[CatalogCandidate]] = {
             context.target_id: [] for context in contexts
         }
-        # Batch the same three explicit table/epoch combinations.
-        queries = (
-            ("I/259/tyc2", 2000.0, self.radius_arcsec),
-            ("I/259/suppl_1", 1991.25, max(10.0, self.radius_arcsec)),
-            ("I/259/suppl_2", 1991.25, max(10.0, self.radius_arcsec)),
+        queries = tuple(
+            (
+                catalog,
+                epoch,
+                self.radius_arcsec if catalog.endswith("/tyc2")
+                else max(10.0, self.radius_arcsec),
+            )
+            for catalog, epoch in self.science_tables
         )
         client = self.create_client()
         client.TIMEOUT = self.timeout_seconds
@@ -173,6 +195,8 @@ class Tycho2Adapter(VizierConeAdapter):
                                 payload=payload,
                                 measurements=candidate.measurements,
                                 attributes=candidate.attributes,
+                                detection_key=candidate.detection_key,
+                                provenance=candidate.provenance,
                             ))
         except Exception as error:
             raise ProviderError(
@@ -180,9 +204,42 @@ class Tycho2Adapter(VizierConeAdapter):
                 transient=True,
             ) from error
         return {
-            target_id: list({candidate.source_id: candidate for candidate in candidates}.values())
+            target_id: self._merge_duplicate_sources(candidates)
             for target_id, candidates in result.items()
         }
+
+    @staticmethod
+    def _merge_duplicate_sources(
+        candidates: list[CatalogCandidate],
+    ) -> list[CatalogCandidate]:
+        """Prefer the first science table but retain every table provenance."""
+
+        result: dict[str, CatalogCandidate] = {}
+        for candidate in candidates:
+            previous = result.get(candidate.source_id)
+            if previous is None:
+                result[candidate.source_id] = candidate
+                continue
+            provenance = tuple(dict.fromkeys(
+                (*previous.provenance, *candidate.provenance)
+            ))
+            payload = dict(previous.payload)
+            payload["_sdb_duplicate_tables"] = [
+                item.table_id for item in provenance if item.table_id
+            ]
+            payload = with_payload_provenance(payload, provenance)
+            result[candidate.source_id] = CatalogCandidate(
+                source_id=previous.source_id,
+                ra_deg=previous.ra_deg,
+                dec_deg=previous.dec_deg,
+                epoch=previous.epoch,
+                payload=payload,
+                measurements=previous.measurements,
+                attributes=previous.attributes,
+                detection_key=previous.detection_key,
+                provenance=provenance,
+            )
+        return list(result.values())
 
     @classmethod
     def parse_row(cls, row, *, table_name: str | None = None) -> CatalogCandidate:
@@ -244,6 +301,14 @@ class Tycho2Adapter(VizierConeAdapter):
             fields=cls.review_fields,
             position_uncertainty=cls.position_uncertainty,
         )
+        provenance = (CatalogProvenance(
+            service="VizieR",
+            catalog_id=cls.release,
+            table_id=table_name,
+            access_url=vizier_access_url(table_name),
+            readme_url=vizier_readme_url(cls.release),
+        ),)
+        payload = with_payload_provenance(payload, provenance)
         return CatalogCandidate(
             source_id=source_id,
             ra_deg=ra,
@@ -251,4 +316,5 @@ class Tycho2Adapter(VizierConeAdapter):
             epoch=cls.query_epoch,
             payload=payload,
             measurements=tuple(measurements),
+            provenance=provenance,
         )

@@ -31,6 +31,9 @@ def test_config_layers_reference_defaults_and_mirrors(tmp_path, monkeypatch):
         "hip2", "tdsc",
     )
     assert value.reference_max_age_days() == 45
+    assert value.catalog_providers(("2mass", "tycho2")) == (
+        "2mass", "tycho2",
+    )
     assert value.sources == (config,)
     assert __import__("os").environ["SDB_SIMBAD_SERVER"] == "simbad.example"
     assert __import__("os").environ["SDB_VIZIER_SERVER"] == "vizier.example"
@@ -43,6 +46,20 @@ def test_reference_provider_default_expands_to_all(tmp_path):
     assert load_config(config).reference_providers(("hip2", "tdsc")) == (
         "hip2", "tdsc",
     )
+    assert load_config(config).catalog_providers(("2mass", "tycho2")) == (
+        "2mass", "tycho2",
+    )
+
+
+def test_catalog_provider_configuration_can_select_a_subset(tmp_path):
+    config = tmp_path / "catalog.toml"
+    config.write_text(
+        "[catalog]\n"
+        'providers = ["2mass", "tycho2"]\n'
+    )
+    assert load_config(config).catalog_providers(
+        ("gaia_dr3", "tycho2", "2mass")
+    ) == ("2mass", "tycho2")
 
 
 def test_reference_ensure_fetches_only_missing_and_stale():

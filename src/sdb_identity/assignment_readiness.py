@@ -79,7 +79,7 @@ def assignment_readiness_report(
                 row["fit_excluded"] for row in measurements
             ),
             "detection_count": len({
-                (row["provider"], row["source_id"]) for row in measurements
+                row["detection_id"] for row in measurements
             }),
             "providers": providers,
             "systems": target["systems"],

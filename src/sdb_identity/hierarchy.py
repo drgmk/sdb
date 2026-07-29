@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from .catalog_measurements import (
 )
 from .dirty import find_target, mark_export_dirty
 from .decisions import DecisionContext
+from .effective_assignments import effective_measurement_assignments
 from .models import (
     AstrometricSolution,
     ExternalIdentifier,
@@ -653,7 +655,12 @@ class HierarchyService:
             "warnings": warnings,
         }
 
-    def system_context(self, target_reference: str | int) -> dict[str, object]:
+    def system_context(
+        self,
+        target_reference: str | int,
+        *,
+        catalog_providers: Iterable[str] | None = None,
+    ) -> dict[str, object]:
         """Return a read-only, system-level review context for one target.
 
         This deliberately composes existing target-level evidence rather than
@@ -706,6 +713,17 @@ class HierarchyService:
                 session, target_ids, metadata_by_target=simbad_metadata,
             )
             catalog_neighbourhood = _system_catalog_neighbourhood(session, target_ids)
+            from .catalog_associations import (
+                catalog_coverage_by_target,
+                catalog_target_candidates,
+            )
+
+            catalog_candidates = catalog_target_candidates(session, target_ids)
+            catalog_coverage = catalog_coverage_by_target(
+                session,
+                sorted({target.id, *explicit_target_ids}),
+                providers=catalog_providers,
+            )
             identity_cross_candidates = _identity_cross_candidates(
                 session,
                 target,
@@ -744,9 +762,13 @@ class HierarchyService:
                 "target_lifecycle_by_target": target_lifecycle,
                 "system_memberships_by_target": system_memberships,
                 "catalog_neighbourhood_by_target": catalog_neighbourhood,
+                "catalog_target_candidates": catalog_candidates,
+                "catalog_coverage_by_target": catalog_coverage,
                 "notes": [
                     "read-only review context; no system/export decisions are persisted",
                     "identity_cross_candidates show rejected/accepted source candidates that resolve to another nearby SDB target",
+                    "catalog_target_candidates re-evaluate current provider detections against every target in the review neighbourhood",
+                    "catalog_coverage_by_target reports direct provider-query coverage for explicit system members",
                 ],
             }
         from .system_expansion import preview_immediate_relatives
@@ -2501,11 +2523,10 @@ def _system_measurement_assignments(
     if not measurements:
         return []
     measurement_ids = [value.id for value in measurements]
-    associations_by_measurement: dict[int, list[MeasurementTargetAssociation]] = {}
-    for association in session.scalars(
-        select(MeasurementTargetAssociation)
-        .where(MeasurementTargetAssociation.measurement_id.in_(measurement_ids))
-        .order_by(MeasurementTargetAssociation.measurement_id, MeasurementTargetAssociation.id)
+    associations_by_measurement = {}
+    for association in effective_measurement_assignments(
+        session,
+        measurement_ids,
     ):
         associations_by_measurement.setdefault(association.measurement_id, []).append(association)
     referenced_target_ids = {
@@ -2525,13 +2546,14 @@ def _system_measurement_assignments(
         "value": measurement.value,
         "unit": measurement.unit,
         "contributors": [{
-            "association_id": association.id,
+            "association_id": association.association_id,
             "target_id": association.target_id,
             "sdbid": targets.get(association.target_id),
             "role": association.role,
             "method": association.method,
             "weight": association.weight,
             "note": association.note,
+            "derived": association.derived,
         } for association in associations_by_measurement.get(measurement.id, [])],
     } for measurement in measurements]
 

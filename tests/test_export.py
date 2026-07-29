@@ -68,6 +68,36 @@ def test_shared_catalog_source_is_excluded_from_component_exports(session_factor
     assert "shared catalog source" in table["Note2"][0]
 
 
+def test_same_display_source_in_distinct_releases_is_not_shared(
+    session_factory, tmp_path,
+):
+    identity = IdentityService(session_factory)
+    first = identity.add(AddRequest(ra_deg=10, dec_deg=-20))
+    second = identity.add(AddRequest(ra_deg=20, dec_deg=-20))
+    first_adapter = FakeCatalog(
+        [candidate(measurements=[measurement("IRAS12", 1.2, 0.1)])],
+        name="iras_psc",
+        release="release-one",
+    )
+    second_adapter = FakeCatalog(
+        [candidate(ra=20, measurements=[measurement("IRAS12", 2.2, 0.1)])],
+        name="iras_psc",
+        release="release-two",
+    )
+    CatalogService(
+        session_factory, {"iras_psc": first_adapter}
+    ).refresh(first.sdbid, "iras_psc")
+    CatalogService(
+        session_factory, {"iras_psc": second_adapter}
+    ).refresh(second.sdbid, "iras_psc")
+
+    output = export_ipac(session_factory, first.sdbid, tmp_path / "distinct.txt")
+    table = Table.read(output, format="ascii.ipac")
+
+    assert list(table["exclude"]) == [0]
+    assert "shared catalog source" not in table["Note2"][0]
+
+
 def test_tdsc_component_photometry_takes_precedence_over_tycho2(session_factory, tmp_path):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     tycho = FakeCatalog(

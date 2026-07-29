@@ -56,6 +56,28 @@ class SdbConfig:
             raise ValueError("reference.max_age_days must be a positive number")
         return result
 
+    def catalog_providers(
+        self, available: Iterable[str],
+    ) -> tuple[str, ...]:
+        """Return providers expected to cover each catalogued target."""
+        available_values = tuple(available)
+        configured = self.section("catalog").get("providers", ["all"])
+        if not isinstance(configured, list) or not all(
+            isinstance(value, str) for value in configured
+        ):
+            raise ValueError("catalog.providers must be an array of provider names")
+        clean = tuple(dict.fromkeys(value.strip().lower() for value in configured))
+        if not clean or clean == ("all",):
+            return available_values
+        if "all" in clean:
+            raise ValueError("catalog.providers may use 'all' only by itself")
+        unknown = sorted(set(clean) - set(available_values))
+        if unknown:
+            raise ValueError(
+                f"unknown catalog provider(s) in configuration: {', '.join(unknown)}"
+            )
+        return clean
+
     def apply_environment_defaults(self) -> None:
         mirrors = self.section("mirrors")
         operator = self.section("operator")

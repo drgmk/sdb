@@ -13,15 +13,18 @@ from .adapters import (
 )
 from .catalog_measurements import current_measurement_encounters
 from .dirty import find_target
+from .effective_assignments import effective_measurement_assignments
 from .models import (
     AstrometricSolution,
+    CatalogDetectionProvenance,
     ExternalIdentifier,
-    MeasurementTargetAssociation,
     NormalizedMeasurement,
     RawCatalogRow,
     Target,
 )
 from .providers import Astrometry
+from .ubv_components import decode_ubv_component
+from .tdsc_components import decode_tdsc_component
 
 
 _INACTIVE_STATES = {"suppressed", "superseded", "archived"}
@@ -76,15 +79,56 @@ def measurement_assignment_proposals(
             raw_rows.setdefault(encounter.measurement.id, encounter.raw_row)
         identifiers = _target_identifiers(session, target_ids)
         target_astrometry = _target_astrometry(session, targets)
-        current = _current_assignments(session, [value.id for value in measurements])
+        current = _current_assignments(
+            session,
+            [value.id for value in measurements],
+        )
+        provenance_by_detection: dict[int, list[dict[str, object]]] = {}
+        detection_ids = sorted({
+            int(value.detection_id) for value in measurements
+        })
+        if detection_ids:
+            for row in session.scalars(
+                select(CatalogDetectionProvenance)
+                .where(
+                    CatalogDetectionProvenance.detection_id.in_(detection_ids)
+                )
+                .order_by(
+                    CatalogDetectionProvenance.detection_id,
+                    CatalogDetectionProvenance.id,
+                )
+            ):
+                provenance_by_detection.setdefault(row.detection_id, []).append({
+                    "role": row.role,
+                    "service": row.service,
+                    "catalog_id": row.catalog_id,
+                    "table_id": row.table_id,
+                    "row_key": row.row_key,
+                    "identifier_column": row.identifier_column,
+                    "identifier_value": row.identifier_value,
+                    "source_url": row.source_url,
+                    "access_url": row.access_url,
+                    "readme_url": row.readme_url,
+                })
 
     semantic = system_context.get("simbad_semantic_by_target") or {}
     lifecycle = system_context.get("target_lifecycle_by_target") or {}
+    memberships = system_context.get("system_memberships_by_target") or {}
     target_contexts: dict[str, dict[str, object]] = {}
     result = []
     for measurement in measurements:
         raw = raw_rows.get(measurement.id)
         catalog_payload = _raw_catalog_payload(raw)
+        if measurement.provider == "ubvmeans":
+            catalog_component = decode_ubv_component(
+                catalog_payload, measurement.source_id,
+            )
+        elif measurement.provider == "tdsc":
+            catalog_component = decode_tdsc_component(
+                catalog_payload, measurement.source_id,
+            )
+        else:
+            catalog_component = None
         origin = _proposal_origin(
             measurement,
             encounter_targets.get(measurement.id, {measurement.target_id}),
@@ -115,6 +159,7 @@ def measurement_assignment_proposals(
             identifiers=identifiers,
             semantic=semantic,
             lifecycle=lifecycle,
+            memberships=memberships,
             catalog_payload=catalog_payload,
         )
         prediction = _effective_prediction(
@@ -128,6 +173,7 @@ def measurement_assignment_proposals(
             origin=origin,
             prediction=prediction,
             candidates=candidates,
+            catalog_component=catalog_component,
         )
         current_rows = current.get(measurement.id, [])
         proposed_keys = {(row["target_id"], row["role"]) for row in proposed}
@@ -143,10 +189,13 @@ def measurement_assignment_proposals(
             comparison = "unassigned"
         elif proposed_keys == current_keys:
             comparison = "agrees_with_current"
+        elif current_keys < proposed_keys:
+            comparison = "partial_proposal"
         else:
             comparison = "differs_from_current"
         result.append({
             "measurement_id": measurement.id,
+            "detection_id": measurement.detection_id,
             "origin_target_id": origin.id,
             "origin_sdbid": origin.sdbid,
             "encounter_target_ids": sorted(encounter_targets.get(measurement.id, ())),
@@ -162,6 +211,9 @@ def measurement_assignment_proposals(
                 measurement.source_id,
                 catalog_payload,
             ),
+            "provenance": provenance_by_detection.get(
+                measurement.detection_id, []
+            ),
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
@@ -172,6 +224,9 @@ def measurement_assignment_proposals(
             "predicted_scope": prediction["predicted_ownership_scope"],
             "predicted_blend_state": prediction["predicted_blend_state"],
             "scope_reason": prediction["scope_reason"],
+            "catalog_component": (
+                None if catalog_component is None else catalog_component.as_dict()
+            ),
             "proposal_confidence": confidence,
             "proposal_reason": proposal_reason,
             "comparison_to_current": comparison,
@@ -352,9 +407,10 @@ def _current_assignments(
     result: dict[int, list[dict[str, object]]] = {}
     if not measurement_ids:
         return result
-    rows = list(session.scalars(select(MeasurementTargetAssociation).where(
-        MeasurementTargetAssociation.measurement_id.in_(measurement_ids)
-    ).order_by(MeasurementTargetAssociation.id)))
+    rows = effective_measurement_assignments(
+        session,
+        measurement_ids,
+    )
     target_ids = {row.target_id for row in rows}
     targets = {
         target.id: target.sdbid
@@ -362,12 +418,13 @@ def _current_assignments(
     }
     for row in rows:
         result.setdefault(row.measurement_id, []).append({
-            "association_id": row.id,
+            "association_id": row.association_id,
             "target_id": row.target_id,
             "sdbid": targets.get(row.target_id),
             "role": row.role,
             "method": row.method,
             "weight": row.weight,
+            "derived": row.derived,
         })
     return result
 
@@ -401,6 +458,7 @@ def _candidate_rows(
     identifiers: dict[int, tuple[tuple[str, str], ...]],
     semantic: dict[str, dict[str, object]],
     lifecycle: dict[str, dict[str, object]],
+    memberships: dict[str, list[dict[str, object]]],
     catalog_payload: dict[str, object] | None,
 ) -> list[dict[str, object]]:
     rows = []
@@ -426,6 +484,7 @@ def _candidate_rows(
             "identifier_sources": list(identifier_sources),
             "identifier_authority": _identifier_authority(identifier_sources)
             if identifier_sources else 0,
+            "system_memberships": list(memberships.get(target.sdbid) or []),
             "separation_arcsec": angular_separation_arcsec(
                 source_position,
                 target_astrometry[target.id],
@@ -459,9 +518,14 @@ def _effective_prediction(
     """Add explicit-system lifecycle evidence absent from provider hierarchy."""
     if prediction["predicted_ownership_scope"] != "component":
         return prediction
-    origin_row = next((row for row in candidates if row["target_id"] == origin.id), None)
     resolution = measurement.resolution_major_arcsec
-    if origin_row is None or origin_row["target_role"] != "composite" or resolution is None:
+    if resolution is None:
+        return prediction
+    composites = [
+        row for row in candidates
+        if row["eligible"] and row["target_role"] == "composite"
+    ]
+    if len(composites) != 1:
         return prediction
     physical_in_beam = [
         row for row in candidates
@@ -476,7 +540,7 @@ def _effective_prediction(
         "predicted_blend_state": "blended",
         "predicted_blend_reason": "unresolved_at_catalog_resolution",
         "scope_reason": (
-            "the origin is an audited composite target and at least two physical "
+            "one audited composite scope exists and at least two physical "
             "system members lie within one stored full-width resolution"
         ),
     }
@@ -508,6 +572,7 @@ def _propose_assignments(
     origin: Target,
     prediction: dict[str, str],
     candidates: list[dict[str, object]],
+    catalog_component=None,
 ) -> tuple[list[dict[str, object]], str, str]:
     scope = prediction["predicted_ownership_scope"]
     eligible = [row for row in candidates if row["eligible"]]
@@ -526,6 +591,55 @@ def _propose_assignments(
         return [], f"predicted scope {scope} requires review", "low"
 
     if scope == "component":
+        if (
+            catalog_component is not None
+            and catalog_component.kind in {
+                "component_ordinal", "named_component",
+            }
+        ):
+            component_rows = _component_label_candidates(
+                physical, catalog_component.component_label or "",
+            )
+            tolerance = max(
+                1.0,
+                min(3.0, (measurement.resolution_major_arcsec or 2.0) / 2.0),
+            )
+            corroborated = [
+                row for row in component_rows
+                if row["identifier_preferred"]
+                or row["separation_arcsec"] <= tolerance
+            ]
+            conflicting_identifiers = [
+                row for row in identifier_physical
+                if row not in component_rows
+            ]
+            if conflicting_identifiers:
+                return [], (
+                    f"catalog component {catalog_component.native_code} "
+                    f"({catalog_component.component_label}) conflicts with "
+                    "the preferred exact target identifier"
+                ), "low"
+            if len(corroborated) == 1:
+                row = corroborated[0]
+                evidence = "catalog_component_code+system_membership"
+                if row["identifier_preferred"]:
+                    evidence += f"+{_identifier_evidence(row)}"
+                    confidence = "high"
+                    reason = "preferred exact identifier"
+                else:
+                    evidence += "+position"
+                    confidence = "medium"
+                    reason = f"position within {tolerance:.2f} arcsec"
+                return [_proposal(row, "contributor", evidence)], (
+                    f"catalog component {catalog_component.native_code} maps "
+                    f"to system member {catalog_component.component_label}, "
+                    f"corroborated by {reason}"
+                ), confidence
+            if len(corroborated) > 1:
+                return [], (
+                    f"catalog component {catalog_component.native_code} maps "
+                    "to more than one corroborated system member"
+                ), "low"
         if len(identifier_physical) == 1:
             return [_proposal(
                 identifier_physical[0],
@@ -572,6 +686,33 @@ def _propose_assignments(
         composite_scopes = identifier_composite or [
             row for row in composites if row["target_id"] == origin.id
         ]
+        if (
+            catalog_component is not None
+            and catalog_component.kind == "combined_components"
+            and len(identifier_composite) == 1
+        ):
+            contributors = _simple_binary_contributors(
+                identifier_composite[0], physical,
+            )
+            if contributors is not None:
+                assignments = [
+                    _proposal(
+                        row,
+                        "contributor",
+                        "catalog_component_D+simple_binary_membership",
+                    )
+                    for row in contributors
+                ]
+                assignments.append(_proposal(
+                    identifier_composite[0],
+                    "composite_scope",
+                    f"catalog_component_D+{_identifier_evidence(identifier_composite[0])}",
+                ))
+                return assignments, (
+                    "catalog component D records combined light; the exact "
+                    "composite identifier and a unique simple A+B system "
+                    "identify both physical contributors"
+                ), "high"
         if beam is None:
             assignments = [
                 _proposal(row, "composite_scope", _identifier_evidence(row) if row["identifier_preferred"] else "origin_scope")
@@ -635,6 +776,48 @@ def _propose_assignments(
         return assignments, reason, confidence
 
     return [], f"unsupported predicted scope {scope}", "low"
+
+
+def _component_label_candidates(
+    rows: list[dict[str, object]],
+    component_label: str,
+) -> list[dict[str, object]]:
+    wanted = component_label.strip().upper()
+    return [
+        row for row in rows
+        if any(
+            str(membership.get("component_label") or "").strip().upper()
+            == wanted
+            for membership in row.get("system_memberships") or []
+        )
+    ]
+
+
+def _simple_binary_contributors(
+    composite: dict[str, object],
+    physical: list[dict[str, object]],
+) -> list[dict[str, object]] | None:
+    composite_system_ids = {
+        int(membership["system_id"])
+        for membership in composite.get("system_memberships") or []
+        if str(membership.get("component_label") or "").strip().upper() == "AB"
+    }
+    solutions = []
+    for system_id in composite_system_ids:
+        members: dict[str, list[dict[str, object]]] = {}
+        for row in physical:
+            labels = {
+                str(membership.get("component_label") or "").strip().upper()
+                for membership in row.get("system_memberships") or []
+                if int(membership.get("system_id") or -1) == system_id
+            }
+            for label in labels:
+                members.setdefault(label, []).append(row)
+        if set(members) == {"A", "B"} and all(
+            len(members[label]) == 1 for label in ("A", "B")
+        ):
+            solutions.append([members["A"][0], members["B"][0]])
+    return solutions[0] if len(solutions) == 1 else None
 
 
 def _proposal(row: dict[str, object], role: str, evidence: str) -> dict[str, object]:

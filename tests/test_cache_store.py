@@ -44,6 +44,13 @@ def test_snapshot_cache_stores_and_reuses_current_snapshot(tmp_path):
     assert current.tables[0].name == "B/wds/wds"
     assert current.tables[0].rows[0]["WDS"] == "00057+4549"
     assert current.tables[0].metadata["columns"][0]["name"] == "WDS"
+    documentation = path.parent / f"{path.name}.catalogs" / "vizier" / "B_wds"
+    assert (documentation / "ReadMe").read_text() == "ReadMe v1"
+    manifest = json.loads((documentation / "manifest.json").read_text())
+    assert manifest["tables"] == [{
+        "name": "B/wds/wds",
+        "row_count": 1,
+    }]
 
 
 def test_snapshot_cache_summaries_and_cli_inspection(tmp_path, capsys):
@@ -100,6 +107,29 @@ def test_snapshot_cache_summaries_and_cli_inspection(tmp_path, capsys):
     validate_output = capsys.readouterr().out
     assert '"ok": true' in validate_output
     assert '"row_count": 1' in validate_output
+
+
+def test_snapshot_cache_restores_missing_companion_readme(tmp_path):
+    path = tmp_path / "sdb-cache.sqlite"
+    table = Table(rows=[("x",)], names=("Name",))
+    table.meta["name"] = "I/1/main"
+    table.meta["description"] = "test"
+    SnapshotCache(path).store_snapshot(
+        provider="vizier",
+        catalog_id="I/1",
+        release="I/1",
+        source_url="https://example.invalid/I/1",
+        readme="restorable ReadMe",
+        tables=[table],
+    )
+    documentation = (
+        path.parent / f"{path.name}.catalogs" / "vizier" / "I_1"
+    )
+    (documentation / "ReadMe").unlink()
+
+    SnapshotCache(path)
+
+    assert (documentation / "ReadMe").read_text() == "restorable ReadMe"
 
 
 def test_snapshot_cache_validate_reports_invalid_snapshot(tmp_path, capsys):

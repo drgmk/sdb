@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from sdb_identity.catalogs import (
     CatalogCandidate,
@@ -12,7 +12,11 @@ from sdb_identity.catalogs import (
     CatalogService,
     MeasurementValue,
 )
-from sdb_identity.models import CatalogBatchRequest, CatalogMatchOverride, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
+from sdb_identity.catalog_provenance import (
+    CatalogProvenance,
+    vizier_entry_url,
+)
+from sdb_identity.models import CatalogBatchRequest, CatalogDetection, CatalogDetectionProvenance, CatalogMatchOverride, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import AddRequest, IdentityService
@@ -107,6 +111,50 @@ def test_refresh_stores_raw_row_measurements_and_identifier(session_factory):
         assert run.selected_source_id == "J00400000-2000000"
 
 
+def test_refresh_persists_detection_table_provenance(session_factory):
+    target = add_target(session_factory, ra_deg=10, dec_deg=-20)
+    base = candidate(measurements=[measurement()])
+    provenance = CatalogProvenance(
+        service="VizieR",
+        catalog_id="I/276",
+        table_id="I/276/supplem",
+        row_key="88|m_TDSC=B",
+        identifier_column="TDSC",
+        identifier_value="88",
+        access_url=vizier_entry_url(
+            "I/276/supplem", "TDSC", "88"
+        ),
+    )
+    value = CatalogCandidate(
+        source_id=base.source_id,
+        ra_deg=base.ra_deg,
+        dec_deg=base.dec_deg,
+        epoch=base.epoch,
+        payload=base.payload,
+        measurements=base.measurements,
+        provenance=(provenance,),
+    )
+    CatalogService(
+        session_factory, {"2mass": FakeCatalog([value])}
+    ).refresh(target.sdbid, "2mass")
+    with session_factory() as session:
+        stored = session.scalars(select(CatalogDetectionProvenance)).one()
+        assert stored.table_id == "I/276/supplem"
+        assert stored.row_key == "88|m_TDSC=B"
+        assert stored.identifier_column == "TDSC"
+        assert stored.identifier_value == "88"
+
+
+def test_vizier_entry_url_filters_on_native_identifier():
+    assert vizier_entry_url(
+        "II/328/allwise", "AllWISE", "J025959.07+000020.3"
+    ) == (
+        "https://vizier.cds.unistra.fr/viz-bin/VizieR-5?"
+        "-out.add=.&-source=II%2F328%2Fallwise"
+        "&AllWISE===J025959.07%2B000020.3"
+    )
+
+
 def test_refresh_fills_default_resolution_when_adapter_omits_it(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
     adapter = FakeCatalog(
@@ -174,7 +222,9 @@ def test_transient_failure_is_distinct_and_preserves_previous_current_run(sessio
         assert [run.id for run in current] == [first.run_id]
 
 
-def test_ambiguous_candidates_are_retained_without_measurements(session_factory):
+def test_ambiguous_candidates_are_retained_with_detection_measurements(
+    session_factory,
+):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
     adapter = FakeCatalog([
         candidate("one", ra=10.00010, measurements=[measurement()]),
@@ -182,9 +232,92 @@ def test_ambiguous_candidates_are_retained_without_measurements(session_factory)
     ])
     result = CatalogService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     assert result.status == "ambiguous"
+    assert result.measurement_count == 0
     with session_factory() as session:
         assert session.query(RawCatalogRow).count() == 2
-        assert session.query(NormalizedMeasurement).count() == 0
+        assert session.query(NormalizedMeasurement).count() == 2
+        assert {
+            value.normalization_status
+            for value in session.scalars(select(CatalogDetection))
+        } == {"completed"}
+
+
+def test_stored_candidate_measurements_can_be_normalized_without_querying_again(
+    session_factory,
+):
+    target = add_target(session_factory, ra_deg=10, dec_deg=-20)
+    adapter = AllWiseAdapter()
+    query_calls = []
+
+    def query(context):
+        query_calls.append(context)
+        return [
+            adapter.parse_row({
+                "AllWISE": f"J004000.0{index}-200000.0",
+                "RAJ2000": 10.00010 + index * 0.00001,
+                "DEJ2000": -20.0,
+                "W1mag": 7.0 + index,
+                "e_W1mag": 0.02,
+                "qph": "AAAA",
+                "ccf": "0000",
+            })
+            for index in range(2)
+        ]
+
+    adapter.query = query
+    service = CatalogService(session_factory, {"allwise": adapter})
+    result = service.refresh(target.sdbid, "allwise")
+    assert result.status == "ambiguous"
+    with session_factory.begin() as session:
+        detection_ids = list(session.scalars(
+            select(CatalogDetection.id).order_by(CatalogDetection.id)
+        ))
+        session.execute(delete(NormalizedMeasurement))
+        for detection in session.scalars(select(CatalogDetection)):
+            detection.normalization_status = "pending"
+            detection.normalization_error = None
+            detection.normalized_at = None
+
+    summary = service.normalize_detections(detection_ids)
+
+    assert (summary.completed, summary.failed, summary.measurement_count) == (
+        2, 0, 2,
+    )
+    assert len(query_calls) == 1
+    with session_factory() as session:
+        assert session.query(NormalizedMeasurement).count() == 2
+
+
+def test_bad_unaccepted_candidate_does_not_block_selected_detection(
+    session_factory,
+):
+    class PartiallyBrokenCatalog(FakeCatalog):
+        def normalize(self, value):
+            if value.source_id == "bad-neighbour":
+                raise ValueError("bad neighbour photometry")
+            return super().normalize(value)
+
+    target = add_target(session_factory, ra_deg=10, dec_deg=-20)
+    adapter = PartiallyBrokenCatalog([
+        candidate("selected", measurements=[measurement()]),
+        candidate(
+            "bad-neighbour",
+            ra=10 + 8 / (3600 * 0.9396926207859084),
+            measurements=[measurement(value=9.0)],
+        ),
+    ])
+    result = CatalogService(
+        session_factory, {"2mass": adapter},
+    ).refresh(target.sdbid, "2mass")
+
+    assert result.status == "match"
+    assert result.measurement_count == 1
+    with session_factory() as session:
+        bad = session.scalar(select(CatalogDetection).where(
+            CatalogDetection.source_id == "bad-neighbour"
+        ))
+        assert bad.normalization_status == "failed"
+        assert bad.normalization_error == "bad neighbour photometry"
 
 
 def test_refresh_keeps_history_and_replaces_current_measurements(session_factory):
@@ -318,7 +451,21 @@ def test_allwise_review_only_source_can_match_nearby_target_independently(sessio
     }
     assert associations[primary_result.run_id]["review_only"] is True
     assert associations[companion_result.run_id]["review_only"] is False
-    assert [measurement.target_id for measurement in measurements] == [companion.target_id]
+    assert [measurement.first_seen_target_id for measurement in measurements] == [
+        primary.target_id,
+    ]
+    with session_factory() as session:
+        from sdb_identity.catalog_measurements import current_measurements_for_target
+
+        assert current_measurements_for_target(
+            session, primary.target_id,
+        ) == []
+        assert [
+            value.id
+            for value in current_measurements_for_target(
+                session, companion.target_id,
+            )
+        ] == [measurements[0].id]
 
 
 def test_manual_catalog_candidate_override_is_append_only(session_factory):
@@ -353,10 +500,15 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
         runs = list(session.scalars(select(CatalogRun).order_by(CatalogRun.id)))
         assert [run.is_current for run in runs] == [False, True]
         assert session.query(RawCatalogRow).count() == 4
+        replacement_raw = session.scalar(select(RawCatalogRow).where(
+            RawCatalogRow.run_id == replacement.run_id,
+            RawCatalogRow.accepted.is_(True),
+        ))
         measurement = session.scalar(select(NormalizedMeasurement).where(
-            NormalizedMeasurement.run_id == replacement.run_id
+            NormalizedMeasurement.detection_id == replacement_raw.detection_id
         ))
         assert measurement.value == 8.2
+        assert measurement.first_seen_run_id == ambiguous.run_id
         audit = session.scalar(select(CatalogMatchOverride))
         assert audit.previous_run_id == ambiguous.run_id
         assert audit.replacement_run_id == replacement.run_id

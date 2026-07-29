@@ -29,6 +29,16 @@ _IDENTIFIER_ADAPTERS = {
     "tycho2": Tycho2Adapter,
 }
 
+# A catalog centroid is not component identity evidence when its native
+# detection scale is deliberately system-sized.  These providers can still
+# retain an existing accepted system match or match an explicit identifier,
+# but proximity alone must not reassign them to a close component.
+_SYSTEM_SCALE_POSITION_PROVIDERS = {
+    "iras_fsc",
+    "iras_psc",
+    "submm_obs",
+}
+
 
 def _catalog_identifier_key(value: str) -> str:
     normalized = normalize_identifier(value)
@@ -107,6 +117,11 @@ def catalog_source_display_name(
         return str(formatter(source_id))
     return str(source_id).strip()
 
+
+def catalog_position_matches_components(provider: str) -> bool:
+    """Whether a close catalog position can identify a system component."""
+    return provider not in _SYSTEM_SCALE_POSITION_PROVIDERS
+
 __all__ = [
     "AllWiseAdapter",
     "BandDefinition",
@@ -125,4 +140,5 @@ __all__ = [
     "catalog_source_id_matches_identifiers",
     "catalog_source_display_name",
     "catalog_candidate_identifiers",
+    "catalog_position_matches_components",
 ]

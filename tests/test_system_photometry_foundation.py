@@ -28,6 +28,7 @@ from sdb_identity.photometry import (
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.service import normalize_identifier
 from sdb_identity.proposal_application import apply_measurement_assignment_proposals
+from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
 from sdb_identity.target_lifecycle import (
     set_target_lifecycle,
@@ -76,6 +77,32 @@ def _configured_system(session_factory, *, half_separation_deg=0.0003):
             actor="test", reason=f"physical component {component}",
         )
     return system, component_a, component_b
+
+
+def _move_catalog_association(session_factory, *, source, destination):
+    with session_factory() as session:
+        raw = session.query(RawCatalogRow).one()
+        detection_id = raw.detection_id
+        raw_id = raw.id
+    for target, action in ((source, "reject"), (destination, "accept")):
+        preview = review_catalog_target_association_decision(
+            session_factory,
+            target_reference=target.sdbid,
+            detection_id=detection_id,
+            action=action,
+            reviewed_raw_row_id=raw_id,
+        )
+        review_catalog_target_association_decision(
+            session_factory,
+            target_reference=target.sdbid,
+            detection_id=detection_id,
+            action=action,
+            reviewed_raw_row_id=raw_id,
+            apply=True,
+            actor="reviewer",
+            reason="exact catalog identifier belongs to the physical component",
+            expected_token=preview["state_token"],
+        )
 
 
 def test_target_lifecycle_defaults_and_append_only_changes(session_factory):
@@ -213,7 +240,7 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     proposal = proposals[0]
     assert proposal["predicted_scope"] == "system"
     assert proposal["proposal_confidence"] == "medium"
-    assert proposal["comparison_to_current"] == "unassigned"
+    assert proposal["comparison_to_current"] == "partial_proposal"
     assert {
         (row["sdbid"], row["role"])
         for row in proposal["proposed_assignments"]
@@ -245,8 +272,8 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
         "stored_measurement_count": 1,
         "encounter_count": 1,
         "duplicate_measurement_group_count": 0,
-        "comparison_counts": {"unassigned": 1},
-        "review_required": 0,
+        "comparison_counts": {"partial_proposal": 1},
+        "review_required": 1,
     }
     row = matrix["rows"][0]
     assert (row["provider"], row["band"], row["predicted_scope"]) == (
@@ -261,7 +288,7 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     } == {
         (component_a.sdbid, "proposed", ("contributor",)),
         (component_b.sdbid, "proposed", ("contributor",)),
-        (system.sdbid, "proposed", ("composite_scope",)),
+        (system.sdbid, "agrees", ("composite_scope",)),
     }
 
 
@@ -534,7 +561,7 @@ def test_snapshot_payload_identifiers_drive_hip2_and_paunzen_assignments(
     }
 
 
-def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
+def test_correct_source_association_makes_photometry_current_without_assignment_rows(
     session_factory,
 ):
     system, component_a, _component_b = _configured_system(session_factory)
@@ -556,14 +583,19 @@ def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
     CatalogService(session_factory, {"2mass": FakeCatalog([
         candidate(source_id, measurements=[resolved])
     ])}).refresh(system.sdbid, "2mass")
+    _move_catalog_association(
+        session_factory,
+        source=system,
+        destination=component_a,
+    )
 
     preview = apply_measurement_assignment_proposals(
         session_factory, target_reference=system.sdbid,
     )
 
     assert preview["mode"] == "dry_run"
-    assert preview["summary"]["planned_measurements"] == 1
-    assert preview["summary"]["planned_assignments"] == 1
+    assert preview["summary"]["already_current_measurements"] == 1
+    assert preview["summary"]["already_current_assignments"] == 1
     with session_factory() as session:
         assert session.query(MeasurementTargetAssociation).count() == 0
         assert session.query(MeasurementAssociationAction).count() == 0
@@ -581,7 +613,7 @@ def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
     )
     assert sample_preview["targets_evaluated"] == 2
     assert sample_preview["measurements_evaluated"] == 1
-    assert sample_preview["summary"]["planned_assignments"] == 1
+    assert sample_preview["summary"]["already_current_assignments"] == 1
 
     applied = apply_measurement_assignment_proposals(
         session_factory,
@@ -591,16 +623,11 @@ def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
         reason="accept tested proposal",
     )
 
-    assert applied["summary"]["applied_measurements"] == 1
-    assert applied["summary"]["applied_assignments"] == 1
+    assert applied["summary"]["already_current_measurements"] == 1
+    assert applied["summary"]["already_current_assignments"] == 1
     with session_factory() as session:
-        association = session.query(MeasurementTargetAssociation).one()
-        action = session.query(MeasurementAssociationAction).one()
-        assert association.target_id == component_a.target_id
-        assert association.role == "contributor"
-        assert association.method == "automatic_proposal"
-        assert action.actor == "reviewer"
-        assert "accept tested proposal" in action.reason
+        assert session.query(MeasurementTargetAssociation).count() == 0
+        assert session.query(MeasurementAssociationAction).count() == 0
 
     repeated = apply_measurement_assignment_proposals(
         session_factory,
@@ -613,8 +640,8 @@ def test_high_confidence_proposal_application_is_dry_run_audited_and_idempotent(
     assert repeated["summary"]["already_current_measurements"] == 1
     assert repeated["summary"]["already_current_assignments"] == 1
     with session_factory() as session:
-        assert session.query(MeasurementTargetAssociation).count() == 1
-        assert session.query(MeasurementAssociationAction).count() == 1
+        assert session.query(MeasurementTargetAssociation).count() == 0
+        assert session.query(MeasurementAssociationAction).count() == 0
 
 
 def test_proposal_application_does_not_replace_conflicting_current_assignment(
@@ -667,7 +694,7 @@ def test_proposal_application_does_not_replace_conflicting_current_assignment(
         assert session.query(MeasurementAssociationAction).count() == 1
 
 
-def test_proposal_application_assigns_excluded_measurement_without_including_it(
+def test_derived_assignment_preserves_excluded_measurement_until_overridden(
     session_factory, tmp_path,
 ):
     system, component_a, _component_b = _configured_system(session_factory)
@@ -690,6 +717,11 @@ def test_proposal_application_assigns_excluded_measurement_without_including_it(
     CatalogService(session_factory, {"2mass": FakeCatalog([
         candidate(source_id, measurements=[excluded])
     ])}).refresh(system.sdbid, "2mass")
+    _move_catalog_association(
+        session_factory,
+        source=system,
+        destination=component_a,
+    )
 
     result = apply_measurement_assignment_proposals(
         session_factory,
@@ -698,21 +730,21 @@ def test_proposal_application_assigns_excluded_measurement_without_including_it(
         actor="reviewer",
     )
 
-    assert result["summary"]["applied_assignments"] == 1
+    assert result["summary"]["already_current_assignments"] == 1
     assert result["items"][0]["measurement_excluded"] is True
     with session_factory() as session:
         assert session.query(NormalizedMeasurement).one().excluded is True
-        assert session.query(MeasurementTargetAssociation).count() == 1
+        assert session.query(MeasurementTargetAssociation).count() == 0
 
     before = Table.read(
-        export_ipac(session_factory, system.sdbid, tmp_path / "before.txt"),
+        export_ipac(session_factory, component_a.sdbid, tmp_path / "before.txt"),
         format="ascii.ipac",
     )
     assert list(before["exclude"]) == [1]
 
     set_photometry_override(
         session_factory,
-        system.sdbid,
+        component_a.sdbid,
         provider="2mass",
         band="2MJ",
         excluded=False,
@@ -720,7 +752,7 @@ def test_proposal_application_assigns_excluded_measurement_without_including_it(
         reason="visual inspection accepts provider-flagged measurement",
     )
     after = Table.read(
-        export_ipac(session_factory, system.sdbid, tmp_path / "after.txt"),
+        export_ipac(session_factory, component_a.sdbid, tmp_path / "after.txt"),
         format="ascii.ipac",
     )
     assert list(after["exclude"]) == [0]
@@ -771,7 +803,7 @@ def test_simbad_identifier_outranks_provider_derived_duplicate_on_composite(
         "target_id": component_a.target_id,
         "sdbid": component_a.sdbid,
         "role": "contributor",
-        "evidence": "simbad_identifier+beam",
+        "evidence": "simbad_identifier",
         "identifier_match": True,
         "identifier_preferred": True,
         "identifier_sources": ["simbad"],
@@ -924,3 +956,270 @@ def test_proposal_compares_catalog_position_at_native_epoch(session_factory):
     assert proposal["proposed_assignments"][0]["sdbid"] == target.sdbid
     assert proposal["proposed_assignments"][0]["separation_arcsec"] < 0.001
     assert proposal["candidate_targets"][0]["comparison_epoch"] == 1999.3
+
+
+def test_ubv_d_proposes_unique_simple_binary_without_resolution(
+    session_factory,
+):
+    system, component_a, component_b = _configured_system(session_factory)
+    HierarchyService(session_factory).add_member(
+        "proposal AB", system.sdbid, component_label="AB",
+    )
+    with session_factory.begin() as session:
+        session.add_all([
+            ExternalIdentifier(
+                target_id=system.target_id,
+                value="HD 123",
+                normalized_value=normalize_identifier("HD 123"),
+                source="simbad",
+            ),
+            ExternalIdentifier(
+                target_id=component_a.target_id,
+                value="HD 123A",
+                normalized_value=normalize_identifier("HD 123A"),
+                source="simbad",
+            ),
+            ExternalIdentifier(
+                target_id=component_b.target_id,
+                value="HD 123B",
+                normalized_value=normalize_identifier("HD 123B"),
+                source="simbad",
+            ),
+        ])
+    value = MeasurementValue(
+        band="VJ",
+        value=6.1,
+        error=0.01,
+        unit="mag",
+        bibcode="2006yCat.2168....0M",
+        ownership_scope="system",
+        blend_state="blended",
+        blend_reason="catalog_multiple_in_aperture",
+    )
+    catalog = FakeCatalog(
+        [CatalogCandidate(
+            source_id="+100000123|m_LID=D",
+            ra_deg=10.0,
+            dec_deg=-20.0,
+            epoch=2000.0,
+            payload={
+                "SimbadName": "HD 123",
+                "m_LID": "D",
+                "_RA": 10.0,
+                "_DE": -20.0,
+            },
+            measurements=(value,),
+        )],
+        name="ubvmeans",
+        release="II/168",
+        query_epoch=2000.0,
+    )
+    CatalogService(session_factory, {"ubvmeans": catalog}).refresh(
+        system.sdbid, "ubvmeans",
+    )
+
+    proposal = measurement_assignment_proposals(
+        session_factory, system.sdbid,
+    )[0]
+
+    assert proposal["catalog_component"]["kind"] == "combined_components"
+    assert proposal["proposal_confidence"] == "high"
+    assert {
+        (row["sdbid"], row["role"])
+        for row in proposal["proposed_assignments"]
+    } == {
+        (system.sdbid, "composite_scope"),
+        (component_a.sdbid, "contributor"),
+        (component_b.sdbid, "contributor"),
+    }
+    assert "unique simple A+B system" in proposal["proposal_reason"]
+
+
+def test_ubv_d_complex_system_remains_scope_only(session_factory):
+    system, component_a, component_b = _configured_system(session_factory)
+    hierarchy = HierarchyService(session_factory)
+    hierarchy.add_member("proposal AB", system.sdbid, component_label="AB")
+    component_c = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0008, dec_deg=-20.0)
+    )
+    hierarchy.add_member("proposal AB", component_c.sdbid, component_label="C")
+    set_target_lifecycle(
+        session_factory,
+        component_c.sdbid,
+        role="physical",
+        state="active",
+        actor="test",
+        reason="physical component C",
+    )
+    with session_factory.begin() as session:
+        session.add(ExternalIdentifier(
+            target_id=system.target_id,
+            value="HD 123",
+            normalized_value=normalize_identifier("HD 123"),
+            source="simbad",
+        ))
+    value = MeasurementValue(
+        band="VJ",
+        value=6.1,
+        error=0.01,
+        unit="mag",
+        bibcode="2006yCat.2168....0M",
+        ownership_scope="system",
+        blend_state="blended",
+        blend_reason="catalog_multiple_in_aperture",
+    )
+    CatalogService(session_factory, {
+        "ubvmeans": FakeCatalog(
+            [CatalogCandidate(
+                source_id="+100000123|m_LID=D",
+                ra_deg=10.0,
+                dec_deg=-20.0,
+                epoch=2000.0,
+                payload={
+                    "SimbadName": "HD 123",
+                    "m_LID": "D",
+                    "_RA": 10.0,
+                    "_DE": -20.0,
+                },
+                measurements=(value,),
+            )],
+            name="ubvmeans",
+            release="II/168",
+            query_epoch=2000.0,
+        ),
+    }).refresh(system.sdbid, "ubvmeans")
+
+    proposal = measurement_assignment_proposals(
+        session_factory, system.sdbid,
+    )[0]
+
+    assert proposal["comparison_to_current"] == "partial_proposal"
+    assert [
+        row["role"] for row in proposal["proposed_assignments"]
+    ] == ["composite_scope"]
+    assert proposal["proposal_confidence"] == "low"
+
+
+def test_ubv_numeric_component_maps_to_explicit_system_member(
+    session_factory,
+):
+    system, _component_a, component_b = _configured_system(session_factory)
+    with session_factory.begin() as session:
+        session.add(ExternalIdentifier(
+            target_id=component_b.target_id,
+            value="HD 123B",
+            normalized_value=normalize_identifier("HD 123B"),
+            source="simbad",
+        ))
+    value = MeasurementValue(
+        band="VJ",
+        value=7.2,
+        error=0.01,
+        unit="mag",
+        bibcode="2006yCat.2168....0M",
+    )
+    CatalogService(session_factory, {
+        "ubvmeans": FakeCatalog(
+            [CatalogCandidate(
+                source_id="+100000123|m_LID=2",
+                ra_deg=10.0003,
+                dec_deg=-20.0,
+                epoch=2000.0,
+                payload={
+                    "SimbadName": "HD 123",
+                    "m_LID": "2",
+                    "_RA": 10.0003,
+                    "_DE": -20.0,
+                },
+                measurements=(value,),
+            )],
+            name="ubvmeans",
+            release="II/168",
+            query_epoch=2000.0,
+        ),
+    }).refresh(system.sdbid, "ubvmeans")
+
+    proposal = measurement_assignment_proposals(
+        session_factory, system.sdbid,
+    )[0]
+
+    assert proposal["catalog_component"]["component_label"] == "B"
+    assert proposal["proposed_assignments"] == [{
+        "target_id": component_b.target_id,
+        "sdbid": component_b.sdbid,
+        "role": "contributor",
+        "evidence": "catalog_component_code+system_membership+simbad_identifier",
+        "identifier_match": True,
+        "identifier_preferred": True,
+        "identifier_sources": ["simbad"],
+        "separation_arcsec": proposal["proposed_assignments"][0][
+            "separation_arcsec"
+        ],
+    }]
+
+
+def test_tdsc_named_component_maps_to_explicit_system_member(
+    session_factory,
+):
+    system, component_a, _component_b = _configured_system(session_factory)
+    with session_factory.begin() as session:
+        session.add_all([
+            ExternalIdentifier(
+                target_id=system.target_id,
+                value="HD 224953",
+                normalized_value=normalize_identifier("HD 224953"),
+                source="simbad",
+            ),
+            ExternalIdentifier(
+                target_id=component_a.target_id,
+                value="HD 224953A",
+                normalized_value=normalize_identifier("HD 224953A"),
+                source="simbad",
+            ),
+        ])
+    value = MeasurementValue(
+        band="VT",
+        value=9.71,
+        error=0.02,
+        unit="mag",
+        bibcode="2002A&A...384..180F",
+    )
+    CatalogService(session_factory, {
+        "tdsc": FakeCatalog(
+            [CatalogCandidate(
+                source_id="88|m_TDSC=A",
+                ra_deg=10.0 - 0.0003,
+                dec_deg=-20.0,
+                epoch=2000.0,
+                payload={
+                    "TDSC": 88,
+                    "m_TDSC": "A",
+                    "HD": 224953,
+                    "HIP": 169,
+                    "WDS": "00021-6817",
+                    "TYC1": 9134,
+                    "TYC2": 1714,
+                    "TYC3": 1,
+                },
+                measurements=(value,),
+            )],
+            name="tdsc",
+            release="I/276",
+            query_epoch=2000.0,
+        ),
+    }).refresh(system.sdbid, "tdsc")
+
+    proposal = measurement_assignment_proposals(
+        session_factory, system.sdbid,
+    )[0]
+
+    assert proposal["source_display_name"] == "HD 224953A"
+    assert proposal["catalog_component"] == {
+        "native_code": "A",
+        "kind": "named_component",
+        "component_label": "A",
+    }
+    assert [
+        (row["sdbid"], row["role"])
+        for row in proposal["proposed_assignments"]
+    ] == [(component_a.sdbid, "contributor")]

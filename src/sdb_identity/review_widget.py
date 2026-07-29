@@ -26,6 +26,7 @@ from .hierarchy import (
 from .models import (
     AstrometricSolution,
     CatalogAttribute,
+    CatalogDetectionProvenance,
     CatalogRun,
     HierarchyMatchCandidate,
     HierarchyRecord,
@@ -38,6 +39,8 @@ from .models import (
     Target,
 )
 from .providers import Astrometry
+from .ubv_components import decode_ubv_component
+from .tdsc_components import decode_tdsc_component
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,7 @@ class SkyPoint:
     run_id: int | None = None
     raw_row_id: int | None = None
     candidate_id: int | None = None
+    detection_id: int | None = None
     target_id: int | None = None
     run_target_sdbid: str | None = None
     native_epoch: float | None = None
@@ -88,6 +92,8 @@ class SkyPoint:
     cross_candidate_reason: str | None = None
     uncertainty_major_arcsec: float | None = None
     uncertainty_minor_arcsec: float | None = None
+    catalog_component: str | None = None
+    provenance: tuple[dict[str, object], ...] = ()
     note: str = ""
 
 
@@ -197,13 +203,12 @@ def build_review_sky_view(
             arrows.extend(_proper_motion_arrows(target, motion_solution))
         segments = list(hierarchy_segments)
         system_context = HierarchyService(session_factory).system_context(target.sdbid)
-        points.extend(
-            _related_actionable_catalog_points(
-                session,
-                target,
-                center,
-                system_context=system_context,
-            )
+        points = _annotate_catalog_target_candidates(
+            session,
+            target,
+            center,
+            points,
+            system_context=system_context,
         )
         points = _deduplicate_points(points)
         assignment_review = build_measurement_assignment_review(
@@ -766,6 +771,14 @@ def render_review_sky_html(
     let clickedPlotItem = false;
     let pointListExpanded = false;
     function escapeHtml(value) {{ return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }}
+    function sourceLink(label, provenance) {{
+      const text = escapeHtml(String(label));
+      const item = (provenance || []).find(value =>
+        String(value.access_url || "").startsWith("https://")
+      );
+      if (!item) return text;
+      return `<a href="${{escapeHtml(String(item.access_url))}}" target="_blank" rel="noopener">${{text}}</a>`;
+    }}
     function pointDisplayId(point) {{ return point.source_display_name || point.source_id; }}
     function pointColor(point) {{ if (point.kind === "identity" && !point.accepted) return statusColors.candidate; return statusColors[point.status] || "#64748b"; }}
     function defaultPointOpacity(point) {{ return point.status === "no_match" || point.status === "review_neighbour" ? 0.55 : 0.95; }}
@@ -791,7 +804,9 @@ def render_review_sky_html(
       }}).join("; ");
     }}
     function linkedTargetValue(point) {{
-      return point.linked_target_sdbids && point.linked_target_sdbids.length ? ` → ${{point.linked_target_sdbids.join(", ")}}` : "";
+      return point.linked_target_sdbids && point.linked_target_sdbids.length
+        ? ` → ${{point.linked_target_sdbids.map(value => targetMainId(value)).join(", ")}}`
+        : "";
     }}
     function catalogRunTargetValue(point) {{
       if (!point.run_target_sdbid || point.run_target_sdbid === view.sdbid) return "";
@@ -854,6 +869,7 @@ def render_review_sky_html(
       const simbadMetadata = context.simbad_metadata_by_target || {{}};
       const targets = context.nearby_sdb_targets || [];
       const cross = context.identity_cross_candidates || [];
+      const catalogCross = context.catalog_target_candidates || [];
       const matrix = context.measurement_assignment_matrix || {{columns: [], rows: [], summary: {{}}}};
       const relatives = context.simbad_relative_preview || [];
       const targetBySdbid = Object.fromEntries(targets.map(target => [target.sdbid, target]));
@@ -927,6 +943,24 @@ def render_review_sky_html(
         const linked = (row.matched_nearby_targets || []).map(target => target.sdbid).join(", ");
         return `<li><code>${{escapeHtml(row.provider)}} ${{escapeHtml(row.source_id)}}</code> ${{row.accepted ? "accepted" : "rejected"}} <span class="muted">${{displayNumber(row.separation_arcsec)}}"</span> → ${{escapeHtml(linked)}}</li>`;
       }}).join("");
+      const catalogCrossItems = catalogCross
+        .filter(row => (
+          ["strong_candidate", "accepted", "rejected"].includes(row.association_status)
+          && (
+            row.target_sdbid === view.sdbid
+            || (row.encounter_sdbids || []).includes(view.sdbid)
+          )
+        ))
+        .map(row => {{
+          const source = row.source_display_name || row.source_id;
+          const encounter = (row.encounter_sdbids || []).map(
+            value => targetMainId(value)
+          ).join(", ");
+          const decision = row.association_status === "strong_candidate"
+            ? ""
+            : ` · ${{row.association_status}}`;
+          return `<li><code>${{escapeHtml(row.provider)}} ${{escapeHtml(source)}}</code> <span class="muted">${{displayNumber(row.separation_arcsec)}}"${{decision}}</span> → ${{targetReviewLink(row.target_sdbid, targetMainId(row.target_sdbid))}} <span class="muted">(${{escapeHtml(row.association_basis)}}; encountered by ${{escapeHtml(encounter)}})</span></li>`;
+        }}).join("");
       const matrixSymbol = status => ({{agrees: "✓", proposed: "+", current_only: "●", differs: "!", candidate: "·", empty: ""}})[status] || "";
       const matrixHeader = (matrix.columns || []).map(column => `<th title="${{escapeHtml(column.sdbid)}} · ${{escapeHtml(column.role)}}/${{escapeHtml(column.state)}}">${{escapeHtml(column.label)}}<br><span class="muted">${{escapeHtml(column.role)}}</span></th>`).join("");
       const matrixRows = (matrix.rows || []).map(row => {{
@@ -958,11 +992,20 @@ def render_review_sky_html(
           proposalDetails.push(`${{band.band}}: ${{band.comparison_to_current}}${{band.excluded ? "; excluded" : ""}}`);
         }}
         if (row.proposal_confidence) proposalDetails.push(`proposal confidence ${{row.proposal_confidence}}`);
+        if (row.catalog_component && row.catalog_component.native_code) {{
+          const componentLabel = row.catalog_component.component_label
+            ? ` → ${{row.catalog_component.component_label}}`
+            : "";
+          proposalDetails.push(`catalog component ${{row.catalog_component.native_code}} (${{row.catalog_component.kind}}${{componentLabel}})`);
+        }}
         if (row.proposal_reason) proposalDetails.push(row.proposal_reason);
         if (row.comparison_to_current) proposalDetails.push(row.comparison_to_current);
         const sourceName = row.source_display_name || row.source_id;
         const bandSummary = `${{bandCount}} band${{bandCount === 1 ? "" : "s"}}${{bandNames.length ? `: ${{bandNames.join(", ")}}` : ""}}`;
-        return `<tr><td><code>${{escapeHtml(row.provider)}}</code> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source">${{escapeHtml(sourceName)}}</span><span class="muted">${{escapeHtml(bandSummary)}}${{duplicate}}${{mixed}}</span>${{encounterText}}</td>${{cells}}</tr>`;
+        const componentSummary = row.catalog_component && row.catalog_component.component_label
+          ? ` · component ${{row.catalog_component.component_label}}`
+          : "";
+        return `<tr><td><code>${{escapeHtml(row.provider)}}</code> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source">${{sourceLink(sourceName, row.provenance)}}</span><span class="muted">${{escapeHtml(bandSummary + componentSummary)}}${{duplicate}}${{mixed}}</span>${{encounterText}}</td>${{cells}}</tr>`;
       }}).join("");
       const matrixHtml = matrixRows ? `<div class="matrix-wrap"><table class="assignment-matrix"><thead><tr><th>detection</th>${{matrixHeader}}</tr></thead><tbody>${{matrixRows}}</tbody></table></div><div class="muted">✓ current agrees · + proposed · ● current only · ! differs or mixed · · candidate</div>` : '<div class="muted">No current measurements.</div>';
       const relativeChanges = relatives.some(row => row.action === "import" || row.action === "reconcile");
@@ -981,6 +1024,8 @@ def render_review_sky_html(
         ${{targetRows || '<div class="muted">None.</div>'}}
         <h3>Identity cross-candidates</h3>
         <ul class="system-list">${{crossItems || '<li class="muted">None.</li>'}}</ul>
+        <h3>Catalog cross-candidates</h3>
+        <ul class="system-list">${{catalogCrossItems || '<li class="muted">None.</li>'}}</ul>
       `;
       const relativeButton = document.getElementById("review-relatives");
       if (relativeButton) relativeButton.addEventListener("click", () => {{
@@ -991,9 +1036,9 @@ def render_review_sky_html(
     function showDetails(point) {{
       const pm = point.pm_ra_cosdec_masyr == null || point.pm_dec_masyr == null ? "" : `${{displayNumber(point.pm_ra_cosdec_masyr)}}, ${{displayNumber(point.pm_dec_masyr)}} mas/yr (${{point.pm_source || "unknown"}})`;
       const uncertainty = point.uncertainty_major_arcsec == null ? "" : `${{displayNumber(point.uncertainty_major_arcsec)}} × ${{displayNumber(point.uncertainty_minor_arcsec ?? point.uncertainty_major_arcsec)}} arcsec`;
-      const shortRows = [["provider", point.provider], ["status", point.status], ["separation", `${{displayNumber(point.separation_arcsec)}} arcsec`], ["score", point.score == null ? "" : displayNumber(point.score)], ["offset", `${{displayNumber(point.x_arcsec)}}\" east, ${{displayNumber(point.y_arcsec)}}\" north`], ["native epoch", point.native_epoch == null ? "" : displayNumber(point.native_epoch)], ["display epoch", point.display_epoch == null ? "" : displayNumber(point.display_epoch)], ["kind", point.kind], ["accepted", point.accepted ? "yes" : "no"], ["target ID", point.target_id ?? ""], ["run ID", point.run_id ?? ""], ["raw row ID", point.raw_row_id ?? ""], ["candidate ID", point.candidate_id ?? ""]];
-      const longRows = [["ID", pointDisplayId(point)], ["catalog query target", point.run_target_sdbid ? targetMainId(point.run_target_sdbid) : ""], ["linked targets", listValue(point.linked_target_sdbids)], ["cross-match reason", point.cross_candidate_reason || ""], ["photometry", listValue(point.photometry)], ["photometry beams", beamValue(point.photometry_beams)], ["attributes", listValue(point.attributes)], ["proper motion", pm], ["position uncertainty", uncertainty], ["note", point.note || ""]];
-      const column = rows => `<dl class="detail-list">${{rows.filter(([,value]) => value !== "" && value != null).map(([key,value]) => `<div class="detail-row"><dt><code>${{escapeHtml(String(key))}}</code></dt><dd>${{escapeHtml(String(value))}}</dd></div>`).join("")}}</dl>`;
+      const shortRows = [["provider", point.provider], ["status", point.status], ["separation", `${{displayNumber(point.separation_arcsec)}} arcsec`], ["score", point.score == null ? "" : displayNumber(point.score)], ["offset", `${{displayNumber(point.x_arcsec)}}\" east, ${{displayNumber(point.y_arcsec)}}\" north`], ["native epoch", point.native_epoch == null ? "" : displayNumber(point.native_epoch)], ["display epoch", point.display_epoch == null ? "" : displayNumber(point.display_epoch)], ["kind", point.kind], ["accepted", point.accepted ? "yes" : "no"], ["target ID", point.target_id ?? ""], ["detection ID", point.detection_id ?? ""], ["run ID", point.run_id ?? ""], ["raw row ID", point.raw_row_id ?? ""], ["candidate ID", point.candidate_id ?? ""]];
+      const longRows = [["ID", sourceLink(pointDisplayId(point), point.provenance), true], ["catalog component", point.catalog_component || ""], ["catalog query target", point.run_target_sdbid ? targetMainId(point.run_target_sdbid) : ""], ["linked targets", (point.linked_target_sdbids || []).map(value => targetMainId(value)).join("; ")], ["cross-match reason", point.cross_candidate_reason || ""], ["photometry", listValue(point.photometry)], ["photometry beams", beamValue(point.photometry_beams)], ["attributes", listValue(point.attributes)], ["proper motion", pm], ["position uncertainty", uncertainty], ["note", point.note || ""]];
+      const column = rows => `<dl class="detail-list">${{rows.filter(([,value]) => value !== "" && value != null).map(([key,value,html]) => `<div class="detail-row"><dt><code>${{escapeHtml(String(key))}}</code></dt><dd>${{html ? value : escapeHtml(String(value))}}</dd></div>`).join("")}}</dl>`;
       document.getElementById("details").innerHTML = `<div class="details-columns">${{column(shortRows)}}${{column(longRows)}}</div>`;
     }}
     function clearDetails() {{ document.getElementById("details").innerHTML = "Click a point in the sky view or plotted item list."; }}
@@ -1081,7 +1126,7 @@ def render_review_sky_html(
         const linked = linkedTargetValue(point);
         const runTarget = catalogRunTargetValue(point);
         const borderColor = point.linked_target_sdbids && point.linked_target_sdbids.length ? "#7c3aed" : color;
-        row.innerHTML = `<span class="swatch" style="background:${{point.status === "no_match" ? "transparent" : color}}; border-color:${{borderColor}}"></span><span><code>${{escapeHtml(point.provider)}}</code> ${{escapeHtml(point.status)}} ${{escapeHtml(pointDisplayId(point))}}${{linked ? `<span class="muted">${{escapeHtml(linked)}}</span>` : ""}}${{runTarget ? `<span class="muted">${{escapeHtml(runTarget)}}</span>` : ""}} <span class="muted">${{displayNumber(point.separation_arcsec)}}\"</span></span>`;
+        row.innerHTML = `<span class="swatch" style="background:${{point.status === "no_match" ? "transparent" : color}}; border-color:${{borderColor}}"></span><span><code>${{escapeHtml(point.provider)}}</code> ${{escapeHtml(point.status)}} ${{sourceLink(pointDisplayId(point), point.provenance)}}${{linked ? `<span class="muted">${{escapeHtml(linked)}}</span>` : ""}}${{runTarget ? `<span class="muted">${{escapeHtml(runTarget)}}</span>` : ""}} <span class="muted">${{displayNumber(point.separation_arcsec)}}\"</span></span>`;
         row.addEventListener("click", () => {{ applySelection(point.index); showDetails(point); }});
         points.appendChild(row);
       }}
@@ -1347,6 +1392,10 @@ def _merge_duplicate_point(first: SkyPoint, second: SkyPoint) -> SkyPoint:
     photometry = tuple(dict.fromkeys((*first.photometry, *second.photometry)))
     photometry_beams = tuple(dict.fromkeys((*first.photometry_beams, *second.photometry_beams)))
     attributes = tuple(dict.fromkeys((*first.attributes, *second.attributes)))
+    provenance = []
+    for item in (*first.provenance, *second.provenance):
+        if item not in provenance:
+            provenance.append(item)
     return replace(
         first,
         kind="+".join(kinds),
@@ -1354,6 +1403,7 @@ def _merge_duplicate_point(first: SkyPoint, second: SkyPoint) -> SkyPoint:
         run_id=first.run_id if first.run_id is not None else second.run_id,
         raw_row_id=first.raw_row_id if first.raw_row_id is not None else second.raw_row_id,
         candidate_id=first.candidate_id if first.candidate_id is not None else second.candidate_id,
+        detection_id=first.detection_id if first.detection_id is not None else second.detection_id,
         target_id=first.target_id if first.target_id is not None else second.target_id,
         run_target_sdbid=first.run_target_sdbid or second.run_target_sdbid,
         native_epoch=first.native_epoch if first.native_epoch is not None else second.native_epoch,
@@ -1369,6 +1419,8 @@ def _merge_duplicate_point(first: SkyPoint, second: SkyPoint) -> SkyPoint:
         cross_candidate_reason=first.cross_candidate_reason or second.cross_candidate_reason,
         uncertainty_major_arcsec=first.uncertainty_major_arcsec if first.uncertainty_major_arcsec is not None else second.uncertainty_major_arcsec,
         uncertainty_minor_arcsec=first.uncertainty_minor_arcsec if first.uncertainty_minor_arcsec is not None else second.uncertainty_minor_arcsec,
+        catalog_component=first.catalog_component or second.catalog_component,
+        provenance=tuple(provenance),
         note="; duplicate view row merged: ".join(notes),
     )
 
@@ -1728,6 +1780,22 @@ def _catalog_points(
             uncertainty_major, uncertainty_minor = _position_uncertainty_arcsec(
                 run.provider, row.payload_json
             )
+            provenance = tuple({
+                "role": item.role,
+                "service": item.service,
+                "catalog_id": item.catalog_id,
+                "table_id": item.table_id,
+                "row_key": item.row_key,
+                "identifier_column": item.identifier_column,
+                "identifier_value": item.identifier_value,
+                "source_url": item.source_url,
+                "access_url": item.access_url,
+                "readme_url": item.readme_url,
+            } for item in session.scalars(
+                select(CatalogDetectionProvenance)
+                .where(CatalogDetectionProvenance.detection_id == row.detection_id)
+                .order_by(CatalogDetectionProvenance.id)
+            ))
             points.append(
                 SkyPoint(
                     kind="catalog",
@@ -1744,6 +1812,7 @@ def _catalog_points(
                     accepted=row.accepted,
                     run_id=run.id,
                     raw_row_id=row.id,
+                    detection_id=row.detection_id,
                     target_id=target.id,
                     run_target_sdbid=target.sdbid,
                     native_epoch=row.epoch,
@@ -1757,61 +1826,201 @@ def _catalog_points(
                     attributes=attributes,
                     uncertainty_major_arcsec=uncertainty_major,
                     uncertainty_minor_arcsec=uncertainty_minor,
+                    catalog_component=_catalog_component_summary(
+                        run.provider, payload, row.source_id,
+                    ),
+                    provenance=provenance,
                     note=note,
                 )
             )
     return points
 
 
-def _related_actionable_catalog_points(
+def _catalog_component_summary(
+    provider: str,
+    payload: dict[str, object],
+    source_id: str,
+) -> str | None:
+    if provider == "ubvmeans":
+        value = decode_ubv_component(payload, source_id)
+    elif provider == "tdsc":
+        value = decode_tdsc_component(payload, source_id)
+    else:
+        return None
+    if value.kind == "named_component":
+        return (
+            f"{value.native_code} — TDSC component {value.component_label}; "
+            "WDS designation where available"
+        )
+    if value.kind == "component_ordinal":
+        return (
+            f"{value.native_code} — component {value.component_label} "
+            "(ordinal catalogue code)"
+        )
+    if value.kind == "combined_components":
+        return "D — combined light from at least two components; subset unspecified"
+    if value.kind == "supplementary_identifier":
+        return "S — supplementary identification; component requires review"
+    if value.kind == "unknown":
+        return f"{value.native_code} — unknown catalogue component code"
+    return None
+
+
+def _annotate_catalog_target_candidates(
     session: Session,
     target: Target,
     center: tuple[float, float],
+    points: list[SkyPoint],
     *,
     system_context: dict[str, object],
 ) -> list[SkyPoint]:
-    """Project unresolved catalog candidates from nearby review targets.
+    """Annotate or project detections that reconcile to review targets."""
+    candidate_rows = system_context.get("catalog_target_candidates") or []
+    if not candidate_rows:
+        return points
+    strong_by_detection: dict[int, list[dict[str, object]]] = {}
+    current_target_rows: dict[int, dict[str, object]] = {}
+    for row in candidate_rows:
+        if row.get("association_status") not in {
+            "current_match", "strong_candidate", "accepted", "rejected",
+        }:
+            continue
+        detection_id = int(row["detection_id"])
+        strong_by_detection.setdefault(detection_id, []).append(row)
+        if row.get("target_sdbid") == target.sdbid:
+            current_target_rows[detection_id] = row
 
-    Catalog runs remain owned by the target they were queried for.  Projecting
-    only ambiguous rows makes system/component evidence visible from either
-    target page without duplicating all accepted photometry in the sky view.
-    """
-    radius_arcsec = float(system_context.get("radius_arcsec") or 60.0)
-    related_target_ids = {
-        int(row["target_id"])
-        for row in system_context.get("nearby_sdb_targets") or []
-        if (
-            int(row["target_id"]) != target.id
-            and float(row.get("separation_arcsec") or 0.0) <= radius_arcsec
-        )
+    annotated = []
+    existing_detection_ids = set()
+    for point in points:
+        if point.detection_id is None:
+            annotated.append(point)
+            continue
+        existing_detection_ids.add(point.detection_id)
+        associations = strong_by_detection.get(point.detection_id, [])
+        if not associations:
+            annotated.append(point)
+            continue
+        linked = tuple(dict.fromkeys(
+            str(row["target_sdbid"]) for row in associations
+        ))
+        reason = _catalog_candidate_reason(associations)
+        current_row = current_target_rows.get(point.detection_id)
+        annotated.append(replace(
+            point,
+            kind=(
+                "catalog_association"
+                if (
+                    current_row is not None
+                    and current_row["association_status"]
+                    in {"accepted", "rejected"}
+                )
+                else point.kind
+            ),
+            status=(
+                str(current_row["association_status"])
+                if (
+                    current_row is not None
+                    and current_row["association_status"]
+                    in {"accepted", "rejected"}
+                )
+                else point.status
+            ),
+            linked_target_sdbids=tuple(dict.fromkeys(
+                (*point.linked_target_sdbids, *linked)
+            )),
+            cross_candidate_reason=reason,
+            note="; ".join(value for value in (point.note, reason) if value),
+        ))
+
+    targets = {
+        value.id: value
+        for value in session.scalars(select(Target).where(
+            Target.id.in_({
+                int(row["target_id"]) for row in current_target_rows.values()
+            })
+        ))
     }
-    if not related_target_ids:
-        return []
-    related_targets = session.scalars(
-        select(Target)
-        .where(Target.id.in_(related_target_ids))
-        .order_by(Target.id)
-    )
-    points = []
-    for related in related_targets:
-        related_motion = _target_motion_solution(session, related)
-        for point in _catalog_points(
-            session,
-            related,
-            center,
-            motion_solution=related_motion,
-            run_statuses={"ambiguous"},
-        ):
-            if point.status != "ambiguous":
-                continue
-            points.append(replace(
-                point,
-                note=(
-                    f"{point.note}; shown from nearby catalog query target "
-                    f"{related.sdbid}"
+    for detection_id, row in current_target_rows.items():
+        if detection_id in existing_detection_ids:
+            continue
+        association_target = targets.get(int(row["target_id"]))
+        if association_target is None:
+            continue
+        motion_solution = _target_motion_solution(session, association_target)
+        ra2000, dec2000, pm_ra, pm_dec, pm_source, note = (
+            _display_position_2000(
+                float(row["ra_deg"]),
+                float(row["dec_deg"]),
+                float(row["epoch"]),
+                motion_solution,
+                base_note=(
+                    f"catalog detection {detection_id}; "
+                    f"{row['association_status']} for {target.sdbid}"
                 ),
-            ))
-    return points
+            )
+        )
+        encounter_sdbids = tuple(str(value) for value in row.get(
+            "encounter_sdbids", []
+        ))
+        representative_raw_row_id = int(row["representative_raw_row_id"])
+        reason = _catalog_candidate_reason([row])
+        annotated.append(SkyPoint(
+            kind="catalog_association",
+            provider=str(row["provider"]),
+            status=(
+                str(row["association_status"])
+                if row["association_status"] in {"accepted", "rejected"}
+                else "candidate"
+            ),
+            source_id=str(row["source_id"]),
+            source_display_name=str(row["source_display_name"]),
+            ra_deg=ra2000,
+            dec_deg=dec2000,
+            separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
+            score=float(row["score"]),
+            run_id=int(row["representative_run_id"]),
+            raw_row_id=representative_raw_row_id,
+            detection_id=detection_id,
+            target_id=target.id,
+            run_target_sdbid=(
+                None
+                if not encounter_sdbids
+                else str(row.get("representative_run_target_sdbid") or "")
+            ),
+            native_epoch=float(row["epoch"]),
+            native_ra_deg=float(row["ra_deg"]),
+            native_dec_deg=float(row["dec_deg"]),
+            pm_ra_cosdec_masyr=pm_ra,
+            pm_dec_masyr=pm_dec,
+            pm_source=pm_source,
+            photometry=_measurement_summaries(
+                session, representative_raw_row_id
+            ),
+            photometry_beams=_measurement_beams(
+                session, representative_raw_row_id
+            ),
+            linked_target_sdbids=(target.sdbid,),
+            cross_candidate_reason=reason,
+            note="; ".join(value for value in (
+                note,
+                f"encountered by {', '.join(encounter_sdbids)}"
+                if encounter_sdbids else "",
+                reason,
+            ) if value),
+        ))
+    return annotated
+
+
+def _catalog_candidate_reason(
+    rows: list[dict[str, object]],
+) -> str:
+    targets = [
+        f"{row['target_sdbid']} ({row['association_basis']}; "
+        f"{float(row['separation_arcsec']):.3f} arcsec)"
+        for row in rows
+    ]
+    return "catalog detection reconciles to " + ", ".join(targets)
 
 
 def _hierarchy_points(

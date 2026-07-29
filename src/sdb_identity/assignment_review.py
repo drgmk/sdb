@@ -62,12 +62,14 @@ class AssignmentMatrixBand(TypedDict):
 
 
 class AssignmentMatrixRow(TypedDict):
+    detection_id: object
     measurement_id: object
     measurement_ids: list[object]
     stored_measurement_count: int
     provider: str
     source_id: str
     source_display_name: str
+    provenance: list[dict[str, object]]
     band: str
     band_count: int
     bands: list[AssignmentMatrixBand]
@@ -85,6 +87,7 @@ class AssignmentMatrixRow(TypedDict):
     predicted_scopes: list[str]
     predicted_blend_state: str
     predicted_blend_states: list[str]
+    catalog_component: object
     proposal_confidence: str
     proposal_reason: str
     comparison_to_current: str
@@ -385,18 +388,18 @@ def measurement_assignment_matrix(
             ),
         }
 
-    measurement_groups: dict[
-        tuple[str, str], list[dict[str, object]]
-    ] = {}
+    measurement_groups: dict[object, list[dict[str, object]]] = {}
     for proposal in proposals:
-        key = (
+        key = proposal.get("detection_id") or (
             str(proposal["provider"]),
             str(proposal["source_id"]),
         )
         measurement_groups.setdefault(key, []).append(proposal)
 
     rows: list[AssignmentMatrixRow] = []
-    for (provider, source_id), group in measurement_groups.items():
+    for group in measurement_groups.values():
+        provider = str(group[0]["provider"])
+        source_id = str(group[0]["source_id"])
         band_groups: dict[str, list[dict[str, object]]] = {}
         for proposal in group:
             band_groups.setdefault(str(proposal["band"]), []).append(proposal)
@@ -540,6 +543,7 @@ def measurement_assignment_matrix(
             str(proposal["proposal_reason"]) for proposal in group
         ))
         rows.append({
+            "detection_id": first.get("detection_id"),
             "measurement_id": first["measurement_id"],
             "measurement_ids": [
                 proposal["measurement_id"] for proposal in group
@@ -551,6 +555,7 @@ def measurement_assignment_matrix(
                 first.get("source_display_name")
                 or catalog_source_display_name(provider, source_id)
             ),
+            "provenance": list(first.get("provenance") or []),
             "band": bands[0]["band"] if len(bands) == 1 else "multiple",
             "band_count": len(bands),
             "bands": bands,
@@ -586,6 +591,7 @@ def measurement_assignment_matrix(
                 blend_states[0] if len(blend_states) == 1 else "mixed"
             ),
             "predicted_blend_states": blend_states,
+            "catalog_component": first.get("catalog_component"),
             "proposal_confidence": min(
                 (
                     str(proposal["proposal_confidence"])

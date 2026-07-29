@@ -16,12 +16,13 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .cache_store import CachedSnapshotData, SnapshotCache
+from .catalog_provenance import materialize_catalog_documentation
 from .providers import ProviderError
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .serialization import safe_json as _safe_json
 from .service import normalize_identifier
 from .snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
-from .adapters.vizier import row_float, row_payload, row_text
+from .serialization import row_float, row_payload, row_text
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -285,6 +286,36 @@ class ReferenceStore:
             )
         self.sessions = sessionmaker(self.engine, expire_on_commit=False, future=True)
         self._backfill_aliases()
+        self._materialize_current_documentation()
+
+    def _materialize_current_documentation(self) -> None:
+        """Restore companion ReadMes for reference DBs created before sidecars."""
+
+        with self.sessions() as session:
+            snapshots = list(session.scalars(
+                select(ReferenceSnapshot).where(
+                    ReferenceSnapshot.is_current.is_(True)
+                )
+            ))
+            for snapshot in snapshots:
+                tables = list(session.execute(
+                    select(ReferenceTable.name, ReferenceTable.row_count)
+                    .where(ReferenceTable.snapshot_id == snapshot.id)
+                    .order_by(ReferenceTable.id)
+                ))
+                provider = (
+                    "cds" if "/ftp/" in snapshot.source_url else "vizier"
+                )
+                materialize_catalog_documentation(
+                    self.path,
+                    provider=provider,
+                    catalog_id=snapshot.catalog,
+                    release=snapshot.catalog,
+                    content_sha256=snapshot.content_sha256,
+                    source_url=snapshot.source_url,
+                    readme=snapshot.readme,
+                    tables=tables,
+                )
 
     def _backfill_aliases(self) -> None:
         """Populate the alias index for snapshots created before it existed."""
@@ -312,7 +343,7 @@ class ReferenceStore:
                     payload = json.loads(row.payload_json)
                     aliases = {
                         _star_identifier(value)
-                        for value in definition.identifiers(payload)
+                        for value in definition.lookup_identifiers(payload)
                     }
                     for alias in sorted(value for value in aliases if value):
                         session.add(ReferenceAlias(
@@ -379,6 +410,8 @@ class ReferenceStore:
             ) from error
         if not tables:
             raise ProviderError(f"{adapter} snapshot returned no tables")
+        if not readme.strip():
+            raise ProviderError(f"{adapter} snapshot returned an empty ReadMe")
 
         serialized = []
         for table in tables:
@@ -402,6 +435,19 @@ class ReferenceStore:
             "catalog": definition.catalog, "readme": readme, "tables": serialized
         })
         digest = hashlib.sha256(canonical.encode()).hexdigest()
+        materialize_catalog_documentation(
+            self.path,
+            provider=provider,
+            catalog_id=definition.catalog,
+            release=definition.catalog,
+            content_sha256=digest,
+            source_url=source_url,
+            readme=readme,
+            tables=(
+                (str(item["name"]), len(item["rows"]))
+                for item in serialized
+            ),
+        )
         with self.sessions() as session, session.begin():
             existing = session.scalar(select(ReferenceSnapshot).where(
                 ReferenceSnapshot.catalog == definition.catalog,
@@ -491,7 +537,7 @@ class ReferenceStore:
                     if item["name"] in definition.tables_for_matching:
                         alias_values = {
                             _star_identifier(value)
-                            for value in definition.identifiers(payload)
+                            for value in definition.lookup_identifiers(payload)
                         }
                         aliases = tuple(sorted(
                             value for value in alias_values if value

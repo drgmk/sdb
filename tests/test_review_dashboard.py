@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sdb_identity.models import ExternalIdentifier, Target
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_dashboard import review_dashboard_report
+from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 from tests.test_review_actions import _wise_measurements
@@ -18,6 +19,8 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
     unassigned = identity.add(AddRequest(ra_deg=10.0002, dec_deg=-20))
     mixed = identity.add(AddRequest(ra_deg=10.0004, dec_deg=-20))
     empty = identity.add(AddRequest(ra_deg=11.0, dec_deg=-20))
+    ambiguity_target = identity.add(AddRequest(ra_deg=12.0, dec_deg=-20))
+    exception_target = identity.add(AddRequest(ra_deg=13.0, dec_deg=-20))
     samples = SampleService(session_factory)
     samples.create("dashboard")
     for target in (clean, unassigned, mixed, empty):
@@ -49,8 +52,26 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
             actor="test",
             reason="clean ownership",
         )
-    _wise_measurements(
+    unassigned_measurements = _wise_measurements(
         session_factory, unassigned, source_id="unassigned-wise", ra=10.0002,
+    )
+    association_preview = review_catalog_target_association_decision(
+        session_factory,
+        target_reference=ambiguity_target.sdbid,
+        detection_id=unassigned_measurements[0].detection_id,
+        action="accept",
+        reviewed_raw_row_id=unassigned_measurements[0].raw_row_id,
+    )
+    review_catalog_target_association_decision(
+        session_factory,
+        target_reference=ambiguity_target.sdbid,
+        detection_id=unassigned_measurements[0].detection_id,
+        action="accept",
+        reviewed_raw_row_id=unassigned_measurements[0].raw_row_id,
+        apply=True,
+        actor="test",
+        reason="fixture with two plausible source associations",
+        expected_token=association_preview["state_token"],
     )
     mixed_measurements = _wise_measurements(
         session_factory, mixed, source_id="mixed-wise", ra=10.0004,
@@ -58,11 +79,11 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
     assign_measurement_target(
         session_factory,
         mixed_measurements[0].id,
-        mixed.sdbid,
+        exception_target.sdbid,
         role="contributor",
         method="fixture",
         actor="test",
-        reason="one band only",
+        reason="one band is an explicit attribution exception",
     )
 
     report = review_dashboard_report(session_factory, sample="dashboard")

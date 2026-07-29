@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,12 +13,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
 from .catalog_resolution import default_resolution
+from .catalog_provenance import CatalogProvenance, provenance_from_payload
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .models import (
     AstrometricSolution,
     CatalogBatchRequest,
     CatalogDetection,
+    CatalogDetectionProvenance,
     CatalogRun,
     CatalogAttribute,
     CatalogMatchOverride,
@@ -29,6 +32,9 @@ from .models import (
 from .photometry_semantics import validate_photometry_semantics
 from .providers import Astrometry, ProviderError
 from .service import normalize_identifier
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,7 @@ class CatalogCandidate:
     measurements: tuple[MeasurementValue, ...] = field(default_factory=tuple)
     attributes: tuple[CatalogAttributeValue, ...] = field(default_factory=tuple)
     detection_key: str | None = None
+    provenance: tuple[CatalogProvenance, ...] = field(default_factory=tuple)
 
     @property
     def astrometry(self) -> Astrometry:
@@ -118,6 +125,26 @@ class CatalogRefreshResult:
     measurement_count: int
     selected_source_id: str | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class DetectionNormalizationItem:
+    detection_id: int
+    provider: str
+    source_id: str
+    status: str
+    measurement_count: int
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class DetectionNormalizationSummary:
+    detection_count: int
+    completed: int
+    no_measurements: int
+    failed: int
+    measurement_count: int
+    items: tuple[DetectionNormalizationItem, ...]
 
 
 class CatalogService:
@@ -262,6 +289,7 @@ class CatalogService:
 
             raw_rows: list[RawCatalogRow] = []
             detections: list[CatalogDetection] = []
+            normalized_counts: list[int] = []
             for index, (candidate, separation, score) in enumerate(scored):
                 detection = self._canonical_detection(session, adapter, candidate)
                 row = RawCatalogRow(
@@ -280,6 +308,17 @@ class CatalogService:
                 session.flush()
                 raw_rows.append(row)
                 detections.append(detection)
+                item = self._normalize_detection(
+                    session,
+                    adapter=adapter,
+                    candidate=candidate,
+                    detection=detection,
+                    run_id=run.id,
+                    target_id=target.id,
+                    raw_row_id=row.id,
+                    strict=index == selected_index,
+                )
+                normalized_counts.append(item.measurement_count)
 
             measurement_count = 0
             if not scored:
@@ -290,20 +329,7 @@ class CatalogService:
                 run.status = "match"
                 selected = scored[selected_index][0]
                 run.selected_source_id = selected.source_id
-                values = adapter.normalize(selected)
-                for index, value in enumerate(values):
-                    self._canonical_measurement(
-                        session,
-                        adapter=adapter,
-                        candidate=selected,
-                        detection=detections[selected_index],
-                        value=value,
-                        value_index=index,
-                        run_id=run.id,
-                        target_id=target.id,
-                        raw_row_id=raw_rows[selected_index].id,
-                    )
-                    measurement_count += 1
+                measurement_count = normalized_counts[selected_index]
                 shared_targets = self._mark_shared_detection(
                     session, run.id, target.id, detections[selected_index].id
                 )
@@ -549,6 +575,9 @@ class CatalogService:
                 dec_deg=candidate.dec_deg,
                 epoch=candidate.epoch,
                 payload_json=payload_json,
+                normalization_status="pending",
+                normalization_error=None,
+                normalized_at=None,
                 created_at=datetime.now(timezone.utc),
             )
             .on_conflict_do_update(
@@ -559,6 +588,9 @@ class CatalogService:
                     "dec_deg": candidate.dec_deg,
                     "epoch": candidate.epoch,
                     "payload_json": payload_json,
+                    "normalization_status": "pending",
+                    "normalization_error": None,
+                    "normalized_at": None,
                 },
             )
         )
@@ -569,7 +601,230 @@ class CatalogService:
         ))
         if detection is None:
             raise RuntimeError("failed to create or retrieve canonical catalog detection")
+        CatalogService._store_detection_provenance(
+            session, detection, candidate
+        )
         return detection
+
+    @staticmethod
+    def _store_detection_provenance(
+        session: Session,
+        detection: CatalogDetection,
+        candidate: CatalogCandidate,
+    ) -> None:
+        provenance = (
+            candidate.provenance
+            or provenance_from_payload(candidate.payload)
+            or (CatalogProvenance(
+                service=detection.provider,
+                catalog_id=detection.release.split("@", 1)[0],
+            ),)
+        )
+        for item in provenance:
+            session.execute(
+                sqlite_insert(CatalogDetectionProvenance)
+                .values(
+                    detection_id=detection.id,
+                    provenance_key=item.key,
+                    role=item.role,
+                    service=item.service,
+                    catalog_id=item.catalog_id,
+                    table_id=item.table_id,
+                    row_key=item.row_key,
+                    identifier_column=item.identifier_column,
+                    identifier_value=item.identifier_value,
+                    source_url=item.source_url,
+                    access_url=item.access_url,
+                    readme_url=item.readme_url,
+                    created_at=datetime.now(timezone.utc),
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["detection_id", "provenance_key"]
+                )
+            )
+
+    def normalize_detections(
+        self,
+        detection_ids: Iterable[int],
+    ) -> DetectionNormalizationSummary:
+        """Normalize stored provider payloads without repeating provider queries."""
+        ids = tuple(dict.fromkeys(int(value) for value in detection_ids))
+        if not ids:
+            return self._normalization_summary([])
+        items = []
+        with self.sessions() as session, session.begin():
+            detections = list(session.scalars(
+                select(CatalogDetection)
+                .where(CatalogDetection.id.in_(ids))
+                .order_by(CatalogDetection.id)
+            ))
+            for detection in detections:
+                adapter = self.adapters.get(detection.provider)
+                if adapter is None:
+                    items.append(DetectionNormalizationItem(
+                        detection.id,
+                        detection.provider,
+                        detection.source_id,
+                        "failed",
+                        0,
+                        f"catalog adapter is unavailable: {detection.provider}",
+                    ))
+                    continue
+                encounter = session.execute(
+                    select(RawCatalogRow, CatalogRun)
+                    .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
+                    .where(RawCatalogRow.detection_id == detection.id)
+                    .order_by(RawCatalogRow.id)
+                    .limit(1)
+                ).first()
+                if encounter is None:
+                    detection.normalization_status = "failed"
+                    detection.normalization_error = "detection has no query encounter"
+                    detection.normalized_at = datetime.now(timezone.utc)
+                    items.append(DetectionNormalizationItem(
+                        detection.id,
+                        detection.provider,
+                        detection.source_id,
+                        "failed",
+                        0,
+                        detection.normalization_error,
+                    ))
+                    continue
+                raw, run = encounter
+                try:
+                    candidate = self._candidate_from_payload(
+                        adapter, json.loads(detection.payload_json)
+                    )
+                    self._store_detection_provenance(
+                        session, detection, candidate
+                    )
+                except Exception as error:
+                    detection.normalization_status = "failed"
+                    detection.normalization_error = str(error)
+                    detection.normalized_at = datetime.now(timezone.utc)
+                    items.append(DetectionNormalizationItem(
+                        detection.id,
+                        detection.provider,
+                        detection.source_id,
+                        "failed",
+                        0,
+                        str(error),
+                    ))
+                    continue
+                items.append(self._normalize_detection(
+                    session,
+                    adapter=adapter,
+                    candidate=candidate,
+                    detection=detection,
+                    run_id=run.id,
+                    target_id=run.target_id,
+                    raw_row_id=raw.id,
+                    strict=False,
+                ))
+        return self._normalization_summary(items)
+
+    @staticmethod
+    def _candidate_from_payload(
+        adapter: CatalogAdapter,
+        payload: dict[str, object],
+    ) -> CatalogCandidate:
+        if hasattr(adapter, "candidate_from_payload"):
+            candidate = adapter.candidate_from_payload(payload)
+        elif hasattr(adapter, "parse_row"):
+            candidate = adapter.parse_row(payload)
+        else:
+            raise ValueError(
+                f"{adapter.name} adapter cannot reconstruct stored candidates"
+            )
+        if candidate.provenance:
+            return candidate
+        return CatalogCandidate(
+            source_id=candidate.source_id,
+            ra_deg=candidate.ra_deg,
+            dec_deg=candidate.dec_deg,
+            epoch=candidate.epoch,
+            payload=candidate.payload,
+            measurements=candidate.measurements,
+            attributes=candidate.attributes,
+            detection_key=candidate.detection_key,
+            provenance=provenance_from_payload(payload),
+        )
+
+    def _normalize_detection(
+        self,
+        session: Session,
+        *,
+        adapter: CatalogAdapter,
+        candidate: CatalogCandidate,
+        detection: CatalogDetection,
+        run_id: int,
+        target_id: int,
+        raw_row_id: int,
+        strict: bool,
+    ) -> DetectionNormalizationItem:
+        try:
+            values = adapter.normalize(candidate)
+            count = 0
+            for value_index, value in enumerate(values):
+                self._canonical_measurement(
+                    session,
+                    adapter=adapter,
+                    candidate=candidate,
+                    detection=detection,
+                    value=value,
+                    value_index=value_index,
+                    run_id=run_id,
+                    target_id=target_id,
+                    raw_row_id=raw_row_id,
+                )
+                count += 1
+        except Exception as error:
+            if strict:
+                raise
+            LOGGER.warning(
+                "could not normalize unaccepted %s detection %s",
+                adapter.name,
+                candidate.source_id,
+                exc_info=True,
+            )
+            detection.normalization_status = "failed"
+            detection.normalization_error = str(error)
+            detection.normalized_at = datetime.now(timezone.utc)
+            return DetectionNormalizationItem(
+                detection.id,
+                detection.provider,
+                detection.source_id,
+                "failed",
+                0,
+                str(error),
+            )
+        detection.normalization_status = (
+            "completed" if count else "no_measurements"
+        )
+        detection.normalization_error = None
+        detection.normalized_at = datetime.now(timezone.utc)
+        return DetectionNormalizationItem(
+            detection.id,
+            detection.provider,
+            detection.source_id,
+            detection.normalization_status,
+            count,
+        )
+
+    @staticmethod
+    def _normalization_summary(
+        items: list[DetectionNormalizationItem],
+    ) -> DetectionNormalizationSummary:
+        return DetectionNormalizationSummary(
+            detection_count=len(items),
+            completed=sum(item.status == "completed" for item in items),
+            no_measurements=sum(
+                item.status == "no_measurements" for item in items
+            ),
+            failed=sum(item.status == "failed" for item in items),
+            measurement_count=sum(item.measurement_count for item in items),
+            items=tuple(items),
+        )
 
     @staticmethod
     def _canonical_measurement(
@@ -640,7 +895,7 @@ class CatalogService:
         # Provider-native values may be corrected without a release-label
         # change. Refresh those fields in place so every target encounter sees
         # the same current representation, while preserving SDB curation
-        # fields (exclusion and association/blend state) and first-seen
+        # fields (exclusion and assignment state) and first-seen
         # provenance on the canonical row.
         provider_values = {
             key: values[key]
@@ -650,6 +905,7 @@ class CatalogService:
                 "quality", "note1", "note2", "private",
                 "resolution_major_arcsec", "resolution_minor_arcsec",
                 "resolution_kind", "resolution_reference",
+                "ownership_scope", "blend_state", "blend_reason",
             )
         }
         session.execute(
@@ -966,14 +1222,6 @@ class CatalogService:
             )
         ))
         affected = target_ids - {target_id}
-        if not affected:
-            return set()
-        for measurement in session.scalars(select(NormalizedMeasurement).where(
-            NormalizedMeasurement.detection_id == detection_id,
-        )):
-            measurement.ownership_scope = "shared"
-            measurement.blend_state = "blended"
-            measurement.blend_reason = "duplicate_source"
         return affected
 
     @staticmethod

@@ -37,7 +37,9 @@ from sdb_identity.reference import (
 )
 from sdb_identity.adapters.reference import TdscSnapshotAdapter
 from sdb_identity.reference_definitions import V70A_DEFINITION
+from sdb_identity.reference_definitions import UBVMEANS_DEFINITION
 from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.ubv_components import decode_ubv_component
 
 
 class FakeSnapshotClient:
@@ -174,7 +176,8 @@ class FakeNewOpticalClient:
 
 
 def test_snapshot_preserves_tables_schema_readme_and_relationships(tmp_path):
-    store = ReferenceStore(tmp_path / "reference.sqlite")
+    path = tmp_path / "reference.sqlite"
+    store = ReferenceStore(path)
     fetched = store.fetch_gaspar(FakeSnapshotClient())
     assert (fetched.table_count, fetched.row_count, fetched.unchanged) == (2, 3, False)
     assert store.fetch_gaspar(FakeSnapshotClient()).unchanged is True
@@ -192,6 +195,11 @@ def test_snapshot_preserves_tables_schema_readme_and_relationships(tmp_path):
         "r_Age", "Ref", "comma_separated_ints",
     )
     assert store.rows("refs")[0]["BibCode"] == "1991ApJS...76..383D"
+    documentation = (
+        path.parent / f"{path.name}.catalogs" / "vizier"
+        / GASPAR_CATALOG.replace("/", "_")
+    )
+    assert "Note (6)" in (documentation / "ReadMe").read_text()
 
 
 def test_reference_fetch_can_reuse_generic_snapshot_cache(tmp_path):
@@ -330,8 +338,34 @@ def test_ubvmeans_marks_d_as_an_unresolved_multiple_in_the_aperture(tmp_path):
     assert values["VJ"].ownership_scope == "system"
     assert values["VJ"].blend_state == "blended"
     assert values["VJ"].blend_reason == "catalog_multiple_in_aperture"
+    assert candidate.payload["_sdb_photometry_scope"] == {
+        "native_code": "D",
+        "kind": "combined_components",
+        "ordinal": None,
+        "component_label": None,
+        "minimum_contributors": 2,
+    }
     assert values["UJ_BJ"].quality == "S"
     assert values["BJ_VJ"].resolution_major_arcsec is None
+
+
+def test_ubvmeans_component_codes_construct_component_identity_and_scope():
+    assert UBVMEANS_DEFINITION.identifiers({
+        "SimbadName": "HD 123", "m_LID": "1",
+    }) == ("HD 123A",)
+    assert UBVMEANS_DEFINITION.identifiers({
+        "SimbadName": "HD 123B", "m_LID": "2",
+    }) == ("HD 123B",)
+    assert UBVMEANS_DEFINITION.identifiers({
+        "SimbadName": "HD 123", "m_LID": "D",
+    }) == ("HD 123",)
+
+    third = decode_ubv_component({"m_LID": "3"})
+    assert (third.kind, third.ordinal, third.component_label) == (
+        "component_ordinal", 3, "C",
+    )
+    supplementary = decode_ubv_component(source_id="+100000123|m_LID=S")
+    assert supplementary.kind == "supplementary_identifier"
 
 
 def test_paunzen_native_indices_use_spatial_limit_not_aperture(tmp_path):

@@ -128,7 +128,7 @@ def review_dashboard_report(
         "rows": rows,
         "notes": [
             "all current sample members are listed, including clean and no-photometry targets",
-            "dashboard states use stored encounters and accepted assignments only",
+            "dashboard states use accepted source associations and explicit attribution exceptions",
             "open a target to compute detailed identifier, position, hierarchy, and resolution proposals",
         ],
     }

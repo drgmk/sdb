@@ -113,6 +113,13 @@ def test_gaia_query_uses_established_source_id_not_a_cone():
     candidates = adapter.query(context)
     assert [value.source_id for value in candidates] == ["123456789"]
     assert client.calls == [{"catalog": "I/355/gaiadr3", "Source": "123456789"}]
+    provenance = candidates[0].provenance[0]
+    assert provenance.table_id == "I/355/gaiadr3"
+    assert provenance.identifier_column == "Source"
+    assert provenance.identifier_value == "123456789"
+    assert provenance.access_url.endswith(
+        "I%2F355%2Fgaiadr3&Source===123456789"
+    )
 
 
 def test_gaia_query_prefers_identifier_over_conflicting_astrometric_source_id():
@@ -164,6 +171,13 @@ def test_gaia_bulk_query_uploads_ids_and_maps_rows_to_targets():
     assert "classprob_dsc_combmod_star AS PSS" in query
     assert kwargs["upload_table_name"] == "targets"
     assert list(kwargs["upload_resource"]["input_target_id"]) == [7]
+    provenance = result[7][0].provenance[0]
+    assert provenance.service == "Gaia TAP"
+    assert provenance.table_id == "I/355/gaiadr3"
+    assert "gea.esac" not in provenance.access_url
+    assert provenance.access_url.endswith(
+        "I%2F355%2Fgaiadr3&Source===123456789"
+    )
 
 
 def test_gaia_refresh_reuses_identity_source_and_stores_photometry(session_factory):

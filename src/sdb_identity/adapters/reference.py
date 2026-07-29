@@ -10,6 +10,14 @@ from sqlalchemy import or_, select
 
 from ..astrometry import angular_separation_arcsec
 from ..catalogs import CatalogAttributeValue, CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_provenance import (
+    CatalogProvenance,
+    provenance_from_payload,
+    vizier_access_url,
+    vizier_entry_url,
+    vizier_readme_url,
+    with_payload_provenance,
+)
 from ..providers import Astrometry, ProviderError
 from ..reference_definitions import (
     GASPAR_BIBCODE, GASPAR_DEFINITION, IRAS_FSC_BIBCODE,
@@ -21,6 +29,8 @@ from ..reference_definitions import (
     UBVMEANS_BIBCODE, UBVMEANS_DEFINITION,
     SnapshotCatalogDefinition,
 )
+from ..ubv_components import decode_ubv_component, ubv_photometry_scope
+from ..tdsc_components import decode_tdsc_component
 from ..reference_store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
 from .vizier import row_float, row_text
 
@@ -41,6 +51,9 @@ class SnapshotCatalogAdapter:
                 f"run 'sdb reference fetch {self.name}'"
             )
         self.snapshot_id = snapshot.id
+        self.snapshot_catalog = snapshot.catalog
+        self.snapshot_source_url = snapshot.source_url
+        self.snapshot_digest = snapshot.content_sha256
         self.release = f"{definition.catalog}@{snapshot.content_sha256[:16]}"
 
     def _snapshot_context(self):
@@ -67,7 +80,11 @@ class SnapshotCatalogAdapter:
                     )):
                         payload = json.loads(ref_row.payload_json)
                         refs[int(payload[relationship.to_column])] = payload
-        return tuple(table.id for table in tables), refs
+        return (
+            tuple(table.id for table in tables),
+            refs,
+            {table.id: table for table in tables},
+        )
 
     def _nearby_rows(self, table_id: int, context: CatalogQueryContext):
         radius_deg = self.radius_arcsec / 3600.0
@@ -165,11 +182,32 @@ class SnapshotCatalogAdapter:
             target_id: list(rows.values()) for target_id, rows in result.items()
         }
 
-    def _candidate(self, row, refs) -> CatalogCandidate:
+    def _candidate(self, row, refs, table: ReferenceTable) -> CatalogCandidate:
         # Common candidate envelope. The concrete adapter methods below own
         # payload enrichment, epoch, photometry, and auxiliary attributes.
         payload = json.loads(row.payload_json)
         payload = self.enrich_payload(payload, refs)
+        identifier_column, identifier_value = self._provenance_identifier(
+            payload
+        )
+        provenance = (CatalogProvenance(
+            service="local reference snapshot",
+            catalog_id=self.snapshot_catalog,
+            table_id=table.name,
+            row_key=row.stable_key or f"row:{row.row_number}",
+            identifier_column=identifier_column,
+            identifier_value=identifier_value,
+            source_url=self.snapshot_source_url,
+            access_url=(
+                vizier_entry_url(
+                    table.name, identifier_column, identifier_value
+                )
+                if identifier_column and identifier_value
+                else vizier_access_url(table.name)
+            ),
+            readme_url=vizier_readme_url(self.snapshot_catalog),
+        ),)
+        payload = with_payload_provenance(payload, provenance)
         return CatalogCandidate(
             source_id=self.definition.row_key(
                 payload, f"{self.name}:{row.row_number}"
@@ -180,7 +218,30 @@ class SnapshotCatalogAdapter:
             payload=payload,
             measurements=self.measurements(payload),
             attributes=self.attributes(payload),
+            provenance=provenance,
         )
+
+    def _provenance_identifier(
+        self,
+        payload: dict[str, object],
+    ) -> tuple[str | None, str | None]:
+        column = self.definition.primary_identifier
+        value = row_text(payload, column)
+        composite_labels = {
+            label
+            for label, _columns, _separator
+            in self.definition.composite_identifier_columns
+        }
+        # Some VizieR tables expose a literal label (for example ``TYC``)
+        # beside the actual multi-column identifier. It is display metadata,
+        # not a row locator.
+        if (
+            column in composite_labels
+            and value
+            and value.casefold() == column.casefold()
+        ):
+            return None, None
+        return (column, value) if value else (None, None)
 
     def enrich_payload(self, payload, refs):
         return payload
@@ -199,7 +260,7 @@ class SnapshotCatalogAdapter:
     def query_many(
         self, contexts: list[CatalogQueryContext]
     ) -> dict[int, list[CatalogCandidate]]:
-        table_ids, refs = self._snapshot_context()
+        table_ids, refs, tables_by_id = self._snapshot_context()
         result = {context.target_id: [] for context in contexts}
         alias_rows_by_target = self._alias_rows_many(table_ids, contexts)
         for context in contexts:
@@ -214,7 +275,7 @@ class SnapshotCatalogAdapter:
             for row in rows.values():
                 if row.ra_deg is None or row.dec_deg is None:
                     continue
-                candidate = self._candidate(row, refs)
+                candidate = self._candidate(row, refs, tables_by_id[row.table_id])
                 separation = angular_separation_arcsec(
                     context.astrometry,
                     candidate.astrometry,
@@ -248,6 +309,8 @@ class SnapshotCatalogAdapter:
                         payload=associated_payload,
                         measurements=candidate.measurements,
                         attributes=candidate.attributes,
+                        detection_key=candidate.detection_key,
+                        provenance=candidate.provenance,
                     ))
         return result
 
@@ -261,6 +324,44 @@ class SnapshotCatalogAdapter:
         enriched = dict(payload)
         if self.name != "gaspar13" or "_resolved_age_references" not in enriched:
             enriched = self.enrich_payload(enriched, {})
+        provenance = provenance_from_payload(enriched)
+        if not provenance:
+            stable_key = self.definition.row_key(enriched, self.name)
+            with self.store.sessions() as session:
+                rows = list(session.execute(
+                    select(ReferenceRow, ReferenceTable)
+                    .join(ReferenceTable, ReferenceTable.id == ReferenceRow.table_id)
+                    .where(
+                        ReferenceTable.snapshot_id == self.snapshot_id,
+                        ReferenceTable.name.in_(
+                            self.definition.tables_for_matching
+                        ),
+                        ReferenceRow.stable_key == stable_key,
+                    )
+                ))
+            identifier_column, identifier_value = (
+                self._provenance_identifier(enriched)
+            )
+            provenance = tuple(CatalogProvenance(
+                service="local reference snapshot",
+                catalog_id=self.snapshot_catalog,
+                table_id=table.name,
+                row_key=row.stable_key or f"row:{row.row_number}",
+                identifier_column=identifier_column,
+                identifier_value=identifier_value,
+                source_url=self.snapshot_source_url,
+                access_url=(
+                    vizier_entry_url(
+                        table.name,
+                        identifier_column,
+                        identifier_value,
+                    )
+                    if identifier_column and identifier_value
+                    else vizier_access_url(table.name)
+                ),
+                readme_url=vizier_readme_url(self.snapshot_catalog),
+            ) for row, table in rows)
+            enriched = with_payload_provenance(enriched, provenance)
         return CatalogCandidate(
             source_id=self.definition.row_key(enriched, self.name),
             ra_deg=ra,
@@ -269,6 +370,7 @@ class SnapshotCatalogAdapter:
             payload=enriched,
             measurements=self.measurements(enriched),
             attributes=self.attributes(enriched),
+            provenance=provenance,
         )
 
     @staticmethod
@@ -494,6 +596,10 @@ class TdscSnapshotAdapter(SnapshotCatalogAdapter):
     def __init__(self, store: ReferenceStore):
         super().__init__(store, TDSC_DEFINITION)
 
+    def enrich_payload(self, payload, refs):
+        payload["_sdb_photometry_scope"] = decode_tdsc_component(payload).as_dict()
+        return payload
+
     @staticmethod
     def score_candidate(context, candidate, separation_arcsec):
         association = candidate.payload.get("_sdb_association", {})
@@ -554,16 +660,13 @@ class UbvMeansSnapshotAdapter(SnapshotCatalogAdapter):
     def __init__(self, store: ReferenceStore):
         super().__init__(store, UBVMEANS_DEFINITION)
 
+    def enrich_payload(self, payload, refs):
+        payload["_sdb_photometry_scope"] = decode_ubv_component(payload).as_dict()
+        return payload
+
     def measurements(self, payload):
         component = row_text(payload, "m_LID") or ""
-        if component.upper() == "D":
-            ownership_scope = "system"
-            blend_state = "blended"
-            blend_reason = "catalog_multiple_in_aperture"
-        else:
-            ownership_scope = "component"
-            blend_state = "clear"
-            blend_reason = None
+        ownership_scope, blend_state, blend_reason = ubv_photometry_scope(payload)
         values = []
         for band, column, error, flag, observations, systematic in (
             ("VJ", "Vmag", "e_Vmag", "n_Vmag", "o_Vmag", 0.02),

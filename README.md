@@ -25,9 +25,10 @@ sdb --database databases/sdb.sqlite status sdbid-v3-004000.00-200000.0
 ```
 
 Copy `sdb.example.toml` to `sdb.toml` or
-`~/.config/sdb/config.toml` for reference-provider, freshness, operator, and
-mirror defaults. `sdb reference ensure` then checks every configured reference
-provider and fetches only missing or stale snapshots.
+`~/.config/sdb/config.toml` for reference-provider, per-target catalog
+coverage, freshness, operator, and mirror defaults. `sdb reference ensure`
+then checks every configured reference provider and fetches only missing or
+stale snapshots.
 
 Run the deterministic release check with:
 

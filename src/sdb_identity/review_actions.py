@@ -7,10 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .adapters import catalog_source_display_name
+from .astrometry import angular_separation_arcsec
+from .catalog_associations import catalog_target_candidates
 from .decisions import DecisionContext
 from .dirty import find_target, mark_export_dirty
+from .effective_assignments import effective_measurement_assignments
 from .models import (
     CatalogDetection,
+    CatalogRun,
+    CatalogTargetAssociationAction,
     MeasurementAssociationAction,
     MeasurementTargetAssociation,
     NormalizedMeasurement,
@@ -19,10 +24,193 @@ from .models import (
     Target,
     TargetLifecycleAction,
 )
+from .providers import Astrometry
 from .target_lifecycle import TARGET_ROLES, TARGET_STATES
 
 
 _REVIEW_STATES = TARGET_STATES - {"superseded"}
+
+
+def review_catalog_target_association_decision(
+    session_factory: sessionmaker[Session],
+    *,
+    target_reference: str | int,
+    detection_id: int,
+    action: str,
+    reviewed_raw_row_id: int,
+    apply: bool = False,
+    actor: str | None = None,
+    reason: str | None = None,
+    expected_token: str | None = None,
+) -> dict[str, object]:
+    """Preview or append a target–detection association decision.
+
+    The action changes effective source association without modifying the
+    catalog run or raw query encounter that originally discovered the source.
+    """
+    action = action.strip().lower()
+    if action not in {"accept", "reject"}:
+        raise ValueError("catalog association action must be accept or reject")
+    context = session_factory.begin() if apply else session_factory()
+    with context as session:
+        target = find_target(session, target_reference)
+        if target is None:
+            raise KeyError(f"target not found: {target_reference}")
+        detection = session.get(CatalogDetection, detection_id)
+        if detection is None:
+            raise KeyError(f"catalog detection not found: {detection_id}")
+        raw = session.get(RawCatalogRow, reviewed_raw_row_id)
+        if raw is None or raw.detection_id != detection.id:
+            raise ValueError(
+                "reviewed catalog row does not belong to this detection"
+            )
+        run = session.get(CatalogRun, raw.run_id)
+        if run is None:
+            raise KeyError(f"catalog run not found: {raw.run_id}")
+        latest = session.scalar(
+            select(CatalogTargetAssociationAction)
+            .where(
+                CatalogTargetAssociationAction.target_id == target.id,
+                CatalogTargetAssociationAction.detection_id == detection.id,
+            )
+            .order_by(CatalogTargetAssociationAction.id.desc())
+            .limit(1)
+        )
+        candidate = next((
+            row
+            for row in catalog_target_candidates(
+                session, [target.id, run.target_id],
+            )
+            if (
+                int(row["target_id"]) == target.id
+                and int(row["detection_id"]) == detection.id
+            )
+        ), None)
+        separation = (
+            float(candidate["separation_arcsec"])
+            if candidate is not None
+            else angular_separation_arcsec(
+                Astrometry(
+                    target.ra2000_deg,
+                    target.dec2000_deg,
+                    2000.0,
+                    source="target",
+                    source_id=target.sdbid,
+                ),
+                Astrometry(
+                    detection.ra_deg,
+                    detection.dec_deg,
+                    detection.epoch,
+                    source=detection.provider,
+                    source_id=detection.source_id,
+                ),
+                epoch=detection.epoch,
+            )
+        )
+        try:
+            payload = json.loads(detection.payload_json)
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        display_name = catalog_source_display_name(
+            detection.provider, detection.source_id, payload,
+        )
+        token_state = {
+            "target_id": target.id,
+            "detection_id": detection.id,
+            "detection_key": detection.detection_key,
+            "reviewed_run_id": run.id,
+            "reviewed_raw_row_id": raw.id,
+            "latest_action_id": None if latest is None else latest.id,
+            "latest_action": None if latest is None else latest.action,
+            "desired_action": action,
+        }
+        token = hashlib.sha256(
+            json.dumps(token_state, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        verb = "Accepted" if action == "accept" else "Rejected"
+        preposition = "as" if action == "accept" else "for"
+        suggested_reason = (
+            f"{verb} {detection.provider} source {display_name} {preposition} "
+            f"{target.sdbid} ({separation:.2f} arcsec separation)"
+        )
+        result: dict[str, object] = {
+            "mode": "preview",
+            "state_token": token,
+            "has_changes": latest is None or latest.action != action,
+            "action": action,
+            "target": _target_row(target),
+            "detection": {
+                "id": detection.id,
+                "provider": detection.provider,
+                "release": detection.release,
+                "source_id": detection.source_id,
+                "source_display_name": display_name,
+                "separation_arcsec": separation,
+                "reviewed_run_id": run.id,
+                "reviewed_raw_row_id": raw.id,
+                "discovered_for": run.target_id,
+            },
+            "current": (
+                None if latest is None else {
+                    "action_id": latest.id,
+                    "action": latest.action,
+                    "actor": latest.actor,
+                    "reason": latest.reason,
+                }
+            ),
+            "suggested_reason": suggested_reason,
+            "notes": [
+                "catalog query provenance is unchanged",
+                (
+                    "accepting makes normalized source measurements available "
+                    "to this target; contributor/composite assignment remains separate"
+                ),
+                "previous association decisions remain in append-only history",
+            ],
+        }
+        if not apply:
+            return result
+        if expected_token is not None and expected_token != token:
+            raise RuntimeError(
+                "catalog association changed after preview; reload and preview again"
+            )
+        decision = DecisionContext.resolve(
+            actor=actor,
+            reason=reason,
+            suggested_reason=suggested_reason,
+        )
+        action_id = None
+        if result["has_changes"]:
+            association = CatalogTargetAssociationAction(
+                target_id=target.id,
+                detection_id=detection.id,
+                action=action,
+                method="manual_review",
+                reviewed_run_id=run.id,
+                reviewed_raw_row_id=raw.id,
+                actor=decision.actor,
+                reason=decision.reason,
+            )
+            session.add(association)
+            session.flush()
+            action_id = association.id
+            mark_export_dirty(
+                session,
+                target.id,
+                source_type="catalog_target_association",
+                source_id=association.id,
+                reason="catalog source association changed",
+            )
+        return {
+            **result,
+            "mode": "applied",
+            "applied": {
+                "actions_added": 0 if action_id is None else 1,
+                "action_id": action_id,
+            },
+        }
 
 
 def review_photometry_eligibility_decision(
@@ -517,7 +705,7 @@ def _decision_snapshot(
         payload,
     )
     selected_ids = {value.id for value in measurements}
-    current = list(session.scalars(
+    explicit_current = list(session.scalars(
         select(MeasurementTargetAssociation)
         .where(MeasurementTargetAssociation.measurement_id.in_(selected_ids))
         .order_by(
@@ -526,7 +714,15 @@ def _decision_snapshot(
             MeasurementTargetAssociation.target_id,
         )
     ))
-    target_ids = {row.target_id for row in current} | seen | {scope_target.id}
+    effective_current = effective_measurement_assignments(
+        session,
+        selected_ids,
+    )
+    target_ids = (
+        {row.target_id for row in effective_current}
+        | seen
+        | {scope_target.id}
+    )
     targets = {
         value.id: value for value in session.scalars(
             select(Target).where(Target.id.in_(target_ids))
@@ -541,14 +737,47 @@ def _decision_snapshot(
             (measurement.id, scope_target.id, "composite_scope")
             for measurement in measurements
         )
-    current_pairs = {
-        (row.measurement_id, row.target_id, row.role) for row in current
-    }
-    add_pairs = sorted(desired_pairs - current_pairs)
-    remove_rows = [
-        row for row in current
-        if (row.measurement_id, row.target_id, row.role) not in desired_pairs
-    ]
+    explicit_by_measurement: dict[int, list[MeasurementTargetAssociation]] = {}
+    for row in explicit_current:
+        explicit_by_measurement.setdefault(row.measurement_id, []).append(row)
+    effective_by_measurement = {}
+    for row in effective_current:
+        effective_by_measurement.setdefault(row.measurement_id, []).append(row)
+    add_pairs = []
+    remove_rows = []
+    for measurement in measurements:
+        desired_for_measurement = {
+            row for row in desired_pairs if row[0] == measurement.id
+        }
+        explicit_rows = explicit_by_measurement.get(measurement.id, [])
+        if explicit_rows:
+            explicit_pairs = {
+                (row.measurement_id, row.target_id, row.role)
+                for row in explicit_rows
+            }
+            add_pairs.extend(desired_for_measurement - explicit_pairs)
+            remove_rows.extend(
+                row for row in explicit_rows
+                if (row.measurement_id, row.target_id, row.role)
+                not in desired_for_measurement
+            )
+            continue
+        effective_pairs = {
+            (row.measurement_id, row.target_id, row.role)
+            for row in effective_by_measurement.get(measurement.id, [])
+        }
+        if desired_for_measurement == effective_pairs:
+            continue
+        if not desired_for_measurement and effective_pairs:
+            raise ValueError(
+                "accepted source association supplies the default photometry "
+                "target; change that source association instead of clearing "
+                "all photometry targets"
+            )
+        # The first explicit row overrides the complete derived default, so
+        # materialize the complete desired set rather than only its difference.
+        add_pairs.extend(desired_for_measurement)
+    add_pairs = sorted(set(add_pairs))
     latest_lifecycle = session.scalar(
         select(TargetLifecycleAction)
         .where(TargetLifecycleAction.target_id == scope_target.id)
@@ -572,7 +801,12 @@ def _decision_snapshot(
         "measurement_ids": sorted(selected_ids),
         "associations": [
             [row.id, row.measurement_id, row.target_id, row.role]
-            for row in current
+            for row in explicit_current
+        ],
+        "derived_assignments": [
+            [row.measurement_id, row.target_id, row.role, row.method]
+            for row in effective_current
+            if row.derived
         ],
         "lifecycle_action_id": None if latest_lifecycle is None else latest_lifecycle.id,
     }
@@ -633,7 +867,8 @@ def _decision_snapshot(
             **_target_row(scope_target), "role": "composite_scope",
         }] if include_composite_scope else []),
         "current_assignments": [
-            _association_row(row, targets[row.target_id]) for row in current
+            _association_row(row, targets[row.target_id])
+            for row in effective_current
         ],
         "add_assignments": [
             {
@@ -651,6 +886,8 @@ def _decision_snapshot(
         "suggested_reason": "; ".join(reason_parts),
         "notes": [
             "selected bands from one canonical catalog detection are reviewed together",
+            "unambiguous accepted source associations supply the ordinary default",
+            "explicit rows are stored only when the reviewed attribution differs",
             "provider exclusions are preserved independently of ownership assignments",
             "apply replaces current assignments for only the selected measurements",
         ],
@@ -740,14 +977,19 @@ def _target_row(target: Target) -> dict[str, object]:
 
 
 def _association_row(
-    association: MeasurementTargetAssociation, target: Target,
+    association: object, target: Target,
 ) -> dict[str, object]:
     return {
-        "association_id": association.id,
+        "association_id": getattr(
+            association,
+            "association_id",
+            getattr(association, "id", None),
+        ),
         "measurement_id": association.measurement_id,
         "target_id": association.target_id,
         "sdbid": target.sdbid,
         "role": association.role,
         "method": association.method,
         "weight": association.weight,
+        "derived": bool(getattr(association, "derived", False)),
     }

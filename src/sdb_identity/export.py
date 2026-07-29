@@ -4,23 +4,23 @@ from pathlib import Path
 
 from astropy.table import Table
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
-    CatalogRun,
     CuratedPhotometryOverride,
     ExternalIdentifier,
     IrasBandSelection,
     IrasDetectionFamily,
     MetadataRun,
-    NormalizedMeasurement,
     PhotometryOverride,
-    RawCatalogRow,
     SimbadMetadata,
     Target,
 )
-from .catalog_measurements import current_measurement_encounters
+from .catalog_measurements import (
+    current_catalog_detection_target_pairs,
+    current_measurement_encounters,
+)
 from .service import normalize_identifier
 from .dirty import clear_export_dirty
 
@@ -80,27 +80,17 @@ def export_ipac(
         curated_overrides = list(session.scalars(
             select(CuratedPhotometryOverride).order_by(CuratedPhotometryOverride.id)
         ))
-        shared_source_keys = {
-            (provider, source_id)
-            for provider, source_id, target_count in session.execute(
-                select(
-                    NormalizedMeasurement.provider,
-                    NormalizedMeasurement.source_id,
-                    func.count(func.distinct(CatalogRun.target_id)),
-                )
-                .join(
-                    RawCatalogRow,
-                    RawCatalogRow.detection_id == NormalizedMeasurement.detection_id,
-                )
-                .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
-                .where(
-                    CatalogRun.is_current.is_(True),
-                    CatalogRun.status == "match",
-                    RawCatalogRow.accepted.is_(True),
-                )
-                .group_by(NormalizedMeasurement.provider, NormalizedMeasurement.source_id)
+        detection_targets: dict[int, set[int]] = {}
+        for detection_id, source_target_id in (
+            current_catalog_detection_target_pairs(session)
+        ):
+            detection_targets.setdefault(detection_id, set()).add(
+                source_target_id
             )
-            if target_count > 1
+        shared_detection_ids = {
+            detection_id
+            for detection_id, source_target_ids in detection_targets.items()
+            if len(source_target_ids) > 1
         }
         iras_alternate_ids = set(session.scalars(
             select(IrasBandSelection.alternate_measurement_id)
@@ -146,7 +136,7 @@ def export_ipac(
             if record_no is not None:
                 curated_override = latest_curated_overrides.get((value.provider, record_no))
         effective_override = curated_override or override
-        shared_source = (value.provider, value.source_id) in shared_source_keys
+        shared_source = value.detection_id in shared_detection_ids
         excluded = value.excluded if effective_override is None else effective_override.excluded
         if shared_source and effective_override is None:
             excluded = True

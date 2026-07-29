@@ -8,7 +8,9 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 
 from .service import normalize_identifier
-from .adapters.vizier import row_float, row_payload, row_text
+from .serialization import row_float, row_payload, row_text
+from .ubv_components import ubv_component_identifiers
+from .tdsc_components import tdsc_component_identifiers
 
 
 GASPAR_CATALOG = "J/ApJ/768/25"
@@ -89,7 +91,7 @@ class SnapshotCatalogDefinition:
     def tables_for_matching(self) -> tuple[str, ...]:
         return self.match_tables or (self.main_table,)
 
-    def identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
+    def _base_identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
         result = []
         for column, prefix in self.identifier_columns:
             value = row_text(payload, column)
@@ -109,6 +111,20 @@ class SnapshotCatalogDefinition:
                     f"GJ {int(match.group(1))}{f' {suffix}' if suffix else ''}"
                 )
         return tuple(result)
+
+    def identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
+        result = self._base_identifiers(payload)
+        if self.adapter == "ubvmeans":
+            return ubv_component_identifiers(result, payload)
+        if self.adapter == "tdsc":
+            return tdsc_component_identifiers(result, payload)
+        return result
+
+    def lookup_identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
+        """Return broad row-discovery aliases without making them identity."""
+        base = self._base_identifiers(payload)
+        specific = self.identifiers(payload)
+        return tuple(dict.fromkeys((*specific, *base)))
 
     def row_key(self, payload: dict[str, object], fallback: str) -> str:
         values = [(column, row_text(payload, column)) for column in self.key_columns]

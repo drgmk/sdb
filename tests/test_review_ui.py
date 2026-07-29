@@ -3,7 +3,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.catalogs import (
@@ -12,9 +12,12 @@ from sdb_identity.catalogs import (
     MeasurementValue,
 )
 from sdb_identity.models import (
+    CatalogDetection,
     CatalogMatchOverride,
+    CatalogTargetAssociationAction,
     MeasurementTargetAssociation,
     MetadataRun,
+    NormalizedMeasurement,
     PhotometryOverride,
     RawCatalogRow,
     SimbadMetadata,
@@ -24,9 +27,10 @@ from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService
+from sdb_identity.update import UpdateItem, UpdateSummary
 from tests.fakes import FakeSimbad, astrometry, simbad_result
 from tests.test_review_actions import _wise_measurements
-from tests.test_catalog import FakeCatalog
+from tests.test_catalog import FakeCatalog, candidate
 from tests.test_system_expansion import _root_with_metadata
 from tests.test_system_photometry_foundation import _configured_system
 
@@ -113,11 +117,16 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert 'class="drawer-actions"' in workspace.text
     assert "--drawer-width:min(420px,38vw)" in workspace.text
     assert "/api/eligibility/preview" in workspace.text
+    assert "/api/catalog-association/preview" in workspace.text
+    assert "Accept for this target" in workspace.text
+    assert "Reject for this target" in workspace.text
     assert 'id="actor" value="browser reviewer"' in workspace.text
     assert "prefillReason('reason',currentPreview)" in workspace.text
     assert 'placeholder="Preview suggests a reason"' in workspace.text
     assert "<code>HD TEST A</code> (physical)" in workspace.text
     assert "<code>HD TEST B</code> (physical)" in workspace.text
+    assert 'id="catalog-coverage-dialog"' in workspace.text
+    assert "/api/catalog-coverage/preview" in workspace.text
 
     sky = client.get(f"/target/{system.sdbid}/sky")
     assert sky.status_code == 200
@@ -207,6 +216,69 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     })
     assert lifecycle_apply.status_code == 200
     assert lifecycle_apply.json()["applied"]["lifecycle_actions"] == 1
+
+
+def test_review_ui_applies_catalog_target_association_without_provider_query(
+    session_factory, monkeypatch,
+):
+    monkeypatch.setenv("SDB_ACTOR", "browser reviewer")
+    identity = IdentityService(session_factory)
+    parent = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
+    component = identity.add(
+        AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
+    )
+    CatalogService(session_factory, {
+        "2mass": FakeCatalog([
+            candidate("parent", ra=10.0, dec=0.0),
+            candidate(
+                "component",
+                ra=10.0 + 4.1 / 3600.0,
+                dec=0.0,
+            ),
+        ]),
+    }).refresh(parent.sdbid, "2mass")
+    with session_factory() as session:
+        detection, raw = session.execute(
+            select(CatalogDetection, RawCatalogRow)
+            .join(
+                RawCatalogRow,
+                RawCatalogRow.detection_id == CatalogDetection.id,
+            )
+            .where(CatalogDetection.source_id == "component")
+        ).one()
+
+    client = TestClient(create_review_app(session_factory))
+    payload = {
+        "target": component.sdbid,
+        "detection_id": detection.id,
+        "raw_row_id": raw.id,
+        "action": "accept",
+    }
+    preview = client.post(
+        "/api/catalog-association/preview", json=payload,
+    )
+    assert preview.status_code == 200
+    value = preview.json()
+    assert value["has_changes"] is True
+    assert value["human_summary"]["title"] == (
+        "Catalog source association ready"
+    )
+    applied = client.post(
+        "/api/catalog-association/apply",
+        json={
+            **payload,
+            "state_token": value["state_token"],
+            "actor": "browser reviewer",
+            "reason": value["suggested_reason"],
+        },
+    )
+    assert applied.status_code == 200
+    with session_factory() as session:
+        action = session.scalar(select(CatalogTargetAssociationAction))
+        assert action is not None
+        assert action.target_id == component.target_id
+        assert action.detection_id == detection.id
+        assert action.action == "accept"
 
 
 def test_review_ui_assignment_drawer_uses_snapshot_catalog_display_id(
@@ -415,6 +487,22 @@ def test_review_ui_relative_import_is_disabled_without_live_identity_service(ses
     assert "offline review mode" in applied.json()["detail"]
 
 
+def test_review_ui_collapses_ordinary_attribution_as_an_exception(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
+    _wise_measurements(session_factory, target, source_id="ordinary-wise")
+
+    workspace = TestClient(create_review_app(session_factory)).get(
+        f"/target/{target.sdbid}"
+    )
+
+    assert workspace.status_code == 200
+    assert "Photometry follows the accepted source association" in workspace.text
+    assert "No separate assignment decision is needed" in workspace.text
+    assert "Change attribution (exception)" in workspace.text
+
+
 def test_review_ui_filters_and_navigates_the_unresolved_queue(session_factory):
     identity = IdentityService(session_factory)
     first = identity.add(AddRequest(ra_deg=10, dec_deg=-20))
@@ -473,6 +561,130 @@ def test_review_ui_filters_and_navigates_the_unresolved_queue(session_factory):
     assert filtered_out.status_code == 200
     assert "resolved/filtered out · 1 remain" in filtered_out.text
     assert quote(ordered[1]) in filtered_out.text
+
+
+def test_review_ui_catalog_coverage_previews_and_updates_only_system_gaps(
+    session_factory,
+):
+    system, component_a, component_b = _configured_system(session_factory)
+    calls = []
+
+    class FakeUpdateService:
+        def update_targets(self, target_references, *, providers, force):
+            calls.append((tuple(target_references), tuple(providers), force))
+            return UpdateSummary(
+                target_count=len(tuple(target_references)),
+                refreshed=1,
+                skipped=0,
+                missing=0,
+                failed=0,
+                items=(
+                    UpdateItem(
+                        system.target_id,
+                        system.sdbid,
+                        "2mass",
+                        "refreshed",
+                        "no_match",
+                    ),
+                ),
+            )
+
+    client = TestClient(create_review_app(
+        session_factory,
+        catalog_coverage_providers=("2mass", "tycho2"),
+        catalog_update_factory=FakeUpdateService,
+    ))
+    workspace = client.get(f"/target/{component_b.sdbid}")
+    assert workspace.status_code == 200
+    assert "Catalog coverage 0/6" in workspace.text
+
+    preview_response = client.post(
+        "/api/catalog-coverage/preview",
+        json={"target": component_b.sdbid},
+    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["missing_count"] == 6
+    assert preview["update_available"] is True
+    assert {
+        row["target_sdbid"] for row in preview["coverage"]
+    } == {system.sdbid, component_a.sdbid, component_b.sdbid}
+
+    applied = client.post(
+        "/api/catalog-coverage/apply",
+        json={
+            "target": component_b.sdbid,
+            "state_token": preview["state_token"],
+        },
+    )
+    assert applied.status_code == 200
+    assert applied.json()["applied"]["refreshed"] == 1
+    assert calls == [(
+        (system.sdbid, component_a.sdbid, component_b.sdbid),
+        ("2mass", "tycho2"),
+        False,
+    )]
+
+
+def test_review_ui_catalog_coverage_normalizes_stored_candidates_offline(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    adapter = AllWiseAdapter()
+    query_count = 0
+
+    def query(context):
+        nonlocal query_count
+        query_count += 1
+        return [
+            adapter.parse_row({
+                "AllWISE": f"J004000.0{index}-200000.0",
+                "RAJ2000": 10.00010 + index * 0.00001,
+                "DEJ2000": -20.0,
+                "W1mag": 7.0 + index,
+                "e_W1mag": 0.02,
+                "qph": "AAAA",
+                "ccf": "0000",
+            })
+            for index in range(2)
+        ]
+
+    adapter.query = query
+    service = CatalogService(session_factory, {"allwise": adapter})
+    assert service.refresh(target.sdbid, "allwise").status == "ambiguous"
+    with session_factory.begin() as session:
+        session.execute(delete(NormalizedMeasurement))
+        for detection in session.scalars(select(CatalogDetection)):
+            detection.normalization_status = "pending"
+            detection.normalized_at = None
+
+    client = TestClient(create_review_app(
+        session_factory,
+        catalog_coverage_providers=("allwise",),
+        catalog_service_factory=lambda provider, action: service,
+    ))
+    preview = client.post(
+        "/api/catalog-coverage/preview",
+        json={"target": target.sdbid},
+    ).json()
+
+    assert preview["missing_count"] == 0
+    assert preview["normalization_count"] == 2
+    assert preview["update_available"] is False
+    assert preview["action_available"] is True
+
+    applied = client.post(
+        "/api/catalog-coverage/apply",
+        json={"target": target.sdbid, "state_token": preview["state_token"]},
+    )
+
+    assert applied.status_code == 200
+    assert applied.json()["normalization_applied"][0]["completed"] == 2
+    assert query_count == 1
+    with session_factory() as session:
+        assert session.query(NormalizedMeasurement).count() == 2
 
 
 def test_review_ui_refuses_non_local_bind(session_factory):

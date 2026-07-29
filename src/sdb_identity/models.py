@@ -304,7 +304,37 @@ class CatalogDetection(Base):
     dec_deg: Mapped[float] = mapped_column(Float, nullable=False)
     epoch: Mapped[float] = mapped_column(Float, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    normalization_status: Mapped[str] = mapped_column(
+        String(30), default="pending", nullable=False, index=True,
+    )
+    normalization_error: Mapped[str | None] = mapped_column(Text)
+    normalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class CatalogDetectionProvenance(Base):
+    """One source catalogue/table encounter contributing to a detection."""
+
+    __tablename__ = "catalog_detection_provenance"
+    __table_args__ = (UniqueConstraint("detection_id", "provenance_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    detection_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_detections.id"), nullable=False, index=True
+    )
+    provenance_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    service: Mapped[str | None] = mapped_column(String(80))
+    catalog_id: Mapped[str | None] = mapped_column(String(160))
+    table_id: Mapped[str | None] = mapped_column(String(200))
+    row_key: Mapped[str | None] = mapped_column(String(300))
+    identifier_column: Mapped[str | None] = mapped_column(String(160))
+    identifier_value: Mapped[str | None] = mapped_column(String(300))
+    source_url: Mapped[str | None] = mapped_column(Text)
+    access_url: Mapped[str | None] = mapped_column(Text)
+    readme_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class RawCatalogRow(Base):
@@ -323,6 +353,14 @@ class RawCatalogRow(Base):
 
 
 class NormalizedMeasurement(Base):
+    """Provider values keyed by detection, with immutable first-seen provenance.
+
+    ``run_id``, ``target_id``, and ``raw_row_id`` identify the encounter that
+    first normalized this canonical row. They are not current ownership or
+    association state; those are derived from current encounters and explicit
+    measurement-target associations.
+    """
+
     __tablename__ = "normalized_measurements"
     __table_args__ = (UniqueConstraint("detection_id", "measurement_key"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -353,6 +391,18 @@ class NormalizedMeasurement(Base):
     ownership_scope: Mapped[str] = mapped_column(String(20), default="component", nullable=False)
     blend_state: Mapped[str] = mapped_column(String(30), default="clear", nullable=False)
     blend_reason: Mapped[str | None] = mapped_column(String(80))
+
+    @property
+    def first_seen_run_id(self) -> int:
+        return self.run_id
+
+    @property
+    def first_seen_target_id(self) -> int:
+        return self.target_id
+
+    @property
+    def first_seen_raw_row_id(self) -> int:
+        return self.raw_row_id
 
 
 class IrasDetectionFamily(Base):
@@ -804,6 +854,38 @@ class CatalogMatchOverride(AuditedActionMixin, Base):
         String(30), default="accept_candidate", nullable=False, index=True,
     )
     selected_source_id: Mapped[str | None] = mapped_column(String(200))
+
+
+class CatalogTargetAssociationAction(AuditedActionMixin, Base):
+    """Append-only operator decision linking one catalog detection to a target."""
+
+    __tablename__ = "catalog_target_association_actions"
+    __table_args__ = (
+        Index(
+            "ix_catalog_target_association_actions_pair",
+            "target_id",
+            "detection_id",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id"), nullable=False, index=True,
+    )
+    detection_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_detections.id"), nullable=False, index=True,
+    )
+    action: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True,
+    )
+    method: Mapped[str] = mapped_column(
+        String(40), default="manual_review", nullable=False,
+    )
+    reviewed_run_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_runs.id"), nullable=False, index=True,
+    )
+    reviewed_raw_row_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_catalog_rows.id"), nullable=False, index=True,
+    )
 
 
 class ExportDirtyTarget(Base):

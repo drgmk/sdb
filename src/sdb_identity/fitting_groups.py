@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from .adapters import catalog_source_display_name
 from .catalog_measurements import current_measurement_encounters
 from .dirty import find_target
+from .effective_assignments import effective_measurement_assignments
 from .models import (
+    CatalogDetectionProvenance,
     MeasurementTargetAssociation,
     NormalizedMeasurement,
     PhotometryOverride,
@@ -59,6 +61,28 @@ def fitting_group_report(
                 measurement_ids,
             )
         }
+        provenance_by_detection: dict[int, list[dict[str, object]]] = defaultdict(list)
+        detection_ids = {
+            row.detection_id for row in measurements.values()
+        }
+        for provenance in _scalars_in(
+            session,
+            CatalogDetectionProvenance,
+            CatalogDetectionProvenance.detection_id,
+            detection_ids,
+        ):
+            provenance_by_detection[provenance.detection_id].append({
+                "role": provenance.role,
+                "service": provenance.service,
+                "catalog_id": provenance.catalog_id,
+                "table_id": provenance.table_id,
+                "row_key": provenance.row_key,
+                "identifier_column": provenance.identifier_column,
+                "identifier_value": provenance.identifier_value,
+                "source_url": provenance.source_url,
+                "access_url": provenance.access_url,
+                "readme_url": provenance.readme_url,
+            })
         raw_payloads = {}
         raw_row_ids = {
             row.raw_row_id for row in measurements.values()
@@ -73,7 +97,10 @@ def fitting_group_report(
                 continue
             if isinstance(payload, dict):
                 raw_payloads[raw.id] = payload
-        associations = _associations(session, measurement_ids)
+        associations = effective_measurement_assignments(
+            session,
+            measurement_ids,
+        )
         lifecycle = _lifecycle(session, context_target_ids)
         systems = _system_context(session, context_target_ids)
         overrides = _overrides(
@@ -167,6 +194,9 @@ def fitting_group_report(
                 measurement.source_id,
                 raw_payloads.get(measurement.raw_row_id),
             ),
+            "provenance": provenance_by_detection.get(
+                measurement.detection_id, []
+            ),
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
@@ -206,9 +236,15 @@ def fitting_group_report(
                 "method": association.method,
                 "weight": association.weight,
                 "note": association.note,
+                "association_id": association.association_id,
+                "derived": association.derived,
             } for association in sorted(
                 assigned,
-                key=lambda value: (value.role, value.target_id, value.id),
+                key=lambda value: (
+                    value.role,
+                    value.target_id,
+                    value.association_id or 0,
+                ),
             )],
             "review_flags": flags,
         }
@@ -316,7 +352,12 @@ def fitting_group_report(
 
     measurement_values = sorted(
         measurement_rows.values(),
-        key=lambda row: (row["provider"], row["source_id"], row["band"], row["measurement_id"]),
+        key=lambda row: (
+            row["provider"],
+            row["detection_id"],
+            row["band"],
+            row["measurement_id"],
+        ),
     )
     return {
         "selection": {
@@ -367,7 +408,7 @@ def fitting_group_report(
             ),
         },
         "notes": [
-            "read-only graph derived from current accepted measurement assignments",
+            "read-only graph uses explicit assignments or one accepted source association",
             "excluded measurements remain visible but do not connect fitting groups",
             "hierarchy membership adds context but does not itself require joint fitting",
             "legacy IPAC export and SDF behavior are unchanged",
@@ -434,19 +475,6 @@ def _context_closure(
             target_ids = expanded_targets
             measurement_ids = all_measurements
     return target_ids, measurement_ids
-
-
-def _associations(
-    session: Session, measurement_ids: set[int]
-) -> list[MeasurementTargetAssociation]:
-    rows = []
-    for chunk in _chunks(measurement_ids):
-        rows.extend(session.scalars(
-            select(MeasurementTargetAssociation)
-            .where(MeasurementTargetAssociation.measurement_id.in_(chunk))
-            .order_by(MeasurementTargetAssociation.id)
-        ))
-    return rows
 
 
 def _current_measurement_encounters(

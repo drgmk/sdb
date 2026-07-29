@@ -50,6 +50,8 @@ def catalog_service_for_provider(
 
 
 def _reference_providers() -> tuple[str, ...]:
-    from .reference_definitions import SNAPSHOT_CATALOGS
+    # Enter through the adapter package so its reference/vizier dependency
+    # order is established before reference_definitions is evaluated.
+    from .adapters.reference import SNAPSHOT_CATALOGS
 
     return tuple(SNAPSHOT_CATALOGS)

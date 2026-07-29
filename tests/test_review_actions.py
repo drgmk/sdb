@@ -248,6 +248,49 @@ def test_detection_decision_can_convert_scope_to_physical_contributor(
     assert (lifecycle[-1].role, lifecycle[-1].state) == ("physical", "active")
 
 
+def test_detection_decision_does_not_store_the_catalog_association_default(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
+    selected = _wise_measurements(session_factory, target)[0]
+
+    preview = review_detection_decision(
+        session_factory,
+        detection_id=selected.detection_id,
+        scope_target_reference=target.sdbid,
+        contributor_references=[target.sdbid],
+        include_composite_scope=False,
+        measurement_ids=[selected.id],
+    )
+
+    assert preview["has_changes"] is False
+    assert preview["current_assignments"] == [{
+        "association_id": None,
+        "measurement_id": selected.id,
+        "target_id": target.target_id,
+        "sdbid": target.sdbid,
+        "role": "contributor",
+        "method": "catalog_association_default",
+        "weight": None,
+        "derived": True,
+    }]
+    applied = review_detection_decision(
+        session_factory,
+        detection_id=selected.detection_id,
+        scope_target_reference=target.sdbid,
+        contributor_references=[target.sdbid],
+        include_composite_scope=False,
+        measurement_ids=[selected.id],
+        apply=True,
+        actor="reviewer",
+        reason="confirm the displayed default",
+        expected_token=preview["state_token"],
+    )
+    assert applied["applied"]["assignments_added"] == 0
+    with session_factory() as session:
+        assert session.query(MeasurementTargetAssociation).count() == 0
+
+
 def test_detection_decision_rejects_stale_preview_token(session_factory):
     system, component_a, component_b = _configured_system(session_factory)
     measurement = _wise_measurements(session_factory, system)[0]

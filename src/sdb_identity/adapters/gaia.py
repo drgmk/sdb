@@ -7,6 +7,12 @@ from astroquery.vizier import Vizier
 
 from ..astroquery_config import configure_vizier_class
 from ..catalogs import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_provenance import (
+    CatalogProvenance,
+    vizier_entry_url,
+    vizier_readme_url,
+    with_payload_provenance,
+)
 from ..providers import ProviderError
 from .vizier import row_float, row_payload, row_text
 from .review_metadata import add_review_metadata, PositionUncertainty, ReviewField
@@ -106,7 +112,12 @@ class GaiaDr3Adapter:
             ) from error
         if not tables:
             return []
-        candidates = [self.parse_row(row) for row in tables[0]]
+        candidates = [
+            self._with_provenance(
+                self.parse_row(row), service="VizieR", table_id=self.release,
+            )
+            for row in tables[0]
+        ]
         return [candidate for candidate in candidates if candidate.source_id == source_id]
 
     def query_many(
@@ -163,8 +174,44 @@ class GaiaDr3Adapter:
             ) from error
         for row in returned:
             target_id = int(row["input_target_id"])
-            result.setdefault(target_id, []).append(self.parse_row(row))
+            result.setdefault(target_id, []).append(self._with_provenance(
+                self.parse_row(row),
+                service="Gaia TAP",
+                table_id="gaiadr3.gaia_source",
+            ))
         return result
+
+    @classmethod
+    def _with_provenance(
+        cls,
+        candidate: CatalogCandidate,
+        *,
+        service: str,
+        table_id: str,
+    ) -> CatalogCandidate:
+        provenance = (CatalogProvenance(
+            service=service,
+            catalog_id=cls.release,
+            table_id=cls.release,
+            identifier_column="Source",
+            identifier_value=candidate.source_id,
+            access_url=vizier_entry_url(
+                cls.release, "Source", candidate.source_id
+            ),
+            readme_url=vizier_readme_url(cls.release.rsplit("/", 1)[0]),
+        ),)
+        payload = with_payload_provenance(candidate.payload, provenance)
+        return CatalogCandidate(
+            source_id=candidate.source_id,
+            ra_deg=candidate.ra_deg,
+            dec_deg=candidate.dec_deg,
+            epoch=candidate.epoch,
+            payload=payload,
+            measurements=candidate.measurements,
+            attributes=candidate.attributes,
+            detection_key=candidate.detection_key,
+            provenance=provenance,
+        )
 
     @classmethod
     def parse_row(cls, row) -> CatalogCandidate:

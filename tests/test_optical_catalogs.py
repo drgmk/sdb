@@ -3,13 +3,19 @@ from __future__ import annotations
 import astropy.units as u
 from astropy.table import Table
 
-from sdb_identity.adapters.reference import Hip2SnapshotAdapter, TdscSnapshotAdapter
+from sdb_identity.adapters import catalog_source_display_name
+from sdb_identity.adapters.reference import (
+    Hip2SnapshotAdapter,
+    Paunzen15SnapshotAdapter,
+    TdscSnapshotAdapter,
+)
 from sdb_identity.adapters.tycho2 import Tycho2Adapter
 from sdb_identity.catalogs import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 from sdb_identity.reference import (
     HIP2_CATALOG,
     HIP2_MAIN_TABLE,
+    PAUNZEN15_DEFINITION,
     TDSC_CATALOG,
     TDSC_MAIN_TABLE,
     TDSC_SUPPLEMENT_TABLE,
@@ -101,10 +107,57 @@ def test_tdsc_snapshot_matches_main_and_supplement_tables(tmp_path):
         2, "supplement", Astrometry(10.01, -20.0, 1991.25), ("TYC 1-2-2",),
     ))
     assert [candidate.source_id for candidate in main] == ["10|m_TDSC=A"]
+    assert main[0].payload["_sdb_photometry_scope"] == {
+        "native_code": "A",
+        "kind": "named_component",
+        "component_label": "A",
+    }
+    assert catalog_source_display_name(
+        "tdsc", main[0].source_id, main[0].payload,
+    ) == "HD 456A"
     assert [value.band for value in main[0].measurements] == ["BT", "VT"]
     assert [candidate.source_id for candidate in supplement] == ["10|m_TDSC=B"]
     assert [value.band for value in supplement[0].measurements] == ["BT"]
     assert supplement[0].epoch == 2000.0
+    assert main[0].provenance[0].table_id == TDSC_MAIN_TABLE
+    assert supplement[0].provenance[0].table_id == TDSC_SUPPLEMENT_TABLE
+    assert main[0].provenance[0].identifier_column == "TDSC"
+    assert main[0].provenance[0].identifier_value == "10"
+    assert main[0].provenance[0].access_url.endswith(
+        "I%2F276%2Fcatalog&TDSC===10"
+    )
+
+
+def test_tdsc_component_designation_controls_identity_but_not_lookup():
+    payload = {
+        "TDSC": 88,
+        "m_TDSC": "A",
+        "HIP": 169,
+        "HD": 224953,
+        "WDS": "00021-6817",
+        "TYC1": 9134,
+        "TYC2": 1714,
+        "TYC3": 1,
+    }
+    assert TDSC_DEFINITION.identifiers(payload) == (
+        "HD 224953A",
+        "TYC 9134-1714-1",
+        "WDS J00021-6817A",
+        "HIP 169",
+    )
+    assert "HD 224953" in TDSC_DEFINITION.lookup_identifiers(payload)
+
+
+def test_paunzen_literal_tyc_label_is_not_used_as_a_row_locator():
+    adapter = object.__new__(Paunzen15SnapshotAdapter)
+    adapter.definition = PAUNZEN15_DEFINITION
+
+    assert adapter._provenance_identifier({
+        "TYC": "TYC",
+        "TYC1": 9134,
+        "TYC2": 1714,
+        "TYC3": 1,
+    }) == (None, None)
 
 
 def test_tdsc_bulk_coordinates_are_propagated_per_axis_to_j2000():
@@ -166,6 +219,7 @@ def test_tycho2_does_not_mislabel_supplement_hp_as_vt():
     assert candidate.source_id == "TYC 3105-2070-1"
     assert candidate.measurements == ()
     assert candidate.payload["_table"] == "I/259/suppl_1"
+    assert candidate.provenance[0].table_id == "I/259/suppl_1"
     reconstructed = Tycho2Adapter.parse_row(candidate.payload)
     assert reconstructed.ra_deg == candidate.ra_deg
     assert reconstructed.dec_deg == candidate.dec_deg
@@ -188,3 +242,27 @@ def test_tycho2_uses_simbad_component_identifier_as_explicit_evidence():
     assert adapter.expected_source_ids(context.identifiers) == {"858-1221-1"}
     assert adapter.score_candidate(context, component_one, 0.15) == 1.0
     assert adapter.score_candidate(context, component_two, 0.15) < 0.25
+
+
+def test_tycho2_never_queries_unreliable_second_supplement():
+    class RecordingClient:
+        TIMEOUT = None
+
+        def __init__(self):
+            self.catalogs = []
+
+        def query_region(self, coordinate, *, radius, catalog):
+            self.catalogs.append(catalog)
+            return []
+
+    adapter = Tycho2Adapter()
+    client = RecordingClient()
+    adapter.create_client = lambda: client
+    result = adapter.query(CatalogQueryContext(
+        1, "target", Astrometry(10, -20), (),
+    ))
+    assert result == []
+    assert client.catalogs == ["I/259/tyc2", "I/259/suppl_1"]
+    assert "I/259/suppl_2" not in {
+        table for table, _epoch in adapter.science_tables
+    }

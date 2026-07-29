@@ -20,6 +20,7 @@ from .fitting_groups import fitting_group_report
 from .hierarchy import HierarchyService
 from .models import CatalogRun, RawCatalogRow, Target
 from .review_actions import (
+    review_catalog_target_association_decision,
     review_detection_decision,
     review_photometry_eligibility_decision,
     review_target_lifecycle_decision,
@@ -37,6 +38,8 @@ def create_review_app(
     session_factory: sessionmaker[Session], *, sample: str | None = None,
     identity_service_factory: Callable[[], IdentityService] | None = None,
     catalog_service_factory: Callable[[str, str], object] | None = None,
+    catalog_coverage_providers: tuple[str, ...] | None = None,
+    catalog_update_factory: Callable[[], object] | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -99,7 +102,10 @@ def create_review_app(
             graph = fitting_group_report(
                 session_factory, target_reference=sdbid,
             )
-            system_context = HierarchyService(session_factory).system_context(sdbid)
+            system_context = HierarchyService(session_factory).system_context(
+                sdbid,
+                catalog_providers=catalog_coverage_providers,
+            )
             simbad_main_ids = dict(
                 system_context.get("simbad_main_id_by_target", {})
             )
@@ -132,6 +138,10 @@ def create_review_app(
             return _target_page(
                 sdbid, readiness, graph, raw_row_detections, navigation,
                 display_name, simbad_main_ids,
+                catalog_coverage=list(
+                    system_context.get("catalog_coverage_by_target", [])
+                ),
+                catalog_update_available=catalog_update_factory is not None,
             )
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -254,6 +264,30 @@ def create_review_app(
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    @app.post("/api/catalog-association/preview")
+    async def catalog_association_preview(payload: dict[str, object]):
+        try:
+            value = _catalog_association_from_payload(
+                session_factory, payload, apply=False,
+            )
+            return _with_human_summary(
+                value, _catalog_association_summary(value),
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/catalog-association/apply")
+    async def catalog_association_apply(payload: dict[str, object]):
+        try:
+            value = _catalog_association_from_payload(
+                session_factory, payload, apply=True,
+            )
+            return _with_human_summary(
+                value, _catalog_association_summary(value),
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/api/relatives/preview")
     async def relatives_preview(payload: dict[str, object]):
         try:
@@ -278,6 +312,34 @@ def create_review_app(
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    @app.post("/api/catalog-coverage/preview")
+    async def catalog_coverage_preview(payload: dict[str, object]):
+        try:
+            return _catalog_coverage_from_payload(
+                session_factory,
+                catalog_coverage_providers,
+                catalog_update_factory,
+                catalog_service_factory,
+                payload,
+                apply=False,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/catalog-coverage/apply")
+    async def catalog_coverage_apply(payload: dict[str, object]):
+        try:
+            return _catalog_coverage_from_payload(
+                session_factory,
+                catalog_coverage_providers,
+                catalog_update_factory,
+                catalog_service_factory,
+                payload,
+                apply=True,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     return app
 
 
@@ -290,6 +352,8 @@ def serve_review_ui(
     open_browser: bool = False,
     identity_service_factory: Callable[[], IdentityService] | None = None,
     catalog_service_factory: Callable[[str, str], object] | None = None,
+    catalog_coverage_providers: tuple[str, ...] | None = None,
+    catalog_update_factory: Callable[[], object] | None = None,
 ) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("the review UI currently binds to localhost only")
@@ -306,6 +370,8 @@ def serve_review_ui(
         sample=sample,
         identity_service_factory=identity_service_factory,
         catalog_service_factory=catalog_service_factory,
+        catalog_coverage_providers=catalog_coverage_providers,
+        catalog_update_factory=catalog_update_factory,
     )
     url = f"http://{host}:{port}/"
     if open_browser:
@@ -379,6 +445,27 @@ def _eligibility_from_payload(
     return review_photometry_eligibility_decision(
         session_factory,
         changes=[dict(value) for value in raw_changes],
+        apply=apply,
+        actor=None if not apply else _optional_text(payload.get("actor")),
+        reason=None if not apply else _optional_text(payload.get("reason")),
+        expected_token=(
+            None if not apply else str(payload.get("state_token", ""))
+        ),
+    )
+
+
+def _catalog_association_from_payload(
+    session_factory: sessionmaker[Session],
+    payload: dict[str, object],
+    *,
+    apply: bool,
+) -> dict[str, object]:
+    return review_catalog_target_association_decision(
+        session_factory,
+        target_reference=str(payload["target"]),
+        detection_id=int(payload["detection_id"]),
+        action=str(payload["action"]),
+        reviewed_raw_row_id=int(payload["raw_row_id"]),
         apply=apply,
         actor=None if not apply else _optional_text(payload.get("actor")),
         reason=None if not apply else _optional_text(payload.get("reason")),
@@ -568,6 +655,53 @@ def _provider_result_summary(value: dict[str, object]) -> dict[str, object]:
         ],
         "changes": [change],
         "warnings": warnings,
+    }
+
+
+def _catalog_association_summary(
+    value: dict[str, object],
+) -> dict[str, object]:
+    detection = value["detection"]
+    target = value["target"]
+    action = str(value["action"])
+    verb = "Accept" if action == "accept" else "Reject"
+    source = (
+        detection.get("source_display_name") or detection["source_id"]
+    )
+    change = (
+        f"{verb} {detection['provider']} source {source} "
+        f"{'as' if action == 'accept' else 'for'} {target['sdbid']}."
+    )
+    if value["mode"] == "applied":
+        added = int((value.get("applied") or {}).get("actions_added", 0))
+        title = (
+            "Catalog source association applied"
+            if added
+            else "Catalog source association already current"
+        )
+    else:
+        title = (
+            "Catalog source association ready"
+            if value["has_changes"]
+            else "Catalog source association already current"
+        )
+    return {
+        "title": title,
+        "facts": [
+            (
+                f"Separation: "
+                f"{float(detection['separation_arcsec']):.2f} arcsec"
+            ),
+            "The original provider query and raw result remain unchanged.",
+            (
+                "Measurement contributor/composite assignment is a separate "
+                "decision."
+            ),
+        ],
+        "changes": [change] if value["has_changes"] else [
+            f"The latest manual decision is already {action}."
+        ],
+        "warnings": [],
     }
 
 
@@ -833,6 +967,277 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _catalog_coverage_from_payload(
+    session_factory: sessionmaker[Session],
+    providers: tuple[str, ...] | None,
+    update_factory: Callable[[], object] | None,
+    catalog_service_factory: Callable[[str, str], object] | None,
+    payload: dict[str, object],
+    *,
+    apply: bool,
+) -> dict[str, object]:
+    target = str(payload["target"])
+    preview = _catalog_coverage_preview_payload(
+        session_factory,
+        target,
+        providers=providers,
+        update_available=update_factory is not None,
+        normalization_available=catalog_service_factory is not None,
+    )
+    if not apply:
+        return preview
+    if not preview["action_available"]:
+        raise RuntimeError(
+            "catalog coverage changes are unavailable in this review server"
+        )
+    expected_token = str(payload.get("state_token") or "")
+    if not expected_token or expected_token != preview["state_token"]:
+        raise RuntimeError(
+            "catalog coverage changed after preview; reload and preview again"
+        )
+    missing_rows = [
+        row for row in preview["coverage"] if row["missing_providers"]
+    ]
+    normalization_gaps = {
+        int(gap["detection_id"]): gap
+        for row in preview["coverage"]
+        for gap in row["normalization_gaps"]
+    }
+    if not missing_rows and not normalization_gaps:
+        return preview
+    normalization_results = []
+    if normalization_gaps and catalog_service_factory is not None:
+        by_provider: dict[str, list[int]] = {}
+        for detection_id, gap in normalization_gaps.items():
+            by_provider.setdefault(str(gap["provider"]), []).append(
+                detection_id
+            )
+        for provider, detection_ids in by_provider.items():
+            summary = catalog_service_factory(
+                provider, "normalize"
+            ).normalize_detections(detection_ids)
+            normalization_results.append({
+                "provider": provider,
+                "detection_count": summary.detection_count,
+                "completed": summary.completed,
+                "no_measurements": summary.no_measurements,
+                "failed": summary.failed,
+                "measurement_count": summary.measurement_count,
+                "items": [
+                    {
+                        "detection_id": item.detection_id,
+                        "provider": item.provider,
+                        "source_id": item.source_id,
+                        "status": item.status,
+                        "measurement_count": item.measurement_count,
+                        "error": item.error,
+                    }
+                    for item in summary.items
+                ],
+            })
+    provider_set = {
+        provider
+        for row in missing_rows
+        for provider in row["missing_providers"]
+    }
+    selected_providers = tuple(
+        provider
+        for provider in preview["expected_providers"]
+        if provider in provider_set
+    )
+    summary = None
+    if missing_rows and update_factory is not None:
+        summary = update_factory().update_targets(
+            [str(row["target_sdbid"]) for row in missing_rows],
+            providers=selected_providers,
+            force=False,
+        )
+    refreshed = _catalog_coverage_preview_payload(
+        session_factory,
+        target,
+        providers=providers,
+        update_available=update_factory is not None,
+        normalization_available=catalog_service_factory is not None,
+    )
+    value = {
+        **refreshed,
+        "mode": "applied",
+        "normalization_applied": normalization_results,
+        "applied": (
+            None if summary is None else {
+                "target_count": int(summary.target_count),
+                "refreshed": int(summary.refreshed),
+                "skipped": int(summary.skipped),
+                "missing": int(summary.missing),
+                "failed": int(summary.failed),
+                "items": [
+                    {
+                        "target_id": item.target_id,
+                        "sdbid": item.sdbid,
+                        "provider": item.provider,
+                        "action": item.action,
+                        "status": item.status,
+                        "detail": item.detail,
+                    }
+                    for item in summary.items
+                ],
+            }
+        ),
+    }
+    return _with_human_summary(value, _catalog_coverage_summary(value))
+
+
+def _catalog_coverage_preview_payload(
+    session_factory: sessionmaker[Session],
+    target_reference: str | int,
+    *,
+    providers: tuple[str, ...] | None,
+    update_available: bool,
+    normalization_available: bool,
+) -> dict[str, object]:
+    context = HierarchyService(session_factory).system_context(
+        target_reference,
+        catalog_providers=providers,
+    )
+    names = dict(context.get("simbad_main_id_by_target", {}))
+    coverage = [
+        {
+            **row,
+            "display_name": names.get(
+                str(row["target_sdbid"]), str(row["target_sdbid"])
+            ),
+        }
+        for row in context.get("catalog_coverage_by_target", [])
+    ]
+    token_rows = [{
+        "target_id": row["target_id"],
+        "target_sdbid": row["target_sdbid"],
+        "current_providers": row["current_providers"],
+        "missing_providers": row["missing_providers"],
+        "failed_providers": row["failed_providers"],
+        "normalization_gaps": row["normalization_gaps"],
+    } for row in coverage]
+    token = hashlib.sha256(
+        json.dumps(token_rows, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    expected = (
+        list(coverage[0]["expected_providers"]) if coverage else list(providers or ())
+    )
+    missing_count = sum(
+        len(row["missing_providers"]) for row in coverage
+    )
+    normalization_ids = {
+        int(gap["detection_id"])
+        for row in coverage
+        for gap in row["normalization_gaps"]
+    }
+    normalization_count = len(normalization_ids)
+    action_available = bool(
+        (missing_count and update_available)
+        or (normalization_count and normalization_available)
+    )
+    value = {
+        "mode": "preview",
+        "target": str(target_reference),
+        "state_token": token,
+        "has_changes": bool(missing_count or normalization_count),
+        "update_available": update_available,
+        "normalization_available": normalization_available,
+        "action_available": action_available,
+        "expected_providers": expected,
+        "missing_count": missing_count,
+        "normalization_count": normalization_count,
+        "coverage": coverage,
+    }
+    return _with_human_summary(value, _catalog_coverage_summary(value))
+
+
+def _catalog_coverage_summary(value: dict[str, object]) -> dict[str, object]:
+    coverage = value["coverage"]
+    expected_count = len(value["expected_providers"])
+    changes = [
+        f"Normalize stored {gap['provider']} candidate {gap['source_id']}."
+        for gap in {
+            int(gap["detection_id"]): gap
+            for row in coverage
+            for gap in row["normalization_gaps"]
+        }.values()
+    ]
+    changes.extend(
+        f"Query {', '.join(row['missing_providers'])} for "
+        f"{row['display_name']}."
+        for row in coverage
+        if row["missing_providers"]
+    )
+    failures = [
+        f"{row['display_name']}: previous failed attempt for "
+        f"{', '.join(row['failed_providers'])}."
+        for row in coverage
+        if row["failed_providers"]
+    ]
+    applied = value.get("applied")
+    normalization_applied = value.get("normalization_applied") or []
+    normalized_count = sum(
+        row["completed"] + row["no_measurements"]
+        for row in normalization_applied
+    )
+    normalization_failed = sum(
+        row["failed"] for row in normalization_applied
+    )
+    if applied or normalization_applied:
+        provider_result = (
+            "no provider requests run"
+            if not applied
+            else (
+                f"{applied['refreshed']} refreshed, "
+                f"{applied['skipped']} skipped, {applied['failed']} failed"
+            )
+        )
+        title = (
+            f"Catalog work finished: {normalized_count} stored detections processed; "
+            f"{provider_result}"
+        )
+        if applied:
+            failures.extend(
+                f"{item['sdbid'] or 'system'} · {item['provider']}: "
+                f"{item['detail'] or item['status']}"
+                for item in applied["items"]
+                if item["action"] in {"failed", "missing"}
+            )
+        if normalization_failed:
+            failures.append(
+                f"{normalization_failed} stored detections could not be normalized."
+            )
+    elif value["missing_count"]:
+        title = f"{value['missing_count']} catalog requests missing"
+        if value["normalization_count"]:
+            title += (
+                f"; {value['normalization_count']} detections need normalization"
+            )
+    elif value["normalization_count"]:
+        title = (
+            f"{value['normalization_count']} stored detections need normalization"
+        )
+    else:
+        title = "Catalog coverage is complete"
+    warnings = failures
+    if value["missing_count"] and not value["update_available"]:
+        warnings.append(
+            "This server cannot query missing remote providers in offline mode."
+        )
+    return {
+        "title": title,
+        "facts": [
+            f"System targets: {len(coverage)}",
+            f"Expected providers per target: {expected_count}",
+            "A no-match result counts as completed coverage.",
+            "Stored candidate photometry is normalized without querying the provider again.",
+        ],
+        "changes": changes or ["No direct catalog provider requests are missing."],
+        "warnings": warnings,
+    }
+
+
 def _queue_filters(**values: str) -> dict[str, str]:
     return {
         key: str(value or "").strip()
@@ -1016,6 +1421,8 @@ def _target_page(
     navigation: dict[str, object] | None = None,
     display_name: str | None = None,
     simbad_main_ids: dict[str, str] | None = None,
+    catalog_coverage: list[dict[str, object]] | None = None,
+    catalog_update_available: bool = False,
 ) -> str:
     default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
@@ -1031,7 +1438,40 @@ def _target_page(
         target_sdbid = str(row["sdbid"])
         return simbad_main_ids.get(target_sdbid, target_sdbid)
 
+    def source_html(
+        label: object,
+        rows: list[dict[str, object]],
+    ) -> str:
+        for row in rows:
+            access_url = str(row.get("access_url") or "")
+            if access_url.startswith("https://"):
+                return (
+                    f"<a href='{_e(access_url)}' target='_blank' "
+                    f"rel='noopener'>{_e(label)}</a>"
+                )
+        return _e(label)
+
     requested_target_label = simbad_main_ids.get(sdbid, display_name or sdbid)
+    catalog_coverage = catalog_coverage or []
+    coverage_missing = sum(
+        len(row["missing_providers"]) for row in catalog_coverage
+    )
+    coverage_total = sum(
+        int(row["expected_count"]) for row in catalog_coverage
+    )
+    coverage_current = coverage_total - coverage_missing
+    coverage_normalization = len({
+        int(gap["detection_id"])
+        for row in catalog_coverage
+        for gap in row.get("normalization_gaps", [])
+    })
+    coverage_label = (
+        f"Catalog coverage {coverage_current}/{coverage_total}"
+        if coverage_total
+        else "Catalog coverage"
+    )
+    if coverage_normalization:
+        coverage_label += f" · {coverage_normalization} to normalize"
     detection_rows: dict[int, list[dict[str, object]]] = defaultdict(list)
     for measurement in graph["measurements"]:
         detection_rows[int(measurement["detection_id"])].append(measurement)
@@ -1041,6 +1481,10 @@ def _target_page(
         key=lambda item: (item[1][0]["provider"], item[1][0]["source_id"]),
     ):
         first = measurements[0]
+        source = source_html(
+            first.get("source_display_name") or first["source_id"],
+            list(first.get("provenance") or []),
+        )
         current_contributors = set.intersection(*(
             set(row["contributor_sdbids"]) for row in measurements
         ))
@@ -1060,6 +1504,17 @@ def _target_page(
             tuple(sorted(row["composite_scope_sdbids"])) for row in measurements
         }
         mixed_assignments = len(contributor_patterns) > 1 or len(scope_patterns) > 1
+        ordinary_default = (
+            not mixed_assignments
+            and len(current_contributors) == 1
+            and not current_scopes
+            and all(
+                len(row["assignments"]) == 1
+                and row["assignments"][0].get("derived") is True
+                and row["assignments"][0]["role"] == "contributor"
+                for row in measurements
+            )
+        )
         target_choices = "".join(
             f"<label><input type='checkbox' class='contributor' "
             f"value='{_e(row['sdbid'])}'"
@@ -1121,14 +1576,46 @@ def _target_page(
                 f"{'Include in fit' if excluded else 'Exclude from fit'}</button></div>"
             )
         bands = "".join(band_rows)
+        contributor_editor = (
+            f"<h4>Contributors</h4><div class='choices'>{target_choices}</div>"
+            f"{combined_system_control}"
+        )
+        if ordinary_default:
+            default_sdbid = next(iter(current_contributors))
+            default_target = next(
+                (row for row in targets if row["sdbid"] == default_sdbid),
+                None,
+            )
+            default_label = (
+                default_sdbid
+                if default_target is None
+                else target_label(default_target)
+            )
+            attribution = (
+                "<p class='assignment-default'>Photometry follows the accepted "
+                f"source association to <code>{_e(default_label)}</code>. "
+                "No separate assignment decision is needed.</p>"
+                "<details class='attribution-exception'><summary>Change attribution"
+                " (exception)</summary>"
+                f"{contributor_editor}"
+                "<button class='preview'>Preview attribution change</button>"
+                "</details>"
+                "<div class='drawer-actions'><button class='preview-eligibility' "
+                "type='button'>Preview include/exclude</button></div>"
+            )
+        else:
+            attribution = (
+                contributor_editor
+                + "<div class='drawer-actions'><button class='preview'>"
+                "Preview decision</button><button class='preview-eligibility' "
+                "type='button'>Preview include/exclude</button></div>"
+            )
         cards.append(f"""
 <section class="detection" data-detection="{detection_id}">
-  <h3>{_e(first['provider'])} · {_e(first.get('source_display_name') or first['source_id'])}</h3>
+  <h3>{_e(first['provider'])} · {source}</h3>
   <div class="bands">{bands}</div>
   {"<p class='warning'>Bands currently have different assignments. Their common assignments are selected below; preview carefully before applying.</p>" if mixed_assignments else ""}
-  <h4>Contributors</h4><div class="choices">{target_choices}</div>
-  {combined_system_control}
-  <div class="drawer-actions"><button class="preview">Preview decision</button><button class="preview-eligibility" type="button">Preview include/exclude</button></div>
+  {attribution}
 </section>""")
     readiness_text = (
         "No system-level blocker for this target."
@@ -1166,7 +1653,10 @@ def _target_page(
     <strong>{f'{_e(display_name)} · ' if display_name else ''}<code>{_e(sdbid)}</code></strong>
     <span class="muted">{_e(target['role'])}/{_e(target['state'])} · {readiness_text}</span>
     {navigation_html}
-    <button id="classify-target" class="{'needs-decision' if target['role'] == 'unspecified' else ''}" type="button">{'Decide target role' if target['role'] == 'unspecified' else 'Change target role'}</button>
+    <div class="header-actions">
+      <button id="catalog-coverage" class="{'needs-attention' if coverage_missing else ''}" type="button">{_e(coverage_label)}</button>
+      <button id="classify-target" class="{'needs-decision' if target['role'] == 'unspecified' else ''}" type="button">{'Decide target role' if target['role'] == 'unspecified' else 'Change target role'}</button>
+    </div>
   </header>
   <iframe id="sky-review" title="Sky and system review for {_e(sdbid)}" src="/target/{quote(sdbid)}/sky"></iframe>
   <aside id="assignment-drawer" class="assignment-drawer" hidden>
@@ -1184,6 +1674,15 @@ def _target_page(
       </div>
     </section>
     <section id="provider-result-preview-panel" class="preview-panel" hidden><h2>Provider result preview</h2><div id="provider-result-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-provider-result" disabled>Apply provider result action</button></section>
+    <section id="catalog-association-editor" class="detection" hidden>
+      <h3>Source association</h3>
+      <p id="catalog-association-context" class="muted"></p>
+      <div class="drawer-actions">
+        <button type="button" class="preview-catalog-association" data-action="accept">Accept for this target</button>
+        <button type="button" class="preview-catalog-association" data-action="reject">Reject for this target</button>
+      </div>
+    </section>
+    <section id="catalog-association-preview-panel" class="preview-panel" hidden><h2>Source association preview</h2><div id="catalog-association-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-catalog-association" disabled>Apply source association</button></section>
     <div class="preview-grid">
       <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
       <section class="preview-panel"><h2>Fit include/exclude preview</h2><p class="muted">Fit inclusion is independent of component ownership. Changes apply by origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band action, then preview.</div><button id="apply-eligibility" disabled>Apply include/exclude changes</button></section>
@@ -1206,8 +1705,14 @@ def _target_page(
     <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
     <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
   </dialog>
+  <dialog id="catalog-coverage-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Catalog coverage</h2><code>{_e(requested_target_label)}</code></div><button value="cancel" aria-label="Close catalog coverage dialog">×</button></form>
+    <p>Normalize stored catalog candidates and complete direct provider searches for system targets that do not yet have a current result. Existing results are skipped.</p>
+    <div class="dialog-actions"><button id="preview-catalog-coverage" type="button">Refresh preview</button><button id="apply-catalog-coverage" type="button" disabled>Complete catalog gaps</button></div>
+    <div id="catalog-coverage-preview" class="change-summary muted">Open this dialog to check direct provider coverage.</div>
+  </dialog>
 </main>
-<script>window.SDB_TARGET={json.dumps(sdbid)};window.SDB_TARGET_NAMES={json.dumps(simbad_main_ids, sort_keys=True)};window.SDB_RAW_ROW_DETECTIONS={json.dumps(raw_row_detections, sort_keys=True)};</script>
+<script>window.SDB_TARGET={json.dumps(sdbid)};window.SDB_TARGET_NAMES={json.dumps(simbad_main_ids, sort_keys=True)};window.SDB_RAW_ROW_DETECTIONS={json.dumps(raw_row_detections, sort_keys=True)};window.SDB_CATALOG_UPDATE_AVAILABLE={json.dumps(catalog_update_available)};</script>
 <script>{_WORKSPACE_JS}</script>"""
     return _page(f"SDB review: {sdbid}", body, body_class="live-review")
 
@@ -1260,7 +1765,7 @@ def _display_number(value: object) -> str:
 
 
 _CSS = """
-body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:18px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{overflow:hidden;text-overflow:ellipsis}.live-header button{margin-left:auto;white-space:nowrap}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header .queue-navigation+button{margin-left:0}.live-header button.needs-decision{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
+body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.assignment-default{background:#edf8f1;border-left:4px solid #3b8b5d;padding:9px}.attribution-exception{margin:10px 0}.attribution-exception summary{color:#475569;cursor:pointer}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:18px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{overflow:hidden;text-overflow:ellipsis}.header-actions{display:flex;gap:8px;align-items:center;margin-left:auto}.live-header button{white-space:nowrap}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header button.needs-decision,.live-header button.needs-attention{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
 .live-review{--drawer-width:min(420px,38vw)}.band-row .eligibility-state{grid-column:1}.band-row .eligibility-toggle{grid-column:2;grid-row:1/3;align-self:center;min-width:124px}.band-row .eligibility-state.pending{color:#9a5b00;font-weight:600}.combined-system-control{display:grid;gap:8px;margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #dce3ec;border-radius:6px}.scope-target-field[hidden],.preview-grid[hidden]{display:none}.scope-target-field select{box-sizing:border-box;width:100%;margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.preview-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;margin-top:12px}.preview-grid .preview-panel{margin-top:0}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
 """
 
@@ -1272,8 +1777,24 @@ let currentEligibilityPayload=null;
 let currentEligibilityPreview=null;
 let currentProviderPayload=null;
 let currentProviderPreview=null;
+let currentCatalogAssociationPayload=null;
+let currentCatalogAssociationPreview=null;
 const drawer=document.getElementById('assignment-drawer');
 function pointDisplayId(point){return point.source_display_name||point.source_id;}
+function escapeHtml(value){
+  return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;')
+    .replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+function selectedSourceHtml(point,suffix=''){
+  const label=escapeHtml(pointDisplayId(point));
+  const provenance=(point.provenance||[]).find(
+    value=>String(value.access_url||'').startsWith('https://')
+  );
+  const source=provenance
+    ? `<a href="${escapeHtml(provenance.access_url)}" target="_blank" rel="noopener">${label}</a>`
+    : label;
+  return `${escapeHtml(point.provider)} · ${source} · ${Number(point.separation_arcsec).toFixed(2)} arcsec${escapeHtml(suffix)}`;
+}
 function pointRunTarget(point){
   if(!point.run_target_sdbid) return '';
   return window.SDB_TARGET_NAMES[point.run_target_sdbid]||point.run_target_sdbid;
@@ -1287,9 +1808,12 @@ function closeDrawer(){
   currentEligibilityPreview=null;
   currentProviderPayload=null;
   currentProviderPreview=null;
+  currentCatalogAssociationPayload=null;
+  currentCatalogAssociationPreview=null;
   document.getElementById('apply').disabled=true;
   document.getElementById('apply-eligibility').disabled=true;
   document.getElementById('apply-provider-result').disabled=true;
+  document.getElementById('apply-catalog-association').disabled=true;
   document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
 }
 function showDetection(point,detectionId){
@@ -1300,11 +1824,13 @@ function showDetection(point,detectionId){
   document.querySelector('.preview-grid').hidden=false;
   document.getElementById('provider-result-editor').hidden=true;
   document.getElementById('provider-result-preview-panel').hidden=true;
+  document.getElementById('catalog-association-editor').hidden=true;
+  document.getElementById('catalog-association-preview-panel').hidden=true;
   document.getElementById('drawer-title').textContent='Photometry assignment';
   resetEligibilityControls(section);
   const combinedSystem=section.querySelector('.composite-scope');
   if(combinedSystem) updateCombinedSystemControl(combinedSystem);
-  document.getElementById('selected-source').textContent=`${point.provider} · ${pointDisplayId(point)} · ${Number(point.separation_arcsec).toFixed(2)} arcsec`;
+  document.getElementById('selected-source').innerHTML=selectedSourceHtml(point);
   document.getElementById('assignment-prompt').textContent='Review the selected catalog detection. All bands are selected by default.';
   document.getElementById('preview').textContent='Choose assignments, then preview.';
   document.getElementById('eligibility-preview').textContent='Choose a band action, then preview.';
@@ -1316,6 +1842,8 @@ function showDetection(point,detectionId){
   currentEligibilityPreview=null;
   currentProviderPayload=null;
   currentProviderPreview=null;
+  currentCatalogAssociationPayload=null;
+  currentCatalogAssociationPreview=null;
   drawer.hidden=false;
   document.body.classList.add('drawer-open');
 }
@@ -1327,9 +1855,13 @@ function showProviderReview(point){
   editor.hidden=false;
   editor.classList.add('active');
   document.getElementById('provider-result-preview-panel').hidden=false;
+  document.getElementById('catalog-association-editor').hidden=true;
+  document.getElementById('catalog-association-preview-panel').hidden=true;
   document.getElementById('drawer-title').textContent='Provider result review';
   const runTarget=pointRunTarget(point);
-  document.getElementById('selected-source').textContent=`${point.provider} · ${pointDisplayId(point)} · ${Number(point.separation_arcsec).toFixed(2)} arcsec${runTarget?` · catalog query for ${runTarget}`:''}`;
+  document.getElementById('selected-source').innerHTML=selectedSourceHtml(
+    point,runTarget?` · catalog query for ${runTarget}`:''
+  );
   document.getElementById('assignment-prompt').textContent='Review this catalog provider result.';
   document.getElementById('provider-result-context').textContent=`${point.provider} · ${point.status}${runTarget?` · result belongs to the catalog run for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
   for(const button of editor.querySelectorAll('.preview-provider-result')){
@@ -1345,6 +1877,42 @@ function showProviderReview(point){
   drawer.hidden=false;
   document.body.classList.add('drawer-open');
 }
+function showCatalogAssociation(point,detectionId){
+  document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
+  const hasPhotometry=detectionId!=null && point.status==='accepted';
+  document.getElementById('detection-editors').hidden=!hasPhotometry;
+  document.querySelector('.preview-grid').hidden=!hasPhotometry;
+  if(hasPhotometry){
+    const section=document.querySelector(`.detection[data-detection="${detectionId}"]`);
+    if(section){
+      section.classList.add('active');
+      resetEligibilityControls(section);
+    }
+  }
+  document.getElementById('provider-result-editor').hidden=true;
+  document.getElementById('provider-result-preview-panel').hidden=true;
+  const editor=document.getElementById('catalog-association-editor');
+  editor.hidden=false;
+  editor.classList.add('active');
+  document.getElementById('catalog-association-preview-panel').hidden=false;
+  document.getElementById('drawer-title').textContent=hasPhotometry?'Source association and photometry':'Catalog source association';
+  const runTarget=pointRunTarget(point);
+  document.getElementById('selected-source').innerHTML=selectedSourceHtml(point);
+  document.getElementById('assignment-prompt').textContent=hasPhotometry
+    ? 'This source is accepted for the current target. Its photometry can be assigned below.'
+    : 'Decide whether this discovered source belongs to the current target.';
+  document.getElementById('catalog-association-context').textContent=`${point.provider} · ${point.status}${runTarget?` · discovered by the catalog query for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
+  for(const button of editor.querySelectorAll('.preview-catalog-association')){
+    button.dataset.detectionId=point.detection_id;
+    button.dataset.rawRowId=point.raw_row_id;
+  }
+  document.getElementById('catalog-association-preview').textContent='Choose an action, then preview.';
+  document.getElementById('apply-catalog-association').disabled=true;
+  currentCatalogAssociationPayload=null;
+  currentCatalogAssociationPreview=null;
+  drawer.hidden=false;
+  document.body.classList.add('drawer-open');
+}
 window.addEventListener('message',event=>{
   if(event.origin!==window.location.origin) return;
   if(event.data?.type==='sdb-review-relatives'){
@@ -1354,11 +1922,15 @@ window.addEventListener('message',event=>{
   if(event.data?.type!=='sdb-review-selection') return;
   const point=event.data.point;
   if(!point){closeDrawer();return;}
+  const detectionId=point.raw_row_id==null?null:window.SDB_RAW_ROW_DETECTIONS[String(point.raw_row_id)];
+  if(point.kind==='catalog_association'){
+    showCatalogAssociation(point,detectionId);
+    return;
+  }
   if(point.kind==='catalog'&&(point.status==='ambiguous'||['transient_failure','permanent_failure'].includes(point.status))){
     showProviderReview(point);
     return;
   }
-  const detectionId=point.raw_row_id==null?null:window.SDB_RAW_ROW_DETECTIONS[String(point.raw_row_id)];
   if(detectionId==null){closeDrawer();return;}
   showDetection(point,detectionId);
 });
@@ -1519,6 +2091,24 @@ document.querySelectorAll('.preview-provider-result').forEach(button=>button.add
     document.getElementById('apply-provider-result').disabled=true;
   }
 }));
+document.querySelectorAll('.preview-catalog-association').forEach(button=>button.addEventListener('click',async()=>{
+  currentCatalogAssociationPayload={
+    target:window.SDB_TARGET,
+    action:button.dataset.action,
+    detection_id:Number(button.dataset.detectionId),
+    raw_row_id:Number(button.dataset.rawRowId),
+  };
+  try{
+    currentCatalogAssociationPreview=await request('/api/catalog-association/preview',currentCatalogAssociationPayload);
+    renderHumanSummary(document.getElementById('catalog-association-preview'),currentCatalogAssociationPreview);
+    prefillReason('reason',currentCatalogAssociationPreview);
+    document.getElementById('apply-catalog-association').disabled=!currentCatalogAssociationPreview.has_changes;
+  }catch(error){
+    currentCatalogAssociationPreview=null;
+    renderRequestError(document.getElementById('catalog-association-preview'),error);
+    document.getElementById('apply-catalog-association').disabled=true;
+  }
+}));
 document.getElementById('apply').addEventListener('click',async()=>{
   if(!currentPayload||!currentPreview) return;
   const actor=document.getElementById('actor').value;
@@ -1560,6 +2150,20 @@ document.getElementById('apply-provider-result').addEventListener('click',async(
     document.getElementById('apply-provider-result').disabled=true;
     setTimeout(()=>location.reload(),700);
   }catch(error){renderRequestError(document.getElementById('provider-result-preview'),error);}
+});
+document.getElementById('apply-catalog-association').addEventListener('click',async()=>{
+  if(!currentCatalogAssociationPayload||!currentCatalogAssociationPreview)return;
+  const actor=document.getElementById('actor').value;
+  const reason=document.getElementById('reason').value;
+  if(!actor||!reason){alert('Actor and reason are required.');return;}
+  if(!confirm('Apply the displayed catalog source association?'))return;
+  const payload={...currentCatalogAssociationPayload,actor,reason,state_token:currentCatalogAssociationPreview.state_token};
+  try{
+    const value=await request('/api/catalog-association/apply',payload);
+    renderHumanSummary(document.getElementById('catalog-association-preview'),value);
+    document.getElementById('apply-catalog-association').disabled=true;
+    setTimeout(()=>location.reload(),700);
+  }catch(error){renderRequestError(document.getElementById('catalog-association-preview'),error);}
 });
 const lifecycleDialog=document.getElementById('lifecycle-dialog');
 let lifecyclePreview=null;
@@ -1634,5 +2238,48 @@ document.getElementById('apply-relatives').addEventListener('click',async()=>{
     setTimeout(()=>location.reload(),1000);
   }catch(error){renderRequestError(document.getElementById('relatives-preview'),error);button.disabled=false;}
   finally{button.textContent='Import and reconcile stellar relatives';}
+});
+const catalogCoverageDialog=document.getElementById('catalog-coverage-dialog');
+let catalogCoveragePreview=null;
+async function refreshCatalogCoveragePreview(){
+  const element=document.getElementById('catalog-coverage-preview');
+  const applyButton=document.getElementById('apply-catalog-coverage');
+  element.classList.add('muted');
+  element.textContent='Checking direct provider coverage…';
+  applyButton.disabled=true;
+  try{
+    catalogCoveragePreview=await request('/api/catalog-coverage/preview',{target:window.SDB_TARGET});
+    renderHumanSummary(element,catalogCoveragePreview);
+    applyButton.disabled=!catalogCoveragePreview.has_changes||!catalogCoveragePreview.action_available;
+  }catch(error){
+    catalogCoveragePreview=null;
+    renderRequestError(element,error);
+  }
+}
+document.getElementById('catalog-coverage').addEventListener('click',()=>{
+  if(!catalogCoverageDialog.open)catalogCoverageDialog.showModal();
+  refreshCatalogCoveragePreview();
+});
+document.getElementById('preview-catalog-coverage').addEventListener('click',refreshCatalogCoveragePreview);
+document.getElementById('apply-catalog-coverage').addEventListener('click',async()=>{
+  if(!catalogCoveragePreview)return;
+  if(!confirm('Complete the displayed catalog normalization and provider gaps?'))return;
+  const button=document.getElementById('apply-catalog-coverage');
+  button.disabled=true;
+  button.textContent='Updating…';
+  try{
+    const value=await request('/api/catalog-coverage/apply',{
+      target:window.SDB_TARGET,
+      state_token:catalogCoveragePreview.state_token,
+    });
+    catalogCoveragePreview=value;
+    renderHumanSummary(document.getElementById('catalog-coverage-preview'),value);
+    setTimeout(()=>location.reload(),1000);
+  }catch(error){
+    renderRequestError(document.getElementById('catalog-coverage-preview'),error);
+    button.disabled=false;
+  }finally{
+    button.textContent='Complete catalog gaps';
+  }
 });
 """

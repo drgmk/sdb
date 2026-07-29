@@ -9,6 +9,104 @@ Near-term operator-workflow follow-ups from the parity rehearsal:
 - Repeat the parity rehearsal with the completed review-UI sequence and
   summary-first proposal/reference workflows.
 
+## Catalog association convergence
+
+Import and provider-query order must not determine which component can see or
+claim an already-ingested provider detection.
+
+1. **Implemented foundation:** derive a target–detection candidate graph from
+   canonical catalog detections and current query encounters.
+   - Re-evaluate position and catalog identifiers against every target in the
+     review neighbourhood.
+   - Keep query-relative `review_only`, score, and separation as encounter
+     provenance rather than intrinsic detection state.
+   - Expose strong cross-candidates on both the discovering target and the
+     likely component page without changing accepted catalog state.
+   - Do not infer component identity from the centroids of system-scale
+     providers such as IRAS.
+   - Test parent-first and component-first imports for equivalent derived
+     associations.
+
+2. **Implemented:** make provider coverage converge after target/system
+   changes.
+   - Derive direct provider coverage and missing/failed status for each
+     explicit system target; a cross-target encounter remains evidence, not
+     proof of target-local query coverage.
+   - Preview and complete configured gaps through one system-level Catalog
+     coverage action. The existing updater skips current target/provider
+     results.
+   - Default configured catalog coverage to all registered catalog providers,
+     with a `[catalog] providers` override.
+   - Reconcile known detections immediately, before any provider request
+     finishes.
+
+3. **Implemented:** separate provider measurements from their first accepted
+   encounter.
+   - Normalize usable measurements for every canonical detection, including
+     ambiguous and review-neighbour rows, rather than only the automatically
+     accepted target-local row.
+   - Keep current photometry gated by an accepted current encounter; merely
+     normalizing a detection does not assign or export it.
+   - Treat the canonical measurement's run, target, and raw-row links as
+     immutable first-seen provenance, separately from current target
+     encounters and explicit measurement ownership.
+   - Track detection normalization state and locally backfill old stored
+     payloads through Catalog coverage without repeating provider queries.
+   - Test equivalent normalized values and associations under reversed
+     provider-query order.
+
+4. **Implemented:** move catalog accept/reject decisions from target-local run rows
+   to audited target–detection associations.
+   - Keep discovery/query provenance immutable.
+   - Keep source identity association distinct from contributor/composite
+     photometry assignment.
+   - Add provider-refresh permutation tests alongside the import-order tests.
+   - Derive the current association from the latest append-only action. An
+     accepted detection's canonical measurements become available to the
+     target without copying its discovery run; a rejection suppresses that
+     target/detection pairing.
+   - Preview and apply the decision from a plotted cross-candidate, with an
+   editable suggested reason and accept/reject controls in the review drawer.
+
+5. **Implemented foundation:** make an unambiguous source association the
+   ordinary photometry attribution.
+   - With no explicit measurement assignment, one accepted active physical
+     target derives a contributor and one accepted composite target derives
+     composite scope.
+   - Multiple accepted targets remain unassigned for review. Stored
+     measurement assignments override the complete derived set for that band,
+     preserving shared/composite and rare mixed-band exceptions.
+   - Use the effective projection in fitting groups, readiness/dashboard
+     state, assignment proposals, system context, and the review decision
+     preview without materializing redundant rows.
+   - In the drawer, show the ordinary derived state directly and collapse
+     contributor controls under `Change attribution (exception)`.
+   - Follow-up: migrate or retire redundant automatic assignment rows only
+     after parity assignments are complete and the effective projection has
+     been validated in a fresh rehearsal.
+   - **Implemented:** decode II/168 `m_LID` component evidence. Numeric codes
+     map to explicit ordinal system members with corroboration; `D` can
+     pre-fill A+B only for a uniquely identified simple binary, and otherwise
+     remains composite scope for review. Provider scope is no longer changed
+     merely because another target query encountered the same detection.
+   - **Implemented:** decode TDSC `m_TDSC` as component identity. Prefer
+     component-specific TYC or suffixed HD/WDS evidence over unsuffixed
+     multiple-system identifiers, restore component scope after historical
+     encounter-order overwrites, and label distinct component detections in
+     the review matrix.
+   - **Implemented foundation:** retain detection-level catalogue/table
+     provenance, including the native identifier column/value used to form a
+     row-filtered VizieR link from each displayed source name. Snapshot
+     fetches materialize the upstream ReadMe and table manifest beside their
+     SQLite database. Tycho-2 uses only `tyc2` and `suppl_1`; the suspect
+     `suppl_2` is documentation-only.
+   - **Implemented:** re-normalize existing local snapshot detections to
+     backfill exact table provenance where the old payload did not retain it.
+     Missing provenance is now a Catalog coverage maintenance gap. Export
+     shared-source safety, readiness counts, fitting order, and the review
+     matrix use canonical detection identity rather than provider/source
+     display labels.
+
 ## Review UI implementation sequence
 
 1. **Implemented:** Correct and condense the SIMBAD system-context projection.

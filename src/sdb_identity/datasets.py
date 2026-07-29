@@ -321,6 +321,8 @@ class CuratedDatasetService:
                     dec_deg=target.dec2000_deg,
                     epoch=2000.0,
                     payload_json=record.payload_json,
+                    normalization_status="completed",
+                    normalized_at=datetime.now(timezone.utc),
                 )
                 session.add(detection)
                 session.flush()

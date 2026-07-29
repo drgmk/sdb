@@ -160,10 +160,16 @@ def test_vizier_annotation_marks_review_only_and_scoring_ignores_it():
     )
 
     association = annotated.payload["_sdb_association"]
+    provenance = annotated.provenance[0]
     assert adapter.query_radius(query_context) == 10.0
     assert association["acceptance_radius_arcsec"] == adapter.radius_arcsec
     assert association["candidate_separation_arcsec"] > adapter.radius_arcsec
     assert association["review_only"] is True
+    assert provenance.identifier_column == "id"
+    assert provenance.identifier_value == "source-1"
+    assert provenance.access_url.endswith(
+        "fake%2Frelease&id===source-1"
+    )
     assert adapter.score_candidate(
         query_context, annotated, association["candidate_separation_arcsec"]
     ) == 0.0
