@@ -19,13 +19,13 @@ from .catalog_results import (
 )
 
 from .astrometry import propagate_to_epoch
-from .hierarchy import (
-    HierarchyService,
-    _GRAPH_EDGE_STATUSES,
-    _graph_edge_row,
-    _latest_graph_overrides,
-)
+from .hierarchy import HierarchyService
 from .hierarchy_geometry import hierarchy_record_positions
+from .hierarchy_graph import (
+    GRAPH_EDGE_STATUSES,
+    edge_row,
+    latest_overrides,
+)
 from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
 from .identity_results import effective_identity_candidate_ids
 from .models import (
@@ -2223,7 +2223,7 @@ def _hierarchy_points(
         graph_edges = tuple(session.scalars(
             select(StructuralEdge)
             .where(StructuralEdge.record_id.in_(record_ids))
-            .where(StructuralEdge.status.in_(_GRAPH_EDGE_STATUSES))
+            .where(StructuralEdge.status.in_(GRAPH_EDGE_STATUSES))
             .order_by(
                 StructuralEdge.source,
                 StructuralEdge.native_id,
@@ -2232,11 +2232,11 @@ def _hierarchy_points(
                 StructuralEdge.id,
             )
         ))
-        graph_overrides = _latest_graph_overrides(session, list(graph_edges))
+        graph_overrides = latest_overrides(session, list(graph_edges))
         for edge in graph_edges:
             if edge.record_id is not None:
                 graph_edges_by_record.setdefault(edge.record_id, []).append(
-                    _graph_edge_row(edge, graph_overrides.get(edge.id))
+                    edge_row(edge, graph_overrides.get(edge.id))
                 )
     points: list[SkyPoint] = []
     segments: list[SkySegment] = []
