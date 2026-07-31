@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from sdb_identity.batch import BatchService
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models import ImportItem, ImportJob, ImportRun, Target
 from sdb_identity.providers import ProviderError
@@ -30,7 +30,7 @@ def factories(session_factory, *, metadata_provider=None):
             session_factory,
             metadata_provider or FakeMetadataProvider(MetadataQueryResult("no_match")),
         ),
-        "catalog_factory": lambda: CatalogService(
+        "catalog_factory": lambda: CatalogAcquisitionService(
             session_factory,
             {"2mass": FakeCatalog([])},
         ),
@@ -86,7 +86,7 @@ def test_identity_stage_batches_simbad_name_resolution(session_factory, tmp_path
             gaia=FakeGaia(),
         ),
         metadata_factory=lambda: MetadataService(session_factory, None),
-        catalog_factory=lambda: CatalogService(session_factory, {}),
+        catalog_factory=lambda: CatalogAcquisitionService(session_factory, {}),
     )
     created = service.create(path)
     summary = service.execute(created.run_id)
@@ -190,7 +190,7 @@ def test_provider_client_construction_network_error_is_retryable(session_factory
         session_factory,
         identity_factory=broken_factory,
         metadata_factory=lambda: MetadataService(session_factory, None),
-        catalog_factory=lambda: CatalogService(session_factory, {}),
+        catalog_factory=lambda: CatalogAcquisitionService(session_factory, {}),
     )
     run = service.create(path)
     summary = service.execute(run.run_id)
@@ -200,7 +200,7 @@ def test_provider_client_construction_network_error_is_retryable(session_factory
 def test_allwise_is_supported_as_a_batch_stage(session_factory, tmp_path):
     path = write_targets(tmp_path / "targets.csv", "ra,dec\n10,-20\n")
     base = factories(session_factory)
-    base["catalog_factory"] = lambda: CatalogService(
+    base["catalog_factory"] = lambda: CatalogAcquisitionService(
         session_factory,
         {"allwise": FakeCatalog([], name="allwise", release="fake-allwise", query_epoch=2010.3)},
     )
@@ -214,7 +214,7 @@ def test_allwise_is_supported_as_a_batch_stage(session_factory, tmp_path):
 def test_gaia_photometry_is_supported_as_a_batch_stage(session_factory, tmp_path):
     path = write_targets(tmp_path / "targets.csv", "ra,dec\n10,-20\n")
     base = factories(session_factory)
-    base["catalog_factory"] = lambda: CatalogService(
+    base["catalog_factory"] = lambda: CatalogAcquisitionService(
         session_factory,
         {
             "gaia_dr3": FakeCatalog(
@@ -238,7 +238,7 @@ def test_bulk_catalog_stage_uses_refresh_many(session_factory, tmp_path):
         query_epoch=2016.0,
     )
     base = factories(session_factory)
-    base["catalog_factory"] = lambda: CatalogService(
+    base["catalog_factory"] = lambda: CatalogAcquisitionService(
         session_factory,
         {"gaia_dr3": adapter},
     )
@@ -254,7 +254,7 @@ def test_bulk_catalog_stage_uses_refresh_many(session_factory, tmp_path):
 def test_tycho2_is_supported_as_a_batch_stage(session_factory, tmp_path):
     path = write_targets(tmp_path / "targets.csv", "ra,dec\n10,-20\n")
     base = factories(session_factory)
-    base["catalog_factory"] = lambda: CatalogService(
+    base["catalog_factory"] = lambda: CatalogAcquisitionService(
         session_factory,
         {
             "tycho2": FakeCatalog(

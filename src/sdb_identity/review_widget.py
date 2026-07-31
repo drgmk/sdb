@@ -24,8 +24,8 @@ from .hierarchy import (
     _GRAPH_EDGE_STATUSES,
     _graph_edge_row,
     _latest_graph_overrides,
-    hierarchy_record_positions,
 )
+from .hierarchy_geometry import hierarchy_record_positions
 from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
 from .identity_results import effective_identity_candidate_ids
 from .models import (

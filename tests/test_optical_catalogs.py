@@ -10,7 +10,7 @@ from sdb_identity.adapters.reference import (
     TdscSnapshotAdapter,
 )
 from sdb_identity.adapters.tycho2 import Tycho2Adapter
-from sdb_identity.catalogs import CatalogQueryContext
+from sdb_identity.catalog_types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 from sdb_identity.reference import (
     HIP2_CATALOG,

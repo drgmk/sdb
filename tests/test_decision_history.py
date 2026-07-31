@@ -13,7 +13,7 @@ from sdb_identity.models import (
     MeasurementEligibilityAction,
     NormalizedMeasurement,
 )
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.target_lifecycle import set_target_lifecycle
@@ -37,7 +37,7 @@ def test_system_history_is_assembled_from_domain_actions(session_factory):
     samples = SampleService(session_factory)
     samples.create("history")
     samples.add("history", primary.sdbid, actor="reviewer")
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog(
             [candidate(
                 "history-wise",

@@ -670,9 +670,9 @@ def _provider_result_from_payload(
     actor = _optional_text(payload.get("actor"))
     reason = _optional_text(payload.get("reason"))
     if action == "reviewed_no_match":
-        from .catalogs import CatalogService
+        from .catalog_decisions import CatalogDecisionService
 
-        result = CatalogService(session_factory, {}).override_no_match(
+        result = CatalogDecisionService(session_factory).reviewed_no_match(
             run_id, actor=actor, reason=reason,
         )
     else:
@@ -682,7 +682,7 @@ def _provider_result_from_payload(
             )
         service = catalog_service_factory(provider, action)
         if action == "accept_candidate":
-            result = service.override_candidate(
+            result = service.accept_candidate(
                 raw_row_id, actor=actor, reason=reason,
             )
         else:

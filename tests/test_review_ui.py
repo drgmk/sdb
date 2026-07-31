@@ -6,11 +6,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from sdb_identity.adapters.allwise import AllWiseAdapter
-from sdb_identity.catalogs import (
-    CatalogCandidate,
-    CatalogService,
-    MeasurementValue,
-)
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
+from sdb_identity.catalog_decisions import CatalogDecisionService
+from sdb_identity.catalog_normalization import CatalogNormalizationService
 from sdb_identity.models import (
     CatalogDetection,
     CatalogResultDecision,
@@ -289,7 +288,7 @@ def test_review_ui_applies_catalog_target_association_without_provider_query(
     component = identity.add(
         AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("parent", ra=10.0, dec=0.0),
             candidate(
@@ -350,7 +349,7 @@ def test_review_ui_places_source_association_before_photometry_controls(
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=10.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("source", ra=10.0, dec=0.0),
         ]),
@@ -372,7 +371,7 @@ def test_review_ui_assignment_drawer_uses_snapshot_catalog_display_id(
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=10, dec_deg=-20)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "hip2": FakeCatalog(
             [CatalogCandidate(
                 source_id="36948",
@@ -593,7 +592,10 @@ def test_review_ui_previews_catalog_accept_no_match_and_retry(session_factory):
     adapter.query = lambda context: [
         adapter.parse_row(row) for row in rows
     ]
-    service = CatalogService(session_factory, {"allwise": adapter})
+    service = CatalogAcquisitionService(session_factory, {"allwise": adapter})
+    decisions = CatalogDecisionService(
+        session_factory, {"allwise": adapter}, acquisition=service,
+    )
     ambiguous = service.refresh(target.sdbid, "allwise")
     with session_factory() as session:
         candidate = session.scalar(
@@ -604,7 +606,7 @@ def test_review_ui_previews_catalog_accept_no_match_and_retry(session_factory):
 
     client = TestClient(create_review_app(
         session_factory,
-        catalog_service_factory=lambda provider, action: service,
+        catalog_service_factory=lambda provider, action: decisions,
     ))
     workspace = client.get(f"/target/{target.sdbid}")
     assert "Preview accept candidate" in workspace.text
@@ -863,7 +865,7 @@ def test_review_ui_catalog_coverage_normalizes_stored_candidates_offline(
         ]
 
     adapter.query = query
-    service = CatalogService(session_factory, {"allwise": adapter})
+    service = CatalogAcquisitionService(session_factory, {"allwise": adapter})
     assert service.refresh(target.sdbid, "allwise").status == "ambiguous"
     with session_factory.begin() as session:
         session.execute(delete(NormalizedMeasurement))
@@ -874,7 +876,9 @@ def test_review_ui_catalog_coverage_normalizes_stored_candidates_offline(
     client = TestClient(create_review_app(
         session_factory,
         catalog_coverage_providers=("allwise",),
-        catalog_service_factory=lambda provider, action: service,
+        catalog_service_factory=lambda provider, action: CatalogNormalizationService(
+            session_factory, {"allwise": adapter},
+        ),
     ))
     preview = client.post(
         "/api/catalog-coverage/preview",

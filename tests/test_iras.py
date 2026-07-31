@@ -4,7 +4,8 @@ from astropy.table import Table
 import pytest
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.export import export_ipac
 from sdb_identity.models import IrasBandSelection, IrasDetectionFamily, NormalizedMeasurement
@@ -50,8 +51,8 @@ def test_iras_family_selects_detection_quality_then_psc_and_export_retains_alter
         [_candidate("F00000+0000", "iras_fsc", quality="3")],
         name="iras_fsc",
     )
-    CatalogService(session_factory, {"iras_psc": psc}).refresh(target.sdbid, "iras_psc")
-    CatalogService(session_factory, {"iras_fsc": fsc}).refresh(target.sdbid, "iras_fsc")
+    CatalogAcquisitionService(session_factory, {"iras_psc": psc}).refresh(target.sdbid, "iras_psc")
+    CatalogAcquisitionService(session_factory, {"iras_fsc": fsc}).refresh(target.sdbid, "iras_fsc")
 
     with session_factory() as session:
         family = session.scalar(select(IrasDetectionFamily))
@@ -79,8 +80,8 @@ def test_iras_family_prefers_detection_over_higher_catalog_precedence(session_fa
         [_candidate("F00000+0000", "iras_fsc", quality="2")],
         name="iras_fsc",
     )
-    CatalogService(session_factory, {"iras_psc": psc}).refresh(target.sdbid, "iras_psc")
-    CatalogService(session_factory, {"iras_fsc": fsc}).refresh(target.sdbid, "iras_fsc")
+    CatalogAcquisitionService(session_factory, {"iras_psc": psc}).refresh(target.sdbid, "iras_psc")
+    CatalogAcquisitionService(session_factory, {"iras_fsc": fsc}).refresh(target.sdbid, "iras_fsc")
     with session_factory() as session:
         selection = session.scalar(select(IrasBandSelection))
         assert selection is not None
@@ -96,10 +97,10 @@ def test_iras_family_does_not_merge_ellipse_inconsistent_rows(session_factory):
     fsc_candidate = _candidate("F00000+0000", "iras_fsc", ra=10 + offset)
     psc_candidate.payload["Major"] = psc_candidate.payload["Minor"] = 0.5
     fsc_candidate.payload["Major"] = fsc_candidate.payload["Minor"] = 0.5
-    CatalogService(
+    CatalogAcquisitionService(
         session_factory, {"iras_psc": FakeCatalog([psc_candidate], name="iras_psc")}
     ).refresh(target.sdbid, "iras_psc")
-    CatalogService(
+    CatalogAcquisitionService(
         session_factory, {"iras_fsc": FakeCatalog([fsc_candidate], name="iras_fsc")}
     ).refresh(target.sdbid, "iras_fsc")
     with session_factory() as session:
@@ -112,12 +113,12 @@ def test_iras_family_review_cli_shows_sources_and_band_decisions(
     session_factory, db_path, capsys
 ):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=0))
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "iras_psc": FakeCatalog(
             [_candidate("00000+0000", "iras_psc")], name="iras_psc"
         )
     }).refresh(target.sdbid, "iras_psc")
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "iras_fsc": FakeCatalog(
             [_candidate("F00000+0000", "iras_fsc")], name="iras_fsc"
         )

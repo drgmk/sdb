@@ -6,7 +6,7 @@ import math
 import pytest
 
 from sdb_identity.catalog_policy import catalog_source_display_name
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.catalog_types import (
     CatalogAttributeValue,
     CatalogCandidate,
@@ -74,14 +74,14 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
     target = IdentityService(session_factory, gaia=identity_gaia).add(
         AddRequest(ra_deg=10, dec_deg=-20)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("2mass-a", ra=10.00010, dec=-20, measurements=[measurement()]),
             candidate("2mass-b", ra=10.00011, dec=-20, measurements=[measurement()]),
         ]),
         "empty": FakeCatalog([], name="empty", release="fake-empty"),
     }).refresh(target.sdbid, "2mass")
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "empty": FakeCatalog([], name="empty", release="fake-empty"),
     }).refresh(target.sdbid, "empty")
 
@@ -111,7 +111,7 @@ def test_review_sky_view_projects_reconciled_catalog_candidate_from_nearby_targe
     component_target = identity.add(
         AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
     )
-    result = CatalogService(session_factory, {
+    result = CatalogAcquisitionService(session_factory, {
         "tycho2": FakeCatalog(
             [candidate("9134-1714-2", ra=10.0 + 4.1 / 3600.0, dec=0.0)],
             name="tycho2",
@@ -294,7 +294,7 @@ def test_review_sky_view_uses_simbad_metadata_pm_when_canonical_pm_is_missing(
             )
         )
         session.commit()
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "old": FakeCatalog([
             CatalogCandidate(
                 source_id="old-a",
@@ -348,7 +348,7 @@ def test_review_sky_html_has_annotation_toggle_and_embedded_data(session_factory
 
 def test_review_sky_html_can_show_selected_photometry_beams(session_factory):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "beamcat": FakeCatalog([
             candidate(
                 "beam-source",
@@ -647,7 +647,7 @@ def test_review_sky_view_displays_catalog_positions_at_epoch_2000_when_target_pm
     target = IdentityService(session_factory, gaia=moving_gaia).add(
         AddRequest(ra_deg=10, dec_deg=-20)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "old": FakeCatalog([
             CatalogCandidate(
                 source_id="old-a",
@@ -676,7 +676,7 @@ def test_review_sky_view_displays_catalog_positions_at_epoch_2000_when_target_pm
 
 def test_review_sky_view_includes_photometry_for_accepted_catalog_row(session_factory):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             CatalogCandidate(
                 source_id="2mass-a",
@@ -723,7 +723,7 @@ def test_review_sky_view_uses_snapshot_catalog_identifier_as_display_id(
         resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "hip2": FakeCatalog(
             [CatalogCandidate(
                 source_id="36948",
@@ -754,7 +754,7 @@ def test_review_sky_view_uses_snapshot_catalog_identifier_as_display_id(
 
 def test_review_sky_view_marks_catalog_review_neighbour_as_muted_context(session_factory):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog([
             CatalogCandidate(
                 source_id="wise-neighbour",
@@ -804,7 +804,7 @@ def test_allwise_apparent_motion_is_not_used_as_proper_motion(session_factory):
         solution.pm_ra_cosdec_masyr = 120.0
         solution.pm_dec_masyr = -45.0
         solution.proper_motion_available = True
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog([
             CatalogCandidate(
                 source_id="WISEA test",

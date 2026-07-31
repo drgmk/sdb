@@ -14,7 +14,7 @@ from typing import Callable, Iterable
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs import CatalogService
+from .catalog_acquisition import CatalogAcquisitionService
 from .ingestion import TargetIngestionPlan
 from .metadata import MetadataService
 from .models import ImportItem, ImportJob, ImportRun
@@ -54,7 +54,7 @@ class BatchService:
         *,
         identity_factory: Callable[[], IdentityService],
         metadata_factory: Callable[[], MetadataService],
-        catalog_factory: Callable[[], CatalogService],
+        catalog_factory: Callable[[], CatalogAcquisitionService],
         workers: dict[str, int] | None = None,
         reporter: ProgressReporter | None = None,
     ):

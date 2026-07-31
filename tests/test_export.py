@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from astropy.table import Table
 
-from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
 from sdb_identity.export import export_ipac
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.service import AddRequest, IdentityService
@@ -17,7 +18,7 @@ def test_export_is_sdf_compatible(session_factory, tmp_path):
         measurement("2MH", 6.9, 0.03, excluded=True),
         measurement("2MKS", 6.8, 0.04),
     ])])
-    CatalogService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
+    CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     MetadataService(
         session_factory,
         FakeMetadataProvider(MetadataQueryResult("match", (snapshot(),))),
@@ -44,7 +45,7 @@ def test_export_is_sdf_compatible(session_factory, tmp_path):
 
 def test_export_uses_only_current_successful_run(session_factory, tmp_path):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    service = CatalogService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement(value=7.1)])])})
+    service = CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement(value=7.1)])])})
     service.refresh(target.sdbid, "2mass")
     service.adapters["2mass"] = FakeCatalog([candidate(measurements=[measurement(value=7.2)])])
     service.refresh(target.sdbid, "2mass")
@@ -58,7 +59,7 @@ def test_shared_catalog_source_is_excluded_from_component_exports(session_factor
     first = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     second = IdentityService(session_factory).add(AddRequest(ra_deg=10.00055, dec_deg=-20))
     adapter = FakeCatalog([candidate(measurements=[measurement("IRAS12", 1.2, 0.1)])])
-    service = CatalogService(session_factory, {"iras_psc": adapter})
+    service = CatalogAcquisitionService(session_factory, {"iras_psc": adapter})
     service.refresh(first.sdbid, "iras_psc")
     service.refresh(second.sdbid, "iras_psc")
 
@@ -84,10 +85,10 @@ def test_same_display_source_in_distinct_releases_is_not_shared(
         name="iras_psc",
         release="release-two",
     )
-    CatalogService(
+    CatalogAcquisitionService(
         session_factory, {"iras_psc": first_adapter}
     ).refresh(first.sdbid, "iras_psc")
-    CatalogService(
+    CatalogAcquisitionService(
         session_factory, {"iras_psc": second_adapter}
     ).refresh(second.sdbid, "iras_psc")
 
@@ -121,10 +122,10 @@ def test_tdsc_component_photometry_takes_precedence_over_tycho2(session_factory,
         release="I/276/catalog",
         query_epoch=1991.25,
     )
-    CatalogService(session_factory, {"tycho2": tycho}).refresh(
+    CatalogAcquisitionService(session_factory, {"tycho2": tycho}).refresh(
         target.sdbid, "tycho2"
     )
-    CatalogService(session_factory, {"tdsc": tdsc}).refresh(target.sdbid, "tdsc")
+    CatalogAcquisitionService(session_factory, {"tdsc": tdsc}).refresh(target.sdbid, "tdsc")
     output = export_ipac(session_factory, target.sdbid, tmp_path / "optical.txt")
     table = Table.read(output, format="ascii.ipac")
     rows = {(row["Band"], row["Phot"]): row for row in table}

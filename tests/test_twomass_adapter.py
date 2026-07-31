@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from sdb_identity.catalogs import CatalogQueryContext
+from sdb_identity.catalog_types import CatalogQueryContext
 from sdb_identity.providers import Astrometry, ProviderError
 from sdb_identity.adapters import twomass
 from sdb_identity.adapters.twomass import TwoMassAdapter

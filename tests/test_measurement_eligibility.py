@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.measurement_eligibility import (
     effective_measurement_eligibility,
 )
@@ -29,7 +29,7 @@ def test_same_provider_and_band_measurements_are_decided_independently(
     identity = IdentityService(session_factory)
     first = identity.add(AddRequest(ra_deg=10, dec_deg=-20))
     second = identity.add(AddRequest(ra_deg=20, dec_deg=-30))
-    service = CatalogService(session_factory, {
+    service = CatalogAcquisitionService(session_factory, {
         "allwise": _catalog("first"),
     })
     service.refresh(first.sdbid, "allwise")
@@ -64,7 +64,7 @@ def test_manual_include_overrides_shared_detection_safety(session_factory):
     identity = IdentityService(session_factory)
     first = identity.add(AddRequest(ra_deg=10, dec_deg=-20))
     second = identity.add(AddRequest(ra_deg=10.0002, dec_deg=-20))
-    service = CatalogService(session_factory, {
+    service = CatalogAcquisitionService(session_factory, {
         "allwise": _catalog("shared"),
     })
     service.refresh(first.sdbid, "allwise")

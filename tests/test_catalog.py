@@ -6,12 +6,14 @@ import json
 import pytest
 from sqlalchemy import delete, select
 
-from sdb_identity.catalogs import (
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import (
     CatalogCandidate,
     CatalogQueryContext,
-    CatalogService,
     MeasurementValue,
 )
+from sdb_identity.catalog_decisions import CatalogDecisionService
+from sdb_identity.catalog_normalization import CatalogNormalizationService
 from sdb_identity.catalog_provenance import (
     CatalogProvenance,
     vizier_entry_url,
@@ -98,7 +100,7 @@ def add_target(session_factory, **kwargs):
 def test_refresh_stores_raw_row_measurements_and_identifier(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
     adapter = FakeCatalog([candidate(measurements=[measurement(), measurement("2MH", 6.9)])])
-    result = CatalogService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
+    result = CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     assert result.status == "match"
     assert result.measurement_count == 2
     with session_factory() as session:
@@ -134,7 +136,7 @@ def test_refresh_persists_detection_table_provenance(session_factory):
         measurements=base.measurements,
         provenance=(provenance,),
     )
-    CatalogService(
+    CatalogAcquisitionService(
         session_factory, {"2mass": FakeCatalog([value])}
     ).refresh(target.sdbid, "2mass")
     with session_factory() as session:
@@ -164,7 +166,7 @@ def test_refresh_fills_default_resolution_when_adapter_omits_it(session_factory)
         query_epoch=2016.0,
     )
 
-    CatalogService(session_factory, {"gaia_dr3": adapter}).refresh(target.sdbid, "gaia_dr3")
+    CatalogAcquisitionService(session_factory, {"gaia_dr3": adapter}).refresh(target.sdbid, "gaia_dr3")
 
     with session_factory() as session:
         value = session.scalars(select(NormalizedMeasurement)).one()
@@ -191,7 +193,7 @@ def test_refresh_preserves_adapter_supplied_resolution(session_factory):
         query_epoch=2016.0,
     )
 
-    CatalogService(session_factory, {"gaia_dr3": adapter}).refresh(target.sdbid, "gaia_dr3")
+    CatalogAcquisitionService(session_factory, {"gaia_dr3": adapter}).refresh(target.sdbid, "gaia_dr3")
 
     with session_factory() as session:
         value = session.scalars(select(NormalizedMeasurement)).one()
@@ -204,7 +206,7 @@ def test_refresh_preserves_adapter_supplied_resolution(session_factory):
 
 def test_no_match_is_recorded_without_sentinel_measurements(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
-    result = CatalogService(session_factory, {"2mass": FakeCatalog([])}).refresh(target.sdbid, "2mass")
+    result = CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([])}).refresh(target.sdbid, "2mass")
     assert result.status == "no_match"
     with session_factory() as session:
         assert session.query(NormalizedMeasurement).count() == 0
@@ -212,9 +214,9 @@ def test_no_match_is_recorded_without_sentinel_measurements(session_factory):
 
 def test_transient_failure_is_distinct_and_preserves_previous_current_run(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
-    ok = CatalogService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement()])])})
+    ok = CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement()])])})
     first = ok.refresh(target.sdbid, "2mass")
-    failing = CatalogService(session_factory, {"2mass": FakeCatalog([], ProviderError("timeout", transient=True))})
+    failing = CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([], ProviderError("timeout", transient=True))})
     second = failing.refresh(target.sdbid, "2mass")
     assert second.status == "transient_failure"
     with session_factory() as session:
@@ -230,7 +232,7 @@ def test_ambiguous_candidates_are_retained_with_detection_measurements(
         candidate("one", ra=10.00010, measurements=[measurement()]),
         candidate("two", ra=10.00011, measurements=[measurement()]),
     ])
-    result = CatalogService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
+    result = CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     assert result.status == "ambiguous"
     assert result.measurement_count == 0
     with session_factory() as session:
@@ -265,7 +267,7 @@ def test_stored_candidate_measurements_can_be_normalized_without_querying_again(
         ]
 
     adapter.query = query
-    service = CatalogService(session_factory, {"allwise": adapter})
+    service = CatalogAcquisitionService(session_factory, {"allwise": adapter})
     result = service.refresh(target.sdbid, "allwise")
     assert result.status == "ambiguous"
     with session_factory.begin() as session:
@@ -278,7 +280,9 @@ def test_stored_candidate_measurements_can_be_normalized_without_querying_again(
             detection.normalization_error = None
             detection.normalized_at = None
 
-    summary = service.normalize_detections(detection_ids)
+    summary = CatalogNormalizationService(
+        session_factory, {"allwise": adapter},
+    ).normalize_detections(detection_ids)
 
     assert (summary.completed, summary.failed, summary.measurement_count) == (
         2, 0, 2,
@@ -306,7 +310,7 @@ def test_bad_unaccepted_candidate_does_not_block_selected_detection(
             measurements=[measurement(value=9.0)],
         ),
     ])
-    result = CatalogService(
+    result = CatalogAcquisitionService(
         session_factory, {"2mass": adapter},
     ).refresh(target.sdbid, "2mass")
 
@@ -322,7 +326,7 @@ def test_bad_unaccepted_candidate_does_not_block_selected_detection(
 
 def test_refresh_keeps_history_and_replaces_current_measurements(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=-20)
-    service = CatalogService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement(value=7.1)])])})
+    service = CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([candidate(measurements=[measurement(value=7.1)])])})
     first = service.refresh(target.sdbid, "2mass")
     service.adapters["2mass"] = FakeCatalog([candidate(measurements=[measurement(value=7.2)])])
     second = service.refresh(target.sdbid, "2mass")
@@ -350,7 +354,7 @@ def test_query_coordinates_are_propagated_to_catalog_epoch(session_factory):
         solution.pm_dec_masyr = -500.0
         solution.proper_motion_available = True
     adapter = FakeCatalog([])
-    CatalogService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
+    CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     assert adapter.contexts[0].astrometry.epoch == 1999.3
     assert adapter.contexts[0].astrometry.ra_deg < 10.0
 
@@ -361,7 +365,7 @@ def test_bulk_refresh_chunks_queries_and_reuses_normal_scoring(session_factory):
         for index in range(3)
     ]
     adapter = FakeBulkCatalog([])
-    results = CatalogService(session_factory, {"2mass": adapter}).refresh_many(
+    results = CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh_many(
         [target.target_id for target in targets], "2mass", chunk_size=2,
     )
 
@@ -384,7 +388,7 @@ def test_failed_bulk_chunk_falls_back_to_individual_queries(session_factory):
     ]
     adapter = FakeBulkCatalog([])
     adapter.bulk_error = ProviderError("bulk timeout", transient=True)
-    results = CatalogService(session_factory, {"2mass": adapter}).refresh_many(
+    results = CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh_many(
         [target.target_id for target in targets], "2mass",
     )
 
@@ -428,7 +432,7 @@ def test_allwise_review_only_source_can_match_nearby_target_independently(sessio
         )]
 
     adapter.query = fake_query
-    service = CatalogService(session_factory, {"allwise": adapter})
+    service = CatalogAcquisitionService(session_factory, {"allwise": adapter})
 
     primary_result = service.refresh(primary.sdbid, "allwise")
     companion_result = service.refresh(companion.sdbid, "allwise")
@@ -484,7 +488,10 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
         },
     ]
     adapter.query = lambda context: [adapter.parse_row(row) for row in rows]
-    service = CatalogService(session_factory, {"allwise": adapter})
+    service = CatalogAcquisitionService(session_factory, {"allwise": adapter})
+    decisions = CatalogDecisionService(
+        session_factory, {"allwise": adapter}, acquisition=service,
+    )
     ambiguous = service.refresh(target.sdbid, "allwise")
     assert ambiguous.status == "ambiguous"
     with session_factory() as session:
@@ -492,7 +499,7 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
             RawCatalogRow.run_id == ambiguous.run_id,
             RawCatalogRow.source_id == "J004000.01-200000.0",
         ))
-    replacement = service.override_candidate(
+    replacement = decisions.accept_candidate(
         chosen.id, actor="tester", reason="image inspection",
     )
     assert (replacement.status, replacement.measurement_count) == ("match", 1)
@@ -527,7 +534,7 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
             ExternalIdentifier.source == "allwise"
         )) is None
 
-    repeated = service.override_candidate(
+    repeated = decisions.accept_candidate(
         chosen.id, actor="tester", reason="repeat submission",
     )
     assert repeated.run_id == ambiguous.run_id
@@ -543,13 +550,13 @@ def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
         candidate("one", ra=10.00010),
         candidate("two", ra=10.00011),
     ])
-    service = CatalogService(
+    service = CatalogAcquisitionService(
         session_factory, {"2mass": ambiguous_adapter},
     )
     ambiguous = service.refresh(target.sdbid, "2mass")
     assert ambiguous.status == "ambiguous"
 
-    reviewed = service.override_no_match(
+    reviewed = CatalogDecisionService(session_factory).reviewed_no_match(
         ambiguous.run_id,
         actor="reviewer",
         reason="neither candidate is the target",
@@ -568,8 +575,12 @@ def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
     failing_adapter = FakeCatalog(
         [], error=ProviderError("temporary outage", transient=True),
     )
-    retry_service = CatalogService(
+    retry_service = CatalogAcquisitionService(
         session_factory, {"2mass": failing_adapter},
+    )
+    retry_decisions = CatalogDecisionService(
+        session_factory, {"2mass": failing_adapter},
+        acquisition=retry_service,
     )
     failed = retry_service.refresh(target.sdbid, "2mass")
     assert failed.status == "transient_failure"
@@ -578,7 +589,7 @@ def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
         candidate(measurements=[measurement()]),
     ]
 
-    retried = retry_service.retry_failed_run(
+    retried = retry_decisions.retry_failed_run(
         failed.run_id,
         actor="reviewer",
         reason="provider is available again",

@@ -7,7 +7,7 @@ from typing import Callable, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs import CatalogService
+from .catalog_acquisition import CatalogAcquisitionService
 from .metadata import MetadataService
 from .models import CatalogRun, MetadataRun, Target
 from .progress import NULL_PROGRESS, ProgressReporter
@@ -53,7 +53,7 @@ class UpdateService:
         reference_store: ReferenceStore,
         *,
         metadata_factory: Callable[[], MetadataService],
-        catalog_factory: Callable[[], CatalogService],
+        catalog_factory: Callable[[], CatalogAcquisitionService],
         workers: int = 4,
         bulk_chunk_size: int = 500,
         reporter: ProgressReporter | None = None,
@@ -449,7 +449,7 @@ class UpdateService:
                     target_id, provider, release=adapter.release
                 ):
                     return UpdateItem(target_id, sdbid, provider, "skipped", "current")
-                result = CatalogService(
+                result = CatalogAcquisitionService(
                     self.sessions, {provider: adapter}
                 ).refresh(target_id, provider)
             else:

@@ -638,13 +638,13 @@ def _worker_settings(values: list[str]) -> dict[str, int]:
 
 def _batch_service(sessions, *, workers=None, offline=False, reporter=None):
     from .batch import BatchService
-    from .catalogs import CatalogService
+    from .catalog_acquisition import CatalogAcquisitionService
     from .metadata import MetadataService
 
     if offline:
         identity_factory = lambda: IdentityService(sessions)
         metadata_factory = lambda: MetadataService(sessions, None)
-        catalog_factory = lambda: CatalogService(sessions, {})
+        catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
         from .live_providers import AstroqueryGaia, AstroquerySimbad
         from .simbad_metadata import AstroquerySimbadMetadata
@@ -659,7 +659,7 @@ def _batch_service(sessions, *, workers=None, offline=False, reporter=None):
             gaia=AstroqueryGaia(),
         )
         metadata_factory = lambda: MetadataService(sessions, AstroquerySimbadMetadata())
-        catalog_factory = lambda: CatalogService(
+        catalog_factory = lambda: CatalogAcquisitionService(
             sessions,
             build_catalog_adapters(REMOTE_CATALOG_PROVIDERS),
         )
@@ -677,14 +677,14 @@ def _update_service(
     sessions, reference_database, *, workers=4, bulk_chunk_size=500, offline=False,
     reporter=None,
 ):
-    from .catalogs import CatalogService
+    from .catalog_acquisition import CatalogAcquisitionService
     from .metadata import MetadataService
     from .reference import ReferenceStore
     from .update import UpdateService
 
     if offline:
         metadata_factory = lambda: MetadataService(sessions, None)
-        catalog_factory = lambda: CatalogService(sessions, {})
+        catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
         from .catalog_registry import (
             REMOTE_CATALOG_PROVIDERS,
@@ -695,7 +695,7 @@ def _update_service(
         metadata_factory = lambda: MetadataService(
             sessions, AstroquerySimbadMetadata()
         )
-        catalog_factory = lambda: CatalogService(
+        catalog_factory = lambda: CatalogAcquisitionService(
             sessions, build_catalog_adapters(REMOTE_CATALOG_PROVIDERS),
         )
     return UpdateService(
@@ -2006,7 +2006,7 @@ def main(argv: list[str] | None = None) -> int:
         }, sort_keys=True))
         return 0
     if args.command == "override-catalog-match":
-        from .catalogs import CatalogService
+        from .catalog_decisions import CatalogDecisionService
 
         with sessions() as session:
             raw = session.get(RawCatalogRow, args.candidate_id)
@@ -2025,9 +2025,9 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
         try:
-            value = CatalogService(
+            value = CatalogDecisionService(
                 sessions, {run.provider: adapter}
-            ).override_candidate(
+            ).accept_candidate(
                 args.candidate_id, actor=args.actor, reason=args.reason
             )
         except (KeyError, ValueError, RuntimeError) as error:
@@ -2043,14 +2043,14 @@ def main(argv: list[str] | None = None) -> int:
             with _provider_output_to_stderr():
                 from .catalog_registry import CATALOG_PROVIDERS
                 if args.provider in CATALOG_PROVIDERS:
-                    from .catalogs import CatalogService
+                    from .catalog_acquisition import CatalogAcquisitionService
                     from .catalog_registry import build_catalog_adapter
                     from .reference import ReferenceStore
                     adapters = {args.provider: build_catalog_adapter(
                         args.provider,
                         reference_store=ReferenceStore(args.reference_database),
                     )}
-                    refreshed = CatalogService(
+                    refreshed = CatalogAcquisitionService(
                         sessions, adapters,
                     ).refresh(
                         args.target, args.provider
@@ -2619,7 +2619,7 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_json(args, {"run_id": args.run_id, "reset_jobs": count}, sort_keys=True))
         return 0
     if args.command == "review" and args.kind == "serve":
-        from .catalog_setup import catalog_service_for_provider
+        from .catalog_setup import catalog_operator_service_for_provider
         from .reference import ReferenceStore
         from .review_ui import serve_review_ui
         from .update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
@@ -2658,7 +2658,7 @@ def main(argv: list[str] | None = None) -> int:
                 open_browser=args.open,
                 identity_service_factory=identity_service_factory,
                 catalog_service_factory=lambda provider, action: (
-                    catalog_service_for_provider(
+                    catalog_operator_service_for_provider(
                         sessions,
                         provider,
                         reference_database=args.reference_database,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astropy.table import Table
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.export import export_ipac
 from sdb_identity.photometry import (
     list_measurement_eligibility_actions,
@@ -27,7 +27,7 @@ def allwise_catalog(value=8.1):
 
 def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_factory, tmp_path):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    service = CatalogService(session_factory, {"allwise": allwise_catalog()})
+    service = CatalogAcquisitionService(session_factory, {"allwise": allwise_catalog()})
     service.refresh(target.sdbid, "allwise")
     with session_factory() as session:
         measurement_id = session.scalar(select(NormalizedMeasurement.id))
@@ -70,7 +70,7 @@ def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_fact
 
 def test_photometry_review_queue_reports_placeholder_for_clean_targets(session_factory):
     clean = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog([candidate(
             "clean-wise", measurements=[measurement("WISE3P4", 8.1)]
         )], name="allwise", release="fake-allwise"),

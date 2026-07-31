@@ -4,7 +4,7 @@ import pytest
 from astropy.table import Table
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.dirty import mark_export_dirty, pending_export_targets
 from sdb_identity.export import (
     export_ipac,
@@ -34,7 +34,7 @@ def test_catalog_refresh_marks_only_material_changes_dirty(session_factory, tmp_
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     export_ipac(session_factory, target.sdbid, tmp_path / "initial.txt")
     adapter = FakeCatalog([candidate(measurements=[measurement(value=7.1)])])
-    service = CatalogService(session_factory, {"2mass": adapter})
+    service = CatalogAcquisitionService(session_factory, {"2mass": adapter})
     service.refresh(target.sdbid, "2mass")
     assert len(pending_export_targets(session_factory)) == 1
     export_ipac(session_factory, target.sdbid, tmp_path / "with-photometry.txt")

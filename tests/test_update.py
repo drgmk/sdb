@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models import ExternalIdentifier
 from sdb_identity.reference import ReferenceStore
@@ -26,7 +26,7 @@ def service(session_factory, tmp_path):
         metadata_factory=lambda: MetadataService(
             session_factory, FakeMetadataProvider(MetadataQueryResult("no_match"))
         ),
-        catalog_factory=lambda: CatalogService(
+        catalog_factory=lambda: CatalogAcquisitionService(
             session_factory,
             {
                 "2mass": FakeCatalog([]),
@@ -95,7 +95,7 @@ def test_update_all_uses_bulk_capable_catalog_adapter(session_factory, tmp_path)
         metadata_factory=lambda: MetadataService(
             session_factory, FakeMetadataProvider(MetadataQueryResult("no_match"))
         ),
-        catalog_factory=lambda: CatalogService(
+        catalog_factory=lambda: CatalogAcquisitionService(
             session_factory, {"2mass": adapter}
         ),
         workers=2,
@@ -116,7 +116,7 @@ def test_update_all_uses_bulk_capable_simbad_metadata(session_factory, tmp_path)
         session_factory,
         ReferenceStore(tmp_path / "reference.sqlite"),
         metadata_factory=lambda: MetadataService(session_factory, provider),
-        catalog_factory=lambda: CatalogService(session_factory, {}),
+        catalog_factory=lambda: CatalogAcquisitionService(session_factory, {}),
         workers=2,
     )
 
@@ -141,7 +141,7 @@ def test_update_all_stores_simbad_aliases_before_applying_snapshots(
             session_factory,
             FakeMetadataProvider(MetadataQueryResult("match", (snapshot(),))),
         ),
-        catalog_factory=lambda: CatalogService(session_factory, {}),
+        catalog_factory=lambda: CatalogAcquisitionService(session_factory, {}),
         workers=2,
     )
     monkeypatch.setattr(

@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import MeasurementValue
 from sdb_identity.models import (
     MeasurementAssociationAction,
     MeasurementEligibilityAction,
@@ -39,7 +40,7 @@ def _wise_measurements(
         )
         for band, value in (("WISE3P4", 6.1), ("WISE22", 5.2))
     ]
-    CatalogService(session_factory, {"allwise": FakeCatalog(
+    CatalogAcquisitionService(session_factory, {"allwise": FakeCatalog(
         [candidate(source_id, ra=ra, dec=dec, measurements=values)],
         name="allwise", release="test", query_epoch=2010.5,
     )}).refresh(target.sdbid, "allwise")

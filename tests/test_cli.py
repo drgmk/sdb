@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
@@ -185,7 +185,7 @@ def test_cli_catalog_status_and_export(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(
+    CatalogAcquisitionService(
         sessions,
         {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
     ).refresh(target.sdbid, "2mass")
@@ -368,7 +368,7 @@ def test_cli_photometry_override_history(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "allwise": FakeCatalog(
             [candidate(
                 "cli-wise",
@@ -401,7 +401,7 @@ def test_cli_photometry_review_lists_measurements(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "allwise": FakeCatalog([candidate(
             "wise-a", ra=10, dec=-20, measurements=[measurement("WISE3P4", 8.1)]
         )], name="allwise", release="fake-allwise"),
@@ -421,7 +421,7 @@ def test_cli_photometry_review_queue_lists_sample_targets(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "allwise": FakeCatalog([candidate(
             "wise-a", ra=10, dec=-20, measurements=[measurement("WISE3P4", 8.1)]
         )], name="allwise", release="fake-allwise"),
@@ -464,7 +464,7 @@ def test_cli_photometry_review_html_writes_bundle(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "allwise": FakeCatalog([candidate(
             "wise-a", ra=10, dec=-20, measurements=[measurement("WISE3P4", 8.1)]
         )], name="allwise", release="fake-allwise"),
@@ -510,7 +510,7 @@ def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
          "qph": "AAAA", "ccf": "0000", "W1mag": 8.0, "e_W1mag": 0.1},
     ]
     adapter.query = lambda context: [adapter.parse_row(row) for row in rows]
-    CatalogService(sessions, {"allwise": adapter}).refresh(target.sdbid, "allwise")
+    CatalogAcquisitionService(sessions, {"allwise": adapter}).refresh(target.sdbid, "allwise")
 
     assert main(["--database", str(database), "review", "catalog-matches"]) == 0
     reviewed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -559,7 +559,7 @@ def test_cli_inspection_commands_resolve_by_alias(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
-    CatalogService(
+    CatalogAcquisitionService(
         sessions,
         {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
     ).refresh(target.sdbid, "2mass")

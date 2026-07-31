@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalog_results import effective_catalog_results
 from .astrometry import propagate_to_epoch
 from .catalog_types import CatalogQueryContext
-from .catalogs import CatalogService
+from .catalog_acquisition import CatalogAcquisitionService
 from .dirty import mark_export_dirty
 from .models import AstrometricSolution, CatalogRun, ExportDirtyTarget, ExternalIdentifier, ReferenceApplicationItem, ReferenceApplicationRecord, ReferenceApplicationRun, Target
 from .providers import Astrometry
@@ -129,7 +129,7 @@ class ReferenceApplicationService:
             session.flush()
             application_id = application.id
 
-        service = CatalogService(self.sessions, {adapter.name: adapter})
+        service = CatalogAcquisitionService(self.sessions, {adapter.name: adapter})
         results = []
         try:
             for context in contexts:

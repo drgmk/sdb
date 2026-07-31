@@ -5,7 +5,8 @@ import json
 from astropy.table import Table
 from sqlalchemy import select, text
 
-from sdb_identity.catalogs import CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.models import SampleExportItem, SampleExportRun
 from sdb_identity.sample_export import SampleExportService
@@ -23,7 +24,7 @@ def _sample_with_photometry(session_factory):
             "2MKS", 6.8, 0.04, unit="mag", upper_limit=True, private=True,
         ),
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([candidate(measurements=values)]),
     }).refresh(target.target_id, "2mass")
     samples = SampleService(session_factory)

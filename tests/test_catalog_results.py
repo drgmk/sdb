@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from sdb_identity.catalog_results import effective_catalog_results
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.models import (
     CatalogResultDecision,
     CatalogRun,
@@ -19,7 +19,7 @@ def test_latest_decision_interprets_one_immutable_ambiguous_run(
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=10, dec_deg=-20)
     )
-    service = CatalogService(session_factory, {
+    service = CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("one", ra=10.00010, measurements=[measurement()]),
             candidate("two", ra=10.00011, measurements=[measurement(value=8.2)]),

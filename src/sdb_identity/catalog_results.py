@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import CatalogDetection, CatalogResultDecision, CatalogRun, RawCatalogRow
+from .models import (
+    CatalogAttribute,
+    CatalogDetection,
+    CatalogResultDecision,
+    CatalogRun,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
 from .vocabulary import ProviderRunStatus
 
 
@@ -140,3 +147,56 @@ def effective_catalog_results(
             decision,
         )
     return result
+
+
+def catalog_run_signature(
+    session: Session,
+    run: CatalogRun | None,
+    *,
+    effective_status: str | ProviderRunStatus | None = None,
+    selected_source_id: str | None = None,
+    selected_raw_row_id: int | None = None,
+):
+    """Comparable provider evidence used to decide whether export became dirty."""
+    if run is None:
+        return None
+    rows = tuple(session.execute(select(
+        RawCatalogRow.source_id,
+        RawCatalogRow.accepted,
+        RawCatalogRow.payload_json,
+    ).where(RawCatalogRow.run_id == run.id).order_by(RawCatalogRow.id)).all())
+    measurements = tuple(session.execute(select(
+        NormalizedMeasurement.band,
+        NormalizedMeasurement.value,
+        NormalizedMeasurement.error,
+        NormalizedMeasurement.upper_limit,
+        NormalizedMeasurement.excluded,
+        NormalizedMeasurement.quality,
+        NormalizedMeasurement.blend_state,
+        NormalizedMeasurement.ownership_scope,
+    ).join(
+        RawCatalogRow,
+        RawCatalogRow.detection_id == NormalizedMeasurement.detection_id,
+    ).where(
+        RawCatalogRow.run_id == run.id,
+        (
+            RawCatalogRow.id == selected_raw_row_id
+            if selected_raw_row_id is not None
+            else RawCatalogRow.accepted.is_(True)
+        ),
+    ).order_by(NormalizedMeasurement.id)).all())
+    attributes = tuple(session.execute(select(
+        CatalogAttribute.key,
+        CatalogAttribute.value_text,
+        CatalogAttribute.value_float,
+        CatalogAttribute.uncertainty,
+        CatalogAttribute.unit,
+        CatalogAttribute.quality,
+    ).where(CatalogAttribute.run_id == run.id).order_by(CatalogAttribute.id)).all())
+    return (
+        run.status if effective_status is None else str(effective_status),
+        run.selected_source_id if selected_source_id is None else selected_source_id,
+        rows,
+        measurements,
+        attributes,
+    )

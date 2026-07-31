@@ -7,7 +7,7 @@ from astropy.coordinates import SkyCoord
 from sdb_identity.adapters import allwise
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
-from sdb_identity.catalogs import CatalogQueryContext
+from sdb_identity.catalog_types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 
 

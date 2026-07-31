@@ -6,7 +6,8 @@ import astropy.units as u
 from astropy.table import Column, Table
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogCandidate, CatalogQueryContext, CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate, CatalogQueryContext
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.export import export_ipac
@@ -476,7 +477,7 @@ def test_iras_ellipse_score_accepts_offset_along_major_axis(session_factory, tmp
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=ra, dec_deg=dec + 8.0 / 3600.0, epoch=1983.5)
     )
-    result = CatalogService(
+    result = CatalogAcquisitionService(
         session_factory, {"iras_psc": adapter}
     ).refresh(target.sdbid, "iras_psc")
     assert result.status == "match"
@@ -517,7 +518,7 @@ def test_v70a_attributes_are_versioned_with_selected_run(session_factory, tmp_pa
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=1.3516667, dec_deg=-37.3575)
     )
-    result = CatalogService(
+    result = CatalogAcquisitionService(
         session_factory, {"v70a": V70ASnapshotAdapter(store)}
     ).refresh(target.sdbid, "v70a")
     assert result.status == "match"
@@ -543,7 +544,7 @@ def test_attributes_cli_lists_current_v70a_values(tmp_path, capsys):
     target = IdentityService(sessions).add(
         AddRequest(ra_deg=1.3516667, dec_deg=-37.3575)
     )
-    CatalogService(sessions, {"v70a": V70ASnapshotAdapter(store)}).refresh(
+    CatalogAcquisitionService(sessions, {"v70a": V70ASnapshotAdapter(store)}).refresh(
         target.sdbid, "v70a"
     )
     assert main([
@@ -566,7 +567,7 @@ def test_gaspar_refresh_copies_selected_snapshot_row_into_main_sdb(session_facto
             normalized_value=normalize_identifier("HD 38"),
             source="test",
         ))
-    result = CatalogService(
+    result = CatalogAcquisitionService(
         session_factory, {"gaspar13": GasparSnapshotAdapter(store)}
     ).refresh(target.sdbid, "gaspar13")
     assert (result.status, result.measurement_count) == ("match", 1)

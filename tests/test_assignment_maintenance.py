@@ -4,7 +4,8 @@ from sdb_identity.assignment_maintenance import (
     audit_automatic_assignment_sets,
 )
 from sdb_identity.catalog_measurements import current_measurement_encounters
-from sdb_identity.catalogs import CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import MeasurementValue
 from sdb_identity.photometry import assign_measurement_target
 from tests.test_catalog import FakeCatalog, candidate
 from tests.test_system_photometry_foundation import _configured_system
@@ -19,7 +20,7 @@ def _measurement_for(session_factory, target, source_id):
         unit="mag",
         bibcode="test",
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog(
             [candidate(source_id, measurements=[value])],
             name="allwise",

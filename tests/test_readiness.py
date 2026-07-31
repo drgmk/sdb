@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.export import export_ipac
@@ -52,7 +52,7 @@ def test_no_match_is_complete_and_pending_export_is_review_only(
     MetadataService(
         session_factory, FakeMetadataProvider(MetadataQueryResult("no_match")),
     ).refresh(target.target_id)
-    CatalogService(session_factory, {"2mass": FakeCatalog([])}).refresh(
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([])}).refresh(
         target.target_id, "2mass",
     )
 
@@ -71,7 +71,7 @@ def test_no_match_is_complete_and_pending_export_is_review_only(
 
 def test_readiness_reports_photometry_review_signals(session_factory):
     target = _sample_target(session_factory)
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([candidate(measurements=[
             measurement(excluded=True),
         ])]),
@@ -90,7 +90,7 @@ def test_readiness_blocks_only_sample_relevant_unresolved_curated_rows(
     session_factory,
 ):
     target = _sample_target(session_factory)
-    CatalogService(session_factory, {"2mass": FakeCatalog([])}).refresh(
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([])}).refresh(
         target.target_id, "2mass",
     )
     with session_factory() as session, session.begin():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database
 from sdb_identity.database import make_session_factory
 from sdb_identity.models import NormalizedMeasurement
@@ -141,7 +141,7 @@ def test_catalog_result_migration_restores_reviewed_acquisition_run(tmp_path):
     target = IdentityService(sessions).add(
         AddRequest(ra_deg=10, dec_deg=-20)
     )
-    service = CatalogService(sessions, {
+    service = CatalogAcquisitionService(sessions, {
         "2mass": FakeCatalog([
             candidate("one", ra=10.00010, measurements=[measurement()]),
             candidate("two", ra=10.00011, measurements=[measurement()]),
@@ -274,7 +274,7 @@ def test_provider_scope_migration_repairs_import_order_overwrite(tmp_path):
     init_database(path)
     sessions = make_session_factory(path)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "ubvmeans": FakeCatalog(
             [candidate(
                 "+100000123|m_LID=D",
@@ -317,7 +317,7 @@ def test_tdsc_scope_migration_repairs_import_order_overwrite(tmp_path):
     init_database(path)
     sessions = make_session_factory(path)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
-    CatalogService(sessions, {
+    CatalogAcquisitionService(sessions, {
         "tdsc": FakeCatalog(
             [candidate(
                 "88|m_TDSC=A",

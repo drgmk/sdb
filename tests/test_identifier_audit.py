@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from sdb_identity.catalogs import CatalogCandidate, CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate
 from sdb_identity.cli import main
 from sdb_identity.identifier_audit import audit_catalog_identifiers
 from sdb_identity.models import ExternalIdentifier
@@ -25,7 +26,7 @@ def _refresh(session_factory, target, source_id, ra):
         1983.5,
         {"IRAS": source_id, "Major": 10, "Minor": 4, "PosAng": 0},
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "iras_psc": FakeCatalog([candidate], name="iras_psc")
     }).refresh(target.sdbid, "iras_psc")
 

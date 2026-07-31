@@ -3,7 +3,8 @@ from __future__ import annotations
 from astropy.table import Table
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
 from sdb_identity.catalog_policy import catalog_band_wavelength_micron
 from sdb_identity.assignment_proposals import measurement_assignment_proposals
 from sdb_identity.assignment_review import build_measurement_assignment_review
@@ -143,7 +144,7 @@ def test_measurement_contributors_are_many_to_many_and_audited_without_changing_
     hierarchy.create_system("test AB", primary=system.sdbid)
     hierarchy.add_member("test AB", component_a.sdbid, component_label="A")
     hierarchy.add_member("test AB", component_b.sdbid, component_label="B")
-    CatalogService(session_factory, {"allwise": _wise_catalog()}).refresh(
+    CatalogAcquisitionService(session_factory, {"allwise": _wise_catalog()}).refresh(
         system.sdbid, "allwise"
     )
     before = Table.read(
@@ -206,7 +207,7 @@ def test_cli_records_lifecycle_and_measurement_assignments(tmp_path, capsys):
     identity = IdentityService(sessions)
     origin = identity.add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
     component = identity.add(AddRequest(ra_deg=10.01, dec_deg=-20.0))
-    CatalogService(sessions, {"allwise": _wise_catalog()}).refresh(origin.sdbid, "allwise")
+    CatalogAcquisitionService(sessions, {"allwise": _wise_catalog()}).refresh(origin.sdbid, "allwise")
     review = __import__("sdb_identity.photometry", fromlist=["review_photometry_associations"])
     measurement_id = review.review_photometry_associations(sessions, origin.sdbid)[0].measurement_id
     common = ["--database", str(database)]
@@ -232,7 +233,7 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
     session_factory,
 ):
     system, component_a, component_b = _configured_system(session_factory)
-    CatalogService(session_factory, {"allwise": _wise_catalog()}).refresh(
+    CatalogAcquisitionService(session_factory, {"allwise": _wise_catalog()}).refresh(
         system.sdbid, "allwise"
     )
 
@@ -298,7 +299,7 @@ def test_system_matrix_consolidates_duplicate_catalog_detection_for_review(
     session_factory,
 ):
     system, component_a, _component_b = _configured_system(session_factory)
-    service = CatalogService(session_factory, {"allwise": _wise_catalog()})
+    service = CatalogAcquisitionService(session_factory, {"allwise": _wise_catalog()})
     service.refresh(system.sdbid, "allwise")
     service.refresh(component_a.sdbid, "allwise")
 
@@ -343,7 +344,7 @@ def test_system_matrix_collapses_detection_bands_and_marks_mixed_assignments(
         )
         for band, value in (("WISE3P4", 7.2), ("WISE22", 6.1))
     ]
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "allwise": FakeCatalog(
             [candidate("joint-wise", measurements=measurements)],
             name="allwise",
@@ -427,7 +428,7 @@ def test_system_matrix_orders_catalog_detections_by_wavelength(session_factory):
             resolution_kind="test",
             resolution_reference="test",
         )
-        CatalogService(session_factory, {
+        CatalogAcquisitionService(session_factory, {
             provider: FakeCatalog(
                 [candidate(f"{provider}-source", measurements=[value])],
                 name=provider,
@@ -465,7 +466,7 @@ def test_resolved_source_between_two_components_remains_review_required(
         release="test",
         query_epoch=1999.3,
     )
-    CatalogService(session_factory, {"2mass": adapter}).refresh(system.sdbid, "2mass")
+    CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(system.sdbid, "2mass")
 
     proposal = measurement_assignment_proposals(session_factory, system.sdbid)[0]
 
@@ -494,7 +495,7 @@ def test_exact_simbad_identifier_wins_over_nearest_component_position(
         resolution_minor_arcsec=0.1, resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(
             source_id,
             ra=10.0003,
@@ -569,7 +570,7 @@ def test_snapshot_payload_identifiers_drive_hip2_and_paunzen_assignments(
         ),
     }
     for provider, row in rows.items():
-        CatalogService(session_factory, {provider: FakeCatalog(
+        CatalogAcquisitionService(session_factory, {provider: FakeCatalog(
             [row],
             name=provider,
             release=f"fake-{provider}",
@@ -631,7 +632,7 @@ def test_correct_source_association_makes_photometry_current_without_assignment_
         resolution_minor_arcsec=0.1, resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(source_id, measurements=[resolved])
     ])}).refresh(system.sdbid, "2mass")
     _move_catalog_association(
@@ -714,7 +715,7 @@ def test_proposal_application_does_not_replace_conflicting_current_assignment(
         resolution_minor_arcsec=0.1, resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(source_id, measurements=[resolved])
     ])}).refresh(system.sdbid, "2mass")
     measurement_id = measurement_assignment_proposals(
@@ -765,7 +766,7 @@ def test_derived_assignment_preserves_excluded_measurement_until_overridden(
         resolution_reference="test", excluded=True,
         exclusion_reason="provider quality flag",
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(source_id, measurements=[excluded])
     ])}).refresh(system.sdbid, "2mass")
     _move_catalog_association(
@@ -837,7 +838,7 @@ def test_simbad_identifier_outranks_provider_derived_duplicate_on_composite(
         resolution_minor_arcsec=0.12, resolution_kind="test",
         resolution_reference="test",
     )
-    service = CatalogService(session_factory, {"gaia_dr3": FakeCatalog([
+    service = CatalogAcquisitionService(session_factory, {"gaia_dr3": FakeCatalog([
         candidate(
             source_id,
             ra=10.0 - 0.0003,
@@ -913,12 +914,12 @@ def test_exact_simbad_composite_identifier_is_secure_without_imported_contributo
         resolution_minor_arcsec=2.5, resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {"gaia_dr3": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"gaia_dr3": FakeCatalog([
         candidate(gaia_source, measurements=[gaia_measurement])
     ], name="gaia_dr3", release="test", query_epoch=2016.0)}).refresh(
         system.sdbid, "gaia_dr3"
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(twomass_source, measurements=[twomass_measurement])
     ], name="2mass", release="test", query_epoch=1999.3)}).refresh(
         system.sdbid, "2mass"
@@ -946,7 +947,7 @@ def test_cli_prints_read_only_measurement_assignment_proposals(tmp_path, capsys)
     init_database(database)
     sessions = make_session_factory(database)
     system, component_a, component_b = _configured_system(sessions)
-    CatalogService(sessions, {"allwise": _wise_catalog()}).refresh(system.sdbid, "allwise")
+    CatalogAcquisitionService(sessions, {"allwise": _wise_catalog()}).refresh(system.sdbid, "allwise")
 
     assert main([
         "--database", str(database), "photometry", "proposals", system.sdbid,
@@ -993,7 +994,7 @@ def test_proposal_compares_catalog_position_at_native_epoch(session_factory):
         resolution_minor_arcsec=0.1, resolution_kind="test",
         resolution_reference="test",
     )
-    CatalogService(session_factory, {"2mass": FakeCatalog([
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([
         candidate(
             "not-an-identifier",
             ra=catalog_position.ra_deg,
@@ -1065,7 +1066,7 @@ def test_ubv_d_proposes_unique_simple_binary_without_resolution(
         release="II/168",
         query_epoch=2000.0,
     )
-    CatalogService(session_factory, {"ubvmeans": catalog}).refresh(
+    CatalogAcquisitionService(session_factory, {"ubvmeans": catalog}).refresh(
         system.sdbid, "ubvmeans",
     )
 
@@ -1119,7 +1120,7 @@ def test_ubv_d_complex_system_remains_scope_only(session_factory):
         blend_state="blended",
         blend_reason="catalog_multiple_in_aperture",
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "ubvmeans": FakeCatalog(
             [CatalogCandidate(
                 source_id="+100000123|m_LID=D",
@@ -1169,7 +1170,7 @@ def test_ubv_numeric_component_maps_to_explicit_system_member(
         unit="mag",
         bibcode="2006yCat.2168....0M",
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "ubvmeans": FakeCatalog(
             [CatalogCandidate(
                 source_id="+100000123|m_LID=2",
@@ -1235,7 +1236,7 @@ def test_tdsc_named_component_maps_to_explicit_system_member(
         unit="mag",
         bibcode="2002A&A...384..180F",
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "tdsc": FakeCatalog(
             [CatalogCandidate(
                 source_id="88|m_TDSC=A",

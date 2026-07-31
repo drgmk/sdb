@@ -5,7 +5,7 @@ from threading import Barrier
 
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models import CatalogRun, MetadataRun
 from sdb_identity.service import AddRequest, IdentityService
@@ -51,7 +51,7 @@ def test_catalog_remote_calls_do_not_hold_sqlite_write_lock(session_factory):
         identity.add(AddRequest(ra_deg=20, dec_deg=-30)),
     ]
     barrier = Barrier(2)
-    service = CatalogService(session_factory, {"2mass": BarrierCatalog(barrier)})
+    service = CatalogAcquisitionService(session_factory, {"2mass": BarrierCatalog(barrier)})
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda target: service.refresh(target.sdbid, "2mass"), targets))
     assert len(results) == 2
@@ -71,7 +71,7 @@ def test_new_catalog_attempt_retires_interrupted_running_attempt(session_factory
             query_epoch=2000,
         ))
 
-    CatalogService(session_factory, {"2mass": FakeCatalog([])}).refresh(
+    CatalogAcquisitionService(session_factory, {"2mass": FakeCatalog([])}).refresh(
         target.target_id, "2mass"
     )
 

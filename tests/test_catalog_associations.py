@@ -9,7 +9,7 @@ from sdb_identity.catalog_associations import (
     catalog_target_candidates,
 )
 from sdb_identity.catalog_measurements import current_measurements_for_target
-from sdb_identity.catalogs import CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.decision_history import system_decision_history
 from sdb_identity.hierarchy import HierarchyService
@@ -36,7 +36,7 @@ def test_catalog_coverage_distinguishes_direct_results_from_shared_evidence(
     component = identity.add(
         AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("component", ra=10.0 + 4.1 / 3600.0, dec=0.0),
         ]),
@@ -64,7 +64,7 @@ def test_catalog_coverage_offers_backfill_for_missing_detection_provenance(
     target = IdentityService(session_factory).add(
         AddRequest(ra_deg=10.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate(measurements=[measurement()]),
         ]),
@@ -90,7 +90,7 @@ def test_catalog_target_candidates_reconcile_detection_to_later_component(
 ):
     identity = IdentityService(session_factory)
     parent = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
-    result = CatalogService(session_factory, {
+    result = CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("parent", ra=10.0, dec=0.0),
             candidate(
@@ -141,7 +141,7 @@ def test_catalog_target_association_is_audited_without_rewriting_query_provenanc
     component = identity.add(
         AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate("parent", ra=10.0, dec=0.0),
             candidate(
@@ -246,7 +246,7 @@ def test_catalog_target_association_is_audited_without_rewriting_query_provenanc
         for row in history
     )
 
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate(
                 "component",
@@ -313,7 +313,7 @@ def test_system_scale_catalog_centroid_does_not_create_component_match(
     component = identity.add(
         AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
     )
-    CatalogService(session_factory, {
+    CatalogAcquisitionService(session_factory, {
         "iras_fsc": FakeCatalog(
             [
                 candidate("system", ra=10.0, dec=0.0),
@@ -358,7 +358,7 @@ def test_catalog_target_candidate_result_is_independent_of_component_import_orde
         else:
             parent = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
             component = None
-        CatalogService(sessions, {
+        CatalogAcquisitionService(sessions, {
             "2mass": FakeCatalog([
                 candidate("parent", ra=10.0, dec=0.0),
                 candidate("component", ra=10.0 + 4.1 / 3600.0, dec=0.0),
@@ -406,7 +406,7 @@ def test_detection_measurements_are_independent_of_provider_query_order(
                 AddRequest(ra_deg=10.0 + 4.2 / 3600.0, dec_deg=0.0)
             ),
         }
-        service = CatalogService(sessions, {
+        service = CatalogAcquisitionService(sessions, {
             "2mass": FakeCatalog([
                 candidate(
                     "parent",
@@ -479,7 +479,7 @@ def test_identifier_backed_encounter_outranks_position_only_encounter(
     identity = IdentityService(session_factory)
     composite = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
     component = identity.add(AddRequest(ra_deg=10.0003, dec_deg=0.0))
-    service = CatalogService(session_factory, {
+    service = CatalogAcquisitionService(session_factory, {
         "2mass": FakeCatalog([
             candidate(
                 "same", ra=10.0, dec=0.0,
@@ -544,7 +544,7 @@ def test_tdsc_component_identifier_outranks_system_identifier(
     identity = IdentityService(session_factory)
     composite = identity.add(AddRequest(ra_deg=10.0, dec_deg=0.0))
     component_a = identity.add(AddRequest(ra_deg=10.0003, dec_deg=0.0))
-    service = CatalogService(session_factory, {
+    service = CatalogAcquisitionService(session_factory, {
         "tdsc": FakeCatalog(
             [candidate(
                 "88|m_TDSC=A",

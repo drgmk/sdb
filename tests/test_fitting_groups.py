@@ -4,7 +4,8 @@ import json
 
 from sqlalchemy import select
 
-from sdb_identity.catalogs import CatalogService, MeasurementValue
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import MeasurementValue
 from sdb_identity.assignment_readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report
@@ -33,7 +34,7 @@ def _measurement(session_factory, system, *, excluded=False):
         resolution_major_arcsec=12.0, resolution_minor_arcsec=12.0,
         resolution_kind="fwhm", resolution_reference="test",
     )
-    CatalogService(session_factory, {"allwise": FakeCatalog(
+    CatalogAcquisitionService(session_factory, {"allwise": FakeCatalog(
         [candidate("joint-wise", measurements=[value])],
         name="allwise", release="test", query_epoch=2010.5,
     )}).refresh(system.sdbid, "allwise")

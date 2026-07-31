@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sdb_identity.adapters.twomass import TwoMassAdapter
 from sdb_identity.astrometry import propagate_to_epoch
-from sdb_identity.catalogs import CatalogQueryContext
+from sdb_identity.catalog_types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 
 

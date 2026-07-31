@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import gzip
 import hashlib
 import json
@@ -14,9 +13,8 @@ from sqlalchemy import Integer, delete, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
-from .adapters.vizier import row_payload
 from .adapters.review_metadata import normalize_review_payload
-from .cache_store import CachedSnapshotData, SnapshotCache
+from .cache_store import SnapshotCache
 from .catalog_measurements import (
     current_measurements_for_target,
 )
@@ -56,9 +54,20 @@ from .hierarchy_semantics import (
     normalize_component_label,
     simbad_component_relevance,
 )
-from .hierarchy_records import ParsedHierarchyRecord
+from .hierarchy_geometry import (
+    best_separation as _best_separation,
+    hierarchy_record_positions,
+    hierarchy_separation_usable as _hierarchy_separation_usable,
+    offset_position as _offset_position,
+    position_usable_for_matching as _position_usable_for_matching,
+    record_positions as _record_positions,
+    record_raw_payload as _record_raw_payload,
+    separation_arcsec as _separation_arcsec,
+    wds_record_has_unusable_separation as _wds_record_has_unusable_separation,
+)
+from .hierarchy_parsing import parse_cached_snapshot, parse_snapshot, parse_tables
 from .hierarchy_registry import hierarchy_source
-from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
+from .hierarchy_wds import component_pair
 from .targets import resolve_target
 from .snapshots import SnapshotClient, VizierSnapshotClient
 from .vocabulary import ProviderRunStatus, ReviewPriority, review_priority_rank
@@ -910,7 +919,7 @@ class HierarchyService:
         checksum = hashlib.sha256(data).hexdigest()
         text_data = gzip.decompress(data) if path.suffix == ".gz" else data
         text = text_data.decode("utf-8", errors="replace")
-        parsed, skipped = _parse_hierarchy_snapshot(provider, text)
+        parsed, skipped = parse_snapshot(provider, text)
         with self.session_factory.begin() as session:
             existing = self._existing_source_result(
                 session, provider, checksum, skipped_count=skipped,
@@ -992,7 +1001,7 @@ class HierarchyService:
                 cache_status = "stored"
             else:
                 cache_status = "reused"
-            parsed = _parse_cached_hierarchy_snapshot(provider, cached)
+            parsed = parse_cached_snapshot(provider, cached)
             readme = cached.readme
             source_url = cached.source_url
             checksum = cached.content_sha256
@@ -1006,7 +1015,7 @@ class HierarchyService:
                 raise ProviderError(
                     f"{provider} hierarchy snapshot fetch failed: {error}", transient=True
                 ) from error
-            parsed = _parse_hierarchy_tables(provider, tables)
+            parsed = parse_tables(provider, tables)
             if not parsed:
                 raise ProviderError(f"{provider} hierarchy snapshot returned no parseable rows")
             release_value = release or _release_from_readme(provider, catalog, readme)
@@ -3983,196 +3992,6 @@ def _target_separations(
     )
 
 
-def hierarchy_record_positions(record: HierarchyRecord) -> tuple[tuple[float, float, str], ...]:
-    """Return useful sky positions for matching/reviewing a hierarchy record.
-
-    The catalog coordinate is usually the system/pair base position.  If a
-    separation and position angle are present, the endpoint is the component or
-    pair-secondary position implied by the catalog geometry.  Both are useful:
-    older WDS/CCDM-style coordinates can be coarse, while component endpoints
-    are often the relevant location for resolved targets.
-    """
-    return _record_positions(record)
-
-
-def _record_positions(
-    record: HierarchyRecord,
-    *,
-    raw_payload: dict[str, object] | None = None,
-) -> tuple[tuple[float, float, str], ...]:
-    if record.ra_deg is None or record.dec_deg is None:
-        return ()
-    if raw_payload is None:
-        raw_payload = _record_raw_payload(record)
-    values = [(record.ra_deg, record.dec_deg, _record_position_kind(record, raw_payload))]
-    if (
-        record.separation_arcsec is not None
-        and record.pa_deg is not None
-        and _hierarchy_separation_usable(record.provider, record.separation_arcsec)
-    ):
-        endpoint = _offset_position(
-            record.ra_deg,
-            record.dec_deg,
-            record.separation_arcsec,
-            record.pa_deg,
-        )
-        values.append((endpoint[0], endpoint[1], "component endpoint"))
-    return tuple(values)
-
-
-def _wds_record_has_unusable_separation(
-    record: HierarchyRecord,
-    *,
-    raw_payload: dict[str, object] | None = None,
-) -> bool:
-    if record.provider != "wds":
-        return False
-    if record.separation_arcsec is not None and record.separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
-        return True
-    if raw_payload is None:
-        raw_payload = _record_raw_payload(record)
-    return raw_payload.get("unusable_separation_arcsec") is not None
-
-
-def _position_usable_for_matching(position_kind: str) -> bool:
-    return position_kind not in {
-        "coarse CCDM identifier position",
-        "coarse WDS identifier position",
-        "low-quality catalog position",
-    }
-
-
-def _record_position_kind(record: HierarchyRecord, raw_payload: dict[str, object]) -> str:
-    coordinate_source = str(raw_payload.get("coordinate_source") or "")
-    if coordinate_source == "ccdm_id_only":
-        return "coarse CCDM identifier position"
-    if coordinate_source == "wds_id_only":
-        return "coarse WDS identifier position"
-    coo_flag = raw_payload.get("CooFlag")
-    try:
-        if coo_flag is not None and int(coo_flag) > 0:
-            return "low-quality catalog position"
-    except (TypeError, ValueError):
-        pass
-    return "record position"
-
-
-def _hierarchy_separation_usable(provider: str, separation_arcsec: float | None) -> bool:
-    if separation_arcsec is None:
-        return False
-    if provider == "wds" and separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
-        return False
-    return True
-
-
-def _record_raw_payload(record: HierarchyRecord) -> dict[str, object]:
-    try:
-        value = json.loads(record.raw_payload_json or "{}")
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _offset_position(
-    ra_deg: float,
-    dec_deg: float,
-    separation_arcsec: float,
-    pa_deg: float,
-) -> tuple[float, float]:
-    pa = math.radians(pa_deg)
-    east_arcsec = separation_arcsec * math.sin(pa)
-    north_arcsec = separation_arcsec * math.cos(pa)
-    cos_dec = max(0.01, abs(math.cos(math.radians(dec_deg))))
-    return (
-        (ra_deg + east_arcsec / (3600.0 * cos_dec)) % 360.0,
-        dec_deg + north_arcsec / 3600.0,
-    )
-
-
-def _separation_arcsec(ra1_deg: float, dec1_deg: float, ra2_deg: float, dec2_deg: float) -> float:
-    ra1 = math.radians(ra1_deg)
-    dec1 = math.radians(dec1_deg)
-    ra2 = math.radians(ra2_deg)
-    dec2 = math.radians(dec2_deg)
-    cosine = (
-        math.sin(dec1) * math.sin(dec2)
-        + math.cos(dec1) * math.cos(dec2) * math.cos(ra1 - ra2)
-    )
-    return math.degrees(math.acos(max(-1.0, min(1.0, cosine)))) * 3600.0
-
-
-def _best_separation(current: object, new: float) -> float:
-    if current is None:
-        return new
-    return min(float(current), new)
-
-
-def _parse_hierarchy_snapshot(provider: str, text: str) -> tuple[list[ParsedHierarchyRecord], int]:
-    definition = hierarchy_source(provider)
-    rows = _parse_delimited_snapshot(provider, text)
-    if rows is None:
-        rows = [definition.fixed_width_parser(line) for line in text.splitlines()]
-    parsed = [row for row in rows if row is not None]
-    return parsed, len(rows) - len(parsed)
-
-
-def _parse_hierarchy_tables(provider: str, tables) -> list[ParsedHierarchyRecord]:
-    parsed = []
-    for index, table in enumerate(tables):
-        table_name = _astropy_table_name(table, index)
-        if not _parseable_hierarchy_table(provider, table_name, getattr(table, "meta", {}) or {}):
-            continue
-        for row in table:
-            payload = row_payload(row)
-            record = _parse_mapping_record(provider, {
-                str(key): "" if value is None else str(value)
-                for key, value in payload.items()
-            })
-            if record is not None:
-                parsed.append(record)
-    return parsed
-
-
-def _parse_cached_hierarchy_snapshot(
-    provider: str,
-    cached: CachedSnapshotData,
-) -> list[ParsedHierarchyRecord]:
-    parsed = []
-    for table in cached.tables:
-        if not _parseable_hierarchy_table(provider, table.name, table.metadata):
-            continue
-        for payload in table.rows:
-            record = _parse_mapping_record(provider, {
-                str(key): "" if value is None else str(value)
-                for key, value in payload.items()
-            })
-            if record is not None:
-                parsed.append(record)
-    return parsed
-
-
-def _astropy_table_name(table, index: int) -> str:
-    meta = getattr(table, "meta", {}) or {}
-    return str(meta.get("name") or meta.get("ID") or f"table{index + 1}")
-
-
-def _parseable_hierarchy_table(
-    provider: str,
-    table_name: str,
-    metadata: dict[str, object] | None = None,
-) -> bool:
-    allowed = hierarchy_source(provider).main_table_aliases
-    names = {
-        table_name.strip().lower(),
-        str((metadata or {}).get("name") or "").strip().lower(),
-        str((metadata or {}).get("ID") or "").strip().lower(),
-    }
-    # VizieR catalog snapshots often include auxiliary notes/reference tables
-    # with target IDs but no usable source rows.  Keep those tables in the raw
-    # cache, but only parse the configured main table into hierarchy records.
-    return any(name in allowed for name in names)
-
-
 def _release_from_readme(provider: str, catalog: str, readme: str) -> str:
     date_match = re.search(
         r"(?:version|updated|last\s+update|date)\D{0,30}"
@@ -4204,226 +4023,6 @@ def _join_notes(*values: str | None) -> str | None:
 def _chunks(values: list[int], size: int):
     for start in range(0, len(values), size):
         yield values[start:start + size]
-
-
-def _parse_delimited_snapshot(provider: str, text: str) -> list[ParsedHierarchyRecord | None] | None:
-    sample_lines = [
-        line for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith(("#", ";"))
-    ]
-    if not sample_lines:
-        return []
-    delimiter = "\t" if "\t" in sample_lines[0] else ("," if "," in sample_lines[0] else None)
-    if delimiter is None:
-        return None
-    reader = csv.DictReader(sample_lines, delimiter=delimiter)
-    if not reader.fieldnames:
-        return []
-    return [_parse_mapping_record(provider, row) for row in reader]
-
-
-def _parse_mapping_record(provider: str, row: dict[str, str]) -> ParsedHierarchyRecord | None:
-    lowered = {key.lower().strip(): value.strip() for key, value in row.items() if key is not None}
-    if provider == "wds" and _wds_dubious_notes(_first_text(
-        lowered, "notes", "note", "n_notes", "n", "rem", "remarks",
-    )):
-        return None
-    native_id = _first_text(lowered, "wds", "wdsid", "ccdm", "id", "name", "native_id")
-    if provider == "ccdm" and native_id and native_id.upper().startswith("CCDM "):
-        native_id = native_id[5:].strip()
-    if not native_id:
-        return None
-    component = _first_text(lowered, "comp", "component", "components", "m_ccdm")
-    discoverer = _first_text(lowered, "disc", "discov", "discoverer", "discoverer_id")
-    ra = _first_ra_deg(lowered, "ra_deg", "raj2000", "_raj2000", "ra_icrs", "ra", "_ra.icrs")
-    dec = _first_dec_deg(lowered, "dec_deg", "dej2000", "_dej2000", "de_icrs", "dec", "de", "_de.icrs")
-    explicit_position = ra is not None and dec is not None
-    if ra is None or dec is None:
-        ra, dec = _coords_from_hierarchy_id(native_id)
-    first_epoch = _first_float(lowered, "first", "first_epoch", "obs1", "date1", "ep1")
-    last_epoch = _first_float(lowered, "last", "last_epoch", "obs2", "date2", "ep2")
-    measure_epoch = _first_float(lowered, "epoch", "measure_epoch", "last_epoch") or last_epoch
-    if provider == "wds":
-        # WDS VizieR rows expose first/last measures separately.  Use the most
-        # recent pair geometry for hierarchy matching/review; the catalog
-        # coordinate is the primary/reference position, not the secondary
-        # endpoint.
-        separation = _first_float(
-            lowered, "sep2", "rho2", "lastsep", "sep", "rho",
-            "separation", "separation_arcsec",
-        )
-        pa = _first_float(
-            lowered, "pa2", "theta2", "lastpa", "pa", "theta", "posang", "pa_deg",
-        )
-    else:
-        separation = _first_float(lowered, "sep", "sep2", "rho", "separation", "separation_arcsec")
-        pa = _first_float(lowered, "pa", "pa2", "theta", "posang", "pa_deg")
-    raw_payload: dict[str, object] = dict(row)
-    if provider == "wds" and not _hierarchy_separation_usable(provider, separation):
-        if separation is not None:
-            raw_payload["unusable_separation_arcsec"] = separation
-            raw_payload["unusable_separation_reason"] = "WDS 999.9 separation sentinel"
-        separation = None
-        pa = None
-    mag1 = _first_float(lowered, "mag1", "m1", "magra", "v1")
-    mag2 = _first_float(lowered, "mag2", "m2", "magb", "v2")
-    delta_mag = _first_float(lowered, "dmag", "delta_mag")
-    if delta_mag is None and mag1 is not None and mag2 is not None:
-        delta_mag = _delta_mag(mag1, mag2)
-    if provider == "wds":
-        reference_component, concerned_component = _wds_component_pair(component)
-        raw_payload.update({
-            "rComp": reference_component or "",
-            "Comp": concerned_component or component or "",
-            "component_label": component or "",
-            "coordinate_source": "wds_catalog" if explicit_position else "wds_id_only",
-        })
-    return ParsedHierarchyRecord(
-        native_id=native_id,
-        component=component,
-        discoverer_id=discoverer,
-        ra_deg=ra,
-        dec_deg=dec,
-        first_epoch=first_epoch,
-        last_epoch=last_epoch,
-        measure_epoch=measure_epoch,
-        separation_arcsec=separation,
-        pa_deg=pa,
-        magnitude_primary=mag1,
-        magnitude_secondary=mag2,
-        delta_mag=delta_mag,
-        raw_payload=raw_payload,
-    )
-
-
-def _parse_wds_fixed(line: str) -> ParsedHierarchyRecord | None:
-    if not line.strip() or line.lstrip().startswith(("#", ";")):
-        return None
-    if _wds_dubious_notes(_wds_fixed_notes(line)):
-        return None
-    native_id = line[0:10].strip()
-    if len(native_id) < 10 or not native_id[:5].isdigit():
-        return None
-    discoverer = line[10:17].strip() or None
-    component = line[17:22].strip() or None
-    first_epoch = _float_text(line[23:27])
-    last_epoch = _float_text(line[28:32])
-    pa = _float_text(line[42:45]) or _float_text(line[38:41])
-    separation = _float_text(line[52:62]) or _float_text(line[46:51])
-    mag1 = _float_text(line[63:68])
-    mag2 = _float_text(line[69:74])
-    if (last_epoch is not None and last_epoch < 1000) or separation is None:
-        compact = _parse_wds_compact(line)
-        if compact is not None:
-            return compact
-    ra, dec = _coords_from_hierarchy_id(native_id)
-    reference_component, concerned_component = _wds_component_pair(component)
-    raw_payload: dict[str, object] = {
-        "line": line,
-        "rComp": reference_component or "",
-        "Comp": concerned_component or component or "",
-        "component_label": component or "",
-        "coordinate_source": "wds_id_only",
-    }
-    if not _hierarchy_separation_usable("wds", separation):
-        if separation is not None:
-            raw_payload["unusable_separation_arcsec"] = separation
-            raw_payload["unusable_separation_reason"] = "WDS 999.9 separation sentinel"
-        separation = None
-        pa = None
-    return ParsedHierarchyRecord(
-        native_id=native_id,
-        component=component,
-        discoverer_id=discoverer,
-        ra_deg=ra,
-        dec_deg=dec,
-        first_epoch=first_epoch,
-        last_epoch=last_epoch,
-        measure_epoch=last_epoch,
-        separation_arcsec=separation,
-        pa_deg=pa,
-        magnitude_primary=mag1,
-        magnitude_secondary=mag2,
-        delta_mag=_delta_mag(mag1, mag2),
-        raw_payload=raw_payload,
-    )
-
-
-def _parse_wds_compact(line: str) -> ParsedHierarchyRecord | None:
-    tokens = line.split()
-    if not tokens:
-        return None
-    first = tokens[0]
-    native_id = first[:10]
-    if len(native_id) < 10 or not native_id[:5].isdigit():
-        return None
-    discoverer = first[10:] or None
-    offset = 1
-    component = None
-    if len(tokens) > offset and any(character.isalpha() for character in tokens[offset]):
-        component = tokens[offset]
-        offset += 1
-    first_epoch = _float_token(tokens, offset)
-    last_epoch = _float_token(tokens, offset + 1)
-    pa = _float_token(tokens, offset + 4) or _float_token(tokens, offset + 3)
-    separation = _float_token(tokens, offset + 6) or _float_token(tokens, offset + 5)
-    mag1 = _float_token(tokens, offset + 7)
-    mag2 = _float_token(tokens, offset + 8)
-    ra, dec = _coords_from_hierarchy_id(native_id)
-    reference_component, concerned_component = _wds_component_pair(component)
-    raw_payload = {
-        "line": line,
-        "rComp": reference_component or "",
-        "Comp": concerned_component or component or "",
-        "component_label": component or "",
-        "coordinate_source": "wds_id_only",
-    }
-    if not _hierarchy_separation_usable("wds", separation):
-        if separation is not None:
-            raw_payload["unusable_separation_arcsec"] = separation
-            raw_payload["unusable_separation_reason"] = "WDS 999.9 separation sentinel"
-        separation = None
-        pa = None
-    return ParsedHierarchyRecord(
-        native_id=native_id,
-        component=component,
-        discoverer_id=discoverer,
-        ra_deg=ra,
-        dec_deg=dec,
-        first_epoch=first_epoch,
-        last_epoch=last_epoch,
-        measure_epoch=last_epoch,
-        separation_arcsec=separation,
-        pa_deg=pa,
-        magnitude_primary=mag1,
-        magnitude_secondary=mag2,
-        delta_mag=_delta_mag(mag1, mag2),
-        raw_payload=raw_payload,
-    )
-
-
-def _wds_dubious_notes(value: str | None) -> bool:
-    return "X" in (value or "").upper()
-
-
-def _wds_fixed_notes(line: str) -> str | None:
-    # WDS fixed-width rows place note flags after the photometric/spectral
-    # columns in the tail of the row. Keep this deliberately broad: the compact
-    # fallback format has no reliable note field, while standard long rows do.
-    return line[107:].strip() if len(line) > 107 else None
-
-
-def _wds_component_pair(component: str | None) -> tuple[str | None, str | None]:
-    text = (component or "").strip()
-    if not text:
-        return None, None
-    if "," in text:
-        left, right = [part.strip() for part in text.split(",", 1)]
-        return left or None, right or None
-    compact = text.replace(" ", "")
-    if len(compact) == 2 and compact.isalpha():
-        return compact[0], compact[1]
-    return None, compact or None
 
 
 def _build_wds_record_index(records: tuple[HierarchyRecord, ...]) -> dict[tuple[int, str, str], HierarchyRecord]:
@@ -4523,7 +4122,7 @@ def _wds_graph_component_pair(
         if (record.source_id, record.native_id, "AB") not in record_index:
             return "A", "B"
         return None, None
-    return _wds_component_pair(component)
+    return component_pair(component)
 
 
 def _wds_graph_start_position(
@@ -4826,239 +4425,3 @@ def _graph_geometry_problem_detail(rows: list[HierarchyGraphEdgeRow]) -> str:
         if len(details) == 5:
             break
     return "; ".join(details)
-
-
-def _parse_ccdm_fixed(line: str) -> ParsedHierarchyRecord | None:
-    if not line.strip() or line.lstrip().startswith(("#", ";")):
-        return None
-    native = line[1:11].strip() if len(line) >= 11 else ""
-    component = None
-    discoverer = None
-    year = None
-    pa = None
-    separation = None
-    vmag = None
-    raw_payload: dict[str, object] = {"line": line, "coordinate_source": "ccdm_id_only"}
-    if native and ("+" in native or "-" in native):
-        rcomp = line[11:12].strip()
-        comp = line[12:13].strip()
-        component = _ccdm_component_label(rcomp, comp)
-        raw_payload.update({
-            "rComp": rcomp,
-            "Comp": comp,
-            "component_label": component,
-        })
-        discoverer = " ".join(line[15:22].split()) or None
-        dra_seconds = _float_text(line[23:30].strip())
-        ddec_arcsec = _float_text(line[30:37].strip())
-        year = _float_text(line[41:45].strip())
-        pa = _float_text(line[46:49].strip())
-        separation = _float_text(line[49:55].strip())
-        vmag = _float_text(line[59:63].strip())
-        pm_note = line[66:67].strip()
-        pm_ra = _float_text(line[67:72].strip())
-        pm_dec = _float_text(line[72:77].strip())
-        raw_payload.update({
-            "dRAs": dra_seconds,
-            "dDEs": ddec_arcsec,
-            "pmNote": pm_note,
-            "pmRA_masyr": pm_ra,
-            "pmDE_masyr": pm_dec,
-        })
-    else:
-        tokens = line.split()
-        native = next((token for token in tokens if token.upper().startswith("J") and len(token) >= 10), None)
-        if native is None and tokens and tokens[0].upper() == "CCDM" and len(tokens) > 1:
-            native = tokens[1]
-        if native is None:
-            native = tokens[0] if tokens else None
-    if native is None:
-        return None
-    native = native.replace("CCDM", "").strip()
-    ra, dec = _coords_from_hierarchy_id(native)
-    if native and ("+" in native or "-" in native):
-        ra, dec = _ccdm_precise_position(native, raw_payload)
-    if component is None:
-        component = _component_from_ccdm_id(native)
-    return ParsedHierarchyRecord(
-        native_id=native,
-        component=component,
-        discoverer_id=discoverer,
-        ra_deg=ra,
-        dec_deg=dec,
-        last_epoch=year,
-        measure_epoch=year,
-        separation_arcsec=separation,
-        pa_deg=pa,
-        magnitude_primary=vmag,
-        raw_payload=raw_payload,
-    )
-
-
-def _ccdm_component_label(reference: str, component: str) -> str | None:
-    if not reference and not component:
-        return None
-    return f"{reference}{component}".strip() or None
-
-
-def _ccdm_precise_position(
-    native: str,
-    raw_payload: dict[str, object],
-) -> tuple[float | None, float | None]:
-    base_ra, base_dec = _coords_from_hierarchy_id(native)
-    if base_ra is None or base_dec is None:
-        return base_ra, base_dec
-    dra_seconds = raw_payload.get("dRAs")
-    ddec_arcsec = raw_payload.get("dDEs")
-    if dra_seconds is None and ddec_arcsec is None:
-        raw_payload["coordinate_source"] = "ccdm_id_only"
-        return base_ra, base_dec
-    ra = base_ra
-    dec = base_dec
-    if isinstance(dra_seconds, int | float) and math.isfinite(float(dra_seconds)):
-        # CCDM dRAs is a remainder in seconds of time relative to the truncated
-        # catalog identifier coordinate.
-        ra = (ra + float(dra_seconds) * 15.0 / 3600.0) % 360.0
-    if isinstance(ddec_arcsec, int | float) and math.isfinite(float(ddec_arcsec)):
-        dec = dec + float(ddec_arcsec) / 3600.0
-    raw_payload["coordinate_source"] = "ccdm_remainder"
-    return ra, dec
-
-
-def _coords_from_hierarchy_id(value: str) -> tuple[float | None, float | None]:
-    text = value.strip()
-    if text.upper().startswith("J"):
-        text = text[1:]
-    sign_index = max(text.find("+"), text.find("-"))
-    if sign_index < 0:
-        return None, None
-    ra_text = text[:sign_index]
-    dec_text = text[sign_index:]
-    sign = -1.0 if dec_text.startswith("-") else 1.0
-    dec_body = dec_text[1:]
-    try:
-        if len(ra_text) >= 5:
-            hours = int(ra_text[0:2])
-            minutes = float(ra_text[2:]) / (10 ** max(0, len(ra_text[2:]) - 2))
-        else:
-            return None, None
-        if len(dec_body) >= 4:
-            degrees = int(dec_body[0:2])
-            arcmin = float(dec_body[2:4])
-        else:
-            return None, None
-    except ValueError:
-        return None, None
-    ra_deg = (hours + minutes / 60.0) * 15.0
-    dec_deg = sign * (degrees + arcmin / 60.0)
-    if not math.isfinite(ra_deg) or not math.isfinite(dec_deg):
-        return None, None
-    return ra_deg % 360.0, dec_deg
-
-
-def _component_from_ccdm_id(value: str) -> str | None:
-    tail = ""
-    for character in reversed(value.strip()):
-        if character.isalpha():
-            tail = character + tail
-        else:
-            break
-    return tail or None
-
-
-def _first_text(row: dict[str, str], *keys: str) -> str | None:
-    for key in keys:
-        value = row.get(key.lower())
-        if value:
-            return value
-    return None
-
-
-def _first_float(row: dict[str, str], *keys: str) -> float | None:
-    for key in keys:
-        value = _float_text(row.get(key.lower(), ""))
-        if value is not None:
-            return value
-    return None
-
-
-def _first_ra_deg(row: dict[str, str], *keys: str) -> float | None:
-    for key in keys:
-        text = row.get(key.lower(), "")
-        value = _float_text(text)
-        if value is not None:
-            return value
-        value = _ra_text_to_deg(text)
-        if value is not None:
-            return value
-    return None
-
-
-def _first_dec_deg(row: dict[str, str], *keys: str) -> float | None:
-    for key in keys:
-        text = row.get(key.lower(), "")
-        value = _float_text(text)
-        if value is not None:
-            return value
-        value = _dec_text_to_deg(text)
-        if value is not None:
-            return value
-    return None
-
-
-def _ra_text_to_deg(value: object) -> float | None:
-    parts = _sexagesimal_parts(value)
-    if parts is None:
-        return None
-    hours, minutes, seconds = parts
-    ra_deg = (abs(hours) + minutes / 60.0 + seconds / 3600.0) * 15.0
-    return ra_deg % 360.0 if math.isfinite(ra_deg) else None
-
-
-def _dec_text_to_deg(value: object) -> float | None:
-    parts = _sexagesimal_parts(value)
-    if parts is None:
-        return None
-    degrees, minutes, seconds = parts
-    sign = -1.0 if str(value).strip().startswith("-") or degrees < 0 else 1.0
-    dec_deg = sign * (abs(degrees) + minutes / 60.0 + seconds / 3600.0)
-    return dec_deg if math.isfinite(dec_deg) else None
-
-
-def _sexagesimal_parts(value: object) -> tuple[float, float, float] | None:
-    text = str(value).strip()
-    if not text or ":" not in text and " " not in text:
-        return None
-    tokens = [token for token in re.split(r"[:\s]+", text) if token]
-    if len(tokens) < 3:
-        return None
-    try:
-        return float(tokens[0]), abs(float(tokens[1])), abs(float(tokens[2]))
-    except ValueError:
-        return None
-
-
-def _float_token(tokens: list[str], index: int) -> float | None:
-    if index < 0 or index >= len(tokens):
-        return None
-    return _float_text(tokens[index])
-
-
-def _float_text(value: object) -> float | None:
-    try:
-        text = str(value).strip()
-    except Exception:
-        return None
-    if not text or text in {".", "-", "--"}:
-        return None
-    try:
-        result = float(text)
-    except ValueError:
-        return None
-    return result if math.isfinite(result) else None
-
-
-def _delta_mag(first: float | None, second: float | None) -> float | None:
-    if first is None or second is None:
-        return None
-    return round(second - first, 6)

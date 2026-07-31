@@ -4,7 +4,8 @@ from astropy.table import Table
 from sqlalchemy import select
 
 from sdb_identity.adapters.gaia import GaiaDr3Adapter
-from sdb_identity.catalogs import CatalogQueryContext, CatalogService
+from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalog_types import CatalogQueryContext
 from sdb_identity.models import CatalogRun, NormalizedMeasurement, RawCatalogRow
 from sdb_identity.providers import Astrometry
 from sdb_identity.service import AddRequest, IdentityService
@@ -193,7 +194,7 @@ def test_gaia_refresh_reuses_identity_source_and_stores_photometry(session_facto
     client = FakeVizier([gaia_row()])
     adapter = GaiaDr3Adapter()
     adapter.create_client = lambda: client
-    result = CatalogService(session_factory, {"gaia_dr3": adapter}).refresh(
+    result = CatalogAcquisitionService(session_factory, {"gaia_dr3": adapter}).refresh(
         target.sdbid, "gaia_dr3"
     )
     assert (result.status, result.selected_source_id, result.measurement_count) == (
