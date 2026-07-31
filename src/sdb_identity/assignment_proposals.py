@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
-from .adapters import (
+from .catalog_policy import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )

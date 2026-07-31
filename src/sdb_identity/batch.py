@@ -15,10 +15,11 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalogs import CatalogService
+from .ingestion import TargetIngestionPlan
 from .metadata import MetadataService
 from .models import ImportItem, ImportJob, ImportRun
 from .progress import NULL_PROGRESS, ProgressReporter
-from .providers import NameResolution, ProviderError
+from .providers import ProviderError
 from .service import AddRequest, IdentityService, UnresolvedTarget
 from .vocabulary import PROVIDER_REVIEW_STATUSES, ProviderRunStatus
 
@@ -44,16 +45,6 @@ class BatchSummary:
     status: str
     item_count: int
     job_counts: dict[str, int]
-
-
-class _PrefetchedSimbad:
-    name = "simbad"
-
-    def __init__(self, values: dict[str, NameResolution | None]):
-        self.values = values
-
-    def resolve_name(self, name: str) -> NameResolution | None:
-        return self.values.get(name)
 
 
 class BatchService:
@@ -299,14 +290,13 @@ class BatchService:
             with ThreadPoolExecutor(max_workers=self.workers["identity"]) as executor:
                 list(executor.map(self._execute_job, job_ids))
             return
-        cached_simbad = _PrefetchedSimbad(resolved)
         worker_state = threading.local()
         def execute_prefetched(job_id: int) -> None:
             request = requests_by_job.get(job_id)
             if request is None:
                 return
-            # Astroquery clients are stateful; use a worker-local Gaia client
-            # while sharing only the immutable prefetched SIMBAD mapping.
+            # Astroquery clients are stateful; each worker keeps its own
+            # identity resolver while consuming immutable prefetched evidence.
             live_identity = getattr(worker_state, "identity", None)
             if live_identity is None:
                 live_identity = self.identity_factory()
@@ -314,10 +304,9 @@ class BatchService:
             self._execute_identity_job(
                 job_id,
                 request,
-                IdentityService(
-                    self.sessions,
-                    simbad=cached_simbad,
-                    gaia=live_identity.gaia,
+                live_identity,
+                name_resolution=(
+                    resolved.get(request.name) if request.name else None
                 ),
             )
         with ThreadPoolExecutor(max_workers=self.workers["identity"]) as executor:
@@ -333,6 +322,8 @@ class BatchService:
         job_id: int,
         request: AddRequest,
         identity: IdentityService,
+        *,
+        name_resolution: object = None,
     ) -> None:
         with self.sessions.begin() as session:
             job = session.get(ImportJob, job_id)
@@ -343,7 +334,11 @@ class BatchService:
             job.started_at = datetime.now(timezone.utc)
             job.completed_at = None
         try:
-            result = identity.add(request)
+            result = TargetIngestionPlan(identity=identity).identify(
+                request,
+                name_resolution=name_resolution,
+                prefetched=True,
+            )
             self._finish(job_id, "succeeded", target_id=result.target_id)
         except UnresolvedTarget as error:
             status = (
@@ -467,7 +462,9 @@ class BatchService:
         try:
             if stage == "identity":
                 request = self._request(input_data)
-                result = self.identity_factory().add(request)
+                result = TargetIngestionPlan(
+                    identity=self.identity_factory(),
+                ).identify(request)
                 self._finish(job_id, "succeeded", target_id=result.target_id)
                 return
             if target_id is None:

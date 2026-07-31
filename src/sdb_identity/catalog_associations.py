@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .adapters import (
+from .catalog_policy import (
     catalog_position_matches_components,
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,

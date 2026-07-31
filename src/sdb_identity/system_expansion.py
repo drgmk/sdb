@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from .astrometry import angular_separation_arcsec
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
-from .hierarchy import (
-    HierarchyService,
-    _component_label_from_identifier,
-    _simbad_component_relevance,
+from .hierarchy import HierarchyService
+from .hierarchy_semantics import (
+    component_label_from_identifier,
+    simbad_component_relevance,
 )
 from .models import (
     ExternalIdentifier,
@@ -27,7 +27,13 @@ from .models import (
 )
 from .providers import Astrometry
 from .identifiers import normalize_identifier
-from .service import AddRequest, IdentityService, UnresolvedTarget
+from .service import (
+    AddRequest,
+    IdentityService,
+    TargetRegistrar,
+    UnresolvedTarget,
+)
+from .ingestion import TargetIngestionPlan
 from .target_lifecycle import set_target_lifecycle, target_lifecycle_status
 from .targets import resolve_target
 from .vocabulary import ProviderRunStatus, TargetRole, TargetState
@@ -103,11 +109,11 @@ def preview_immediate_relatives(
                 )
                 if value
             ))
-            relevance = _simbad_component_relevance(
+            relevance = simbad_component_relevance(
                 relationship.related_object_type, object_types,
             )
             matched = _find_related_target(session, relationship)
-            component = _component_label_from_identifier(relationship.related_main_id)
+            component = component_label_from_identifier(relationship.related_main_id)
             role = _suggested_role(relationship.direction, component)
             state = (
                 TargetState.SYSTEM_ONLY
@@ -224,6 +230,7 @@ def import_immediate_relatives(
         reason=decision.reason,
     )
     rows = []
+    ingestion = TargetIngestionPlan(identity=identity_service)
     counts = {
         "imported": 0,
         "reconciled": 0,
@@ -248,7 +255,7 @@ def import_immediate_relatives(
         target_sdbid = relative.get("matched_sdbid")
         if target_sdbid is None:
             try:
-                added = identity_service.add(AddRequest(
+                added = ingestion.identify(AddRequest(
                     name=str(relative["main_id"]),
                     command=f"hierarchy import-relatives {requested_sdbid}",
                 ))
@@ -450,12 +457,14 @@ def _find_related_target(
         target = session.get(Target, target_id)
         if target is None:
             continue
-        primary = IdentityService._target_primary_identity(session, target)
+        primary = TargetRegistrar.target_primary_identity(
+            session, target,
+        )
         if primary and normalize_identifier(primary) == normalized:
             return target
     if relationship.related_ra_deg is None or relationship.related_dec_deg is None:
         return None
-    related_component = _component_label_from_identifier(relationship.related_main_id)
+    related_component = component_label_from_identifier(relationship.related_main_id)
     position = Astrometry(relationship.related_ra_deg, relationship.related_dec_deg)
     radius_deg = 1.0 / 3600.0
     candidates = session.scalars(select(Target).where(
@@ -465,8 +474,8 @@ def _find_related_target(
         )
     ))
     for target in candidates:
-        primary = IdentityService._target_primary_identity(session, target)
-        primary_component = _component_label_from_identifier(primary or "")
+        primary = TargetRegistrar.target_primary_identity(session, target)
+        primary_component = component_label_from_identifier(primary or "")
         if related_component != primary_component and (
             related_component is not None or primary_component is not None
         ):
@@ -510,7 +519,9 @@ def _find_or_create_expansion_system(
         )
         if row is not None:
             return row
-        primary_identity = IdentityService._target_primary_identity(session, requested)
+        primary_identity = TargetRegistrar.target_primary_identity(
+            session, requested,
+        )
         base_name = f"{primary_identity or requested.sdbid} system"
         name = base_name
         index = 2
@@ -648,7 +659,9 @@ def _promote_system_primary(
         system = session.get(TargetSystem, system_id)
         target = resolve_target(session, target_sdbid)
         system.primary_target_id = target.id
-        primary_identity = IdentityService._target_primary_identity(session, target)
+        primary_identity = TargetRegistrar.target_primary_identity(
+            session, target,
+        )
         preferred_name = None if not primary_identity else f"{primary_identity} system"
         if preferred_name and preferred_name != system.name:
             conflict = session.scalar(select(TargetSystem.id).where(

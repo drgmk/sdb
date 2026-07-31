@@ -6,37 +6,41 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 
 from ..astrometry import propagate_to_epoch
-from ..catalogs import CatalogCandidate, MeasurementValue
+from ..catalog_registry import catalog_provider
+from ..catalog_types import CatalogCandidate, MeasurementValue
 from ..catalog_provenance import (
     CatalogProvenance,
     vizier_access_url,
     vizier_readme_url,
     with_payload_provenance,
 )
-from ..catalogs import CatalogQueryContext
+from ..catalog_types import CatalogQueryContext
 from ..providers import Astrometry, ProviderError
 from .vizier import VizierConeAdapter, row_float, row_payload, row_text, row_value
 from .review_metadata import add_review_metadata, PositionUncertainty, ReviewField
 
 
+_PROVIDER = catalog_provider("tycho2")
+
+
 class Tycho2Adapter(VizierConeAdapter):
     # Catalog identity, table epochs, and match policy.
-    name = "tycho2"
-    display_name = "Tycho-2"
-    release = "I/259"
-    query_epoch = 2000.0
-    radius_arcsec = 2.0
-    review_radius_arcsec = 15.0
-    bibcode = "2000A&A...355L..27H"
+    name = _PROVIDER.key
+    display_name = _PROVIDER.display_name
+    release = _PROVIDER.catalog
+    query_epoch = _PROVIDER.query_epoch
+    radius_arcsec = _PROVIDER.radius_arcsec
+    review_radius_arcsec = _PROVIDER.review_radius_arcsec
+    bibcode = _PROVIDER.bibliography
     source_id_columns = ()
     identifier_prefixes = ("TYC ",)
-    band_wavelengths_micron = (("BT", 0.4203), ("VT", 0.5317))
+    band_wavelengths_micron = _PROVIDER.bands
     # suppl_2 is retained by the upstream catalogue for completeness, but its
     # ReadMe describes the entries as probably false or heavily disturbed.
     # It is therefore intentionally not eligible for SDB matching/photometry.
-    science_tables = (
-        ("I/259/tyc2", 2000.0),
-        ("I/259/suppl_1", 1991.25),
+    science_tables = tuple(
+        (table, 2000.0 if table.endswith("/tyc2") else 1991.25)
+        for table in _PROVIDER.science_tables
     )
     # Provider columns exposed directly to match review.
     review_fields = (

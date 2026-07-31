@@ -45,6 +45,7 @@ def create_review_app(
     catalog_service_factory: Callable[[str, str], object] | None = None,
     catalog_coverage_providers: tuple[str, ...] | None = None,
     catalog_update_factory: Callable[[], object] | None = None,
+    reference_store: object | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -173,6 +174,18 @@ def create_review_app(
         if sample is None:
             raise HTTPException(status_code=400, detail="server has no selected sample")
         return review_dashboard_report(session_factory, sample=sample)
+
+    @app.get("/catalogs", response_class=HTMLResponse)
+    def catalogs_page():
+        from .catalog_overview import catalog_overview
+
+        return _catalogs_page(catalog_overview(reference_store))
+
+    @app.get("/api/catalogs")
+    def catalogs_api():
+        from .catalog_overview import catalog_overview
+
+        return catalog_overview(reference_store)
 
     @app.get("/api/target/{sdbid}")
     def target_api(sdbid: str):
@@ -392,6 +405,7 @@ def serve_review_ui(
     catalog_service_factory: Callable[[str, str], object] | None = None,
     catalog_coverage_providers: tuple[str, ...] | None = None,
     catalog_update_factory: Callable[[], object] | None = None,
+    reference_store: object | None = None,
 ) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("the review UI currently binds to localhost only")
@@ -410,6 +424,7 @@ def serve_review_ui(
         catalog_service_factory=catalog_service_factory,
         catalog_coverage_providers=catalog_coverage_providers,
         catalog_update_factory=catalog_update_factory,
+        reference_store=reference_store,
     )
     url = f"http://{host}:{port}/"
     if open_browser:
@@ -1575,7 +1590,7 @@ def _queue_page(
     })
     body = f"""
 <main>
-  <h1>SDB sample review</h1>
+  <h1>SDB sample review <a class="section-link" href="/catalogs">Catalogs</a></h1>
   <p class="muted">Sample <code>{_e(sample)}</code>. Current detections and accepted ownership are live from SQLite; open a target for detailed proposals.</p>
   <div class="summary">
     <span><strong>{summary['target_count']}</strong> sample targets</span>
@@ -1599,6 +1614,72 @@ def _queue_page(
   <tbody>{''.join(rows) or '<tr><td colspan="9" class="muted">No sample targets match these filters.</td></tr>'}</tbody></table>
 </main>"""
     return _page(f"SDB review: {sample}", body)
+
+
+def _catalogs_page(report: dict[str, object]) -> str:
+    rows = []
+    for provider in report["providers"]:
+        bands = ", ".join(
+            f"{band['name']} ({band['wavelength_micron']:g} µm)"
+            for band in provider["bands"]
+        ) or "—"
+        science_tables = ", ".join(provider["science_tables"]) or "—"
+        retained_tables = ", ".join(provider["retained_tables"]) or "—"
+        snapshot = provider.get("snapshot")
+        snapshot_detail = ""
+        if snapshot:
+            table_rows = "".join(
+                f"<li><code>{_e(table['name'])}</code>: "
+                f"{table['row_count']:,} rows"
+                f"{' (science)' if table['science'] else ' (retained only)'}</li>"
+                for table in snapshot["tables"]
+            )
+            snapshot_detail = (
+                f"<p><strong>Snapshot:</strong> {snapshot['row_count']:,} rows; "
+                f"retrieved {_e(snapshot['retrieved_at'])}; "
+                f"SHA-256 <code>{_e(snapshot['content_sha256'])}</code></p>"
+                f"<ul>{table_rows}</ul>"
+            )
+        caveats = "".join(
+            f"<li>{_e(value)}</li>" for value in provider["caveats"]
+        )
+        details = f"""
+<div class="catalog-detail">
+  <p><strong>Science tables:</strong> {_e(science_tables)}<br>
+  <strong>Retained-only tables:</strong> {_e(retained_tables)}<br>
+  <strong>Identifier policy:</strong> {_e(provider['identifier_policy'])}<br>
+  <strong>Component policy:</strong> {_e(provider['component_policy'])}<br>
+  <strong>Epoch:</strong> {_e(provider['query_epoch'] if provider['query_epoch'] is not None else 'source identifier')} ·
+  <strong>query radius:</strong> {_e(str(provider['radius_arcsec']) + ' arcsec' if provider['radius_arcsec'] is not None else 'n/a')} ·
+  <strong>review radius:</strong> {_e(str(provider['review_radius_arcsec']) + ' arcsec' if provider['review_radius_arcsec'] is not None else 'n/a')}<br>
+  <strong>Bibliography:</strong> <code>{_e(provider['bibliography'] or '—')}</code></p>
+  {snapshot_detail}
+  {f'<ul class="warning-list">{caveats}</ul>' if caveats else ''}
+</div>"""
+        rows.append(
+            f"<tr><td><details><summary><strong>{_e(provider['display_name'])}</strong> "
+            f"<code>{_e(provider['key'])}</code></summary>{details}</details></td>"
+            f"<td><a href='{_e(provider['vizier_url'])}' target='_blank' rel='noopener'>"
+            f"<code>{_e(provider['catalog'])}</code></a></td>"
+            f"<td>{_e(str(provider['acquisition_mode']).replace('_', ' '))}</td>"
+            f"<td>{_e(bands)}</td><td class='catalog-status-{_e(provider['status'])}'>"
+            f"{_e(provider['status'])}</td></tr>"
+        )
+    body = f"""
+<main>
+  <p><a href="/">← readiness queue</a></p>
+  <h1>Catalog providers</h1>
+  <p class="muted">One operational view of remote catalogs and locally retained reference snapshots. Expand a provider for matching, component, provenance, and snapshot details.</p>
+  <div class="summary">
+    <span><strong>{report['provider_count']}</strong> providers</span>
+    <span><strong>{report['remote_count']}</strong> remote</span>
+    <span><strong>{report['snapshot_current_count']}</strong> snapshots current</span>
+    <span><strong>{report['snapshot_missing_count']}</strong> snapshots missing</span>
+  </div>
+  <table class="catalog-overview"><thead><tr><th>provider</th><th>catalog / release</th><th>acquisition</th><th>products / bands</th><th>status</th></tr></thead>
+  <tbody>{''.join(rows)}</tbody></table>
+</main>"""
+    return _page("SDB catalog providers", body)
 
 
 def _target_external_resources(
@@ -1947,6 +2028,7 @@ def _target_page(
 <main class="live-workspace">
   <header class="live-header">
     <span><a href="{_e(back_url)}">← readiness queue</a></span>
+    <span><a href="/catalogs">Catalogs</a></span>
     <strong>{f'{_e(display_name)} · ' if display_name else ''}<code>{_e(sdbid)}</code></strong>
     <span class="muted">{_e(target['role'])}/{_e(target['state'])} · {readiness_text}</span>
     {navigation_html}
@@ -2083,6 +2165,7 @@ body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;backg
 .live-review{--drawer-width:min(420px,38vw)}.band-row .eligibility-state{grid-column:1}.band-row .eligibility-toggle{grid-column:2;grid-row:1/3;align-self:center;min-width:124px}.band-row .eligibility-state.pending{color:#9a5b00;font-weight:600}.combined-system-control{display:grid;gap:8px;margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #dce3ec;border-radius:6px}.scope-target-field[hidden],.preview-grid[hidden]{display:none}.scope-target-field select{box-sizing:border-box;width:100%;margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.preview-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;margin-top:12px}.preview-grid .preview-panel{margin-top:0}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
 .nearby-import-dialog{width:min(900px,94vw)}.nearby-search-controls{display:flex;gap:12px;align-items:end;margin:12px 0}.nearby-search-controls label{display:grid;gap:4px}.nearby-search-controls input{width:90px}.nearby-import-results{max-height:46vh;overflow:auto;border:1px solid #dce3ec;border-radius:7px;margin:10px 0 12px}.nearby-import-results th{position:sticky;top:0;background:#f8fafc;z-index:1}.nearby-import-results td:first-child,.nearby-import-results th:first-child{text-align:center;width:55px}.nearby-import-results td:nth-last-child(2){white-space:nowrap}.import-target-links{display:flex;gap:8px;flex-wrap:wrap}.import-target-links a{display:inline-block;padding:6px 9px;background:white;border:1px solid #b7c1cf;border-radius:5px;text-decoration:none}
 @media(max-width:1400px){.live-header{gap:8px}.live-header>span:first-child{flex-shrink:0}.live-header>.muted{display:none}.live-header>strong{max-width:240px;overflow:hidden;text-overflow:ellipsis}.queue-navigation>span:nth-child(2){display:none}.external-resource{padding:3px 4px;font-size:11px}.live-header button{padding:5px 6px;font-size:12px}}
+.section-link{font-size:14px;font-weight:500;margin-left:12px}.catalog-overview details summary{cursor:pointer}.catalog-overview td:first-child{min-width:260px}.catalog-detail{min-width:min(720px,70vw);padding:8px 0;color:#334155}.catalog-detail p{line-height:1.55}.warning-list{background:#fff8df;border-left:4px solid #d99b16;padding:8px 8px 8px 30px}.catalog-status-current{color:#28734a;font-weight:600}.catalog-status-missing{color:#9a5b00;font-weight:600}
 """
 
 

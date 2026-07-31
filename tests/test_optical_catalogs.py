@@ -3,7 +3,7 @@ from __future__ import annotations
 import astropy.units as u
 from astropy.table import Table
 
-from sdb_identity.adapters import catalog_source_display_name
+from sdb_identity.catalog_policy import catalog_source_display_name
 from sdb_identity.adapters.reference import (
     Hip2SnapshotAdapter,
     Paunzen15SnapshotAdapter,

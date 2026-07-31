@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_results import effective_catalog_results
 from .astrometry import propagate_to_epoch
-from .catalogs import CatalogQueryContext, CatalogService
+from .catalog_types import CatalogQueryContext
+from .catalogs import CatalogService
 from .dirty import mark_export_dirty
 from .models import AstrometricSolution, CatalogRun, ExportDirtyTarget, ExternalIdentifier, ReferenceApplicationItem, ReferenceApplicationRecord, ReferenceApplicationRun, Target
 from .providers import Astrometry

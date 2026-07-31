@@ -51,20 +51,18 @@ from .system_photometry import (
 )
 from .providers import Astrometry, ProviderError
 from .identifiers import normalize_identifier
+from .hierarchy_semantics import (
+    component_label_from_identifier,
+    normalize_component_label,
+    simbad_component_relevance,
+)
+from .hierarchy_records import ParsedHierarchyRecord
+from .hierarchy_registry import hierarchy_source
+from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
 from .targets import resolve_target
 from .snapshots import SnapshotClient, VizierSnapshotClient
 from .vocabulary import ProviderRunStatus, ReviewPriority, review_priority_rank
 
-
-HIERARCHY_CATALOGS = {
-    "wds": "B/wds",
-    "ccdm": "I/274",
-}
-
-HIERARCHY_MAIN_TABLES = {
-    "wds": {"b/wds/wds", "b_wds_wds", "wds"},
-    "ccdm": {"i/274/ccdm", "i_274_ccdm", "ccdm"},
-}
 
 # Structural edges hold both provider-derived graph edges and target-resolved
 # relationships in one table. Graph readers see only re-derivable provider edges;
@@ -78,11 +76,6 @@ def _relationship_status(status: str) -> str:
     clean = status.strip()
     return _RELATIONSHIP_STATUS if clean in ("", "current") else clean
 
-WDS_UNUSABLE_SEPARATION_ARCSEC = 999.8
-_COMPONENT_TOKEN_RE = re.compile(r"^(?:[A-Z]{1,3}|[A-Z][a-z0-9])$")
-_TRAILING_COMPONENT_RE = re.compile(r"(?:^|[\s_-])([A-Z]{1,3}|[A-Z][a-z0-9])$")
-_WDS_CCDM_COMPONENT_RE = re.compile(r"\b(?:WDS|CCDM)\s+J?\d{4,6}[+-]\d{4,6}\s*([A-Z]{1,3}|[A-Z][a-z0-9])\b", re.IGNORECASE)
-_HD_ATTACHED_COMPONENT_RE = re.compile(r"^HD\s+\d+([A-Z]{1,3}|[A-Z][a-z0-9])$")
 
 
 @dataclass(frozen=True)
@@ -259,24 +252,6 @@ class HierarchyGraphDiagnosticRow:
     non_structural_count: int
     matched_candidate_count: int
     detail: str
-
-
-@dataclass(frozen=True)
-class ParsedHierarchyRecord:
-    native_id: str
-    component: str | None = None
-    discoverer_id: str | None = None
-    ra_deg: float | None = None
-    dec_deg: float | None = None
-    first_epoch: float | None = None
-    last_epoch: float | None = None
-    measure_epoch: float | None = None
-    separation_arcsec: float | None = None
-    pa_deg: float | None = None
-    magnitude_primary: float | None = None
-    magnitude_secondary: float | None = None
-    delta_mag: float | None = None
-    raw_payload: dict[str, object] | None = None
 
 
 class HierarchyService:
@@ -927,8 +902,7 @@ class HierarchyService:
         note: str | None = None,
     ) -> HierarchyImportResult:
         provider = provider.lower().strip()
-        if provider not in {"wds", "ccdm"}:
-            raise ValueError(f"unsupported hierarchy provider: {provider}")
+        hierarchy_source(provider)
         if not release.strip():
             raise ValueError("release is required")
         path = Path(path).expanduser().resolve()
@@ -991,9 +965,7 @@ class HierarchyService:
         note: str | None = None,
     ) -> HierarchyImportResult:
         provider = provider.lower().strip()
-        catalog = HIERARCHY_CATALOGS.get(provider)
-        if catalog is None:
-            raise ValueError(f"unsupported hierarchy provider: {provider}")
+        catalog = hierarchy_source(provider).catalog
         client = client or VizierSnapshotClient()
         cache_status = "disabled"
         if cache_path is not None:
@@ -2501,7 +2473,7 @@ def _component_labels_for_identifier_candidate(
     values = []
     identifier = candidate.get("identifier")
     if identifier:
-        label = _component_label_from_identifier(str(identifier))
+        label = component_label_from_identifier(str(identifier))
         if label:
             values.append(label)
     component = candidate.get("component")
@@ -3059,7 +3031,7 @@ def _component_label_candidates(
         values.append(("main_id", main_id, "medium"))
     values.extend(("identifier", value, "low") for value in identifiers)
     for source, value, confidence in values:
-        label = _component_label_from_identifier(value)
+        label = component_label_from_identifier(value)
         if label is None:
             continue
         label_value_key = (label, value)
@@ -3079,41 +3051,6 @@ def _component_label_candidates(
     return candidates
 
 
-def _component_label_from_identifier(value: str) -> str | None:
-    text = " ".join(value.strip().split())
-    if not text:
-        return None
-    matched = _WDS_CCDM_COMPONENT_RE.search(text)
-    if matched:
-        return _normalize_component_label(matched.group(1))
-    # SIMBAD commonly writes HD component names without a separating space,
-    # for example ``HD 224953A``. Keep this catalog-specific: a trailing
-    # letter is not generally safe to interpret as a component label.
-    matched = _HD_ATTACHED_COMPONENT_RE.fullmatch(text)
-    if matched:
-        return _normalize_component_label(matched.group(1))
-    token = text.rsplit(" ", 1)[-1]
-    if _COMPONENT_TOKEN_RE.fullmatch(token) and not _component_token_looks_like_catalog_suffix(text, token):
-        return _normalize_component_label(token)
-    matched = _TRAILING_COMPONENT_RE.search(text)
-    if matched:
-        return _normalize_component_label(matched.group(1))
-    return None
-
-
-def _component_token_looks_like_catalog_suffix(text: str, token: str) -> bool:
-    if len(token) != 1:
-        return False
-    prefix = text[: -len(token)].rstrip()
-    return bool(prefix and prefix[-1].isdigit() and " " not in prefix)
-
-
-def _normalize_component_label(value: str) -> str:
-    if len(value) >= 2 and value[0].isalpha() and value[1:].islower():
-        return value[0].upper() + value[1:]
-    return value.upper()
-
-
 def _best_component_label_candidate(candidates: list[dict[str, object]]) -> str | None:
     if not candidates:
         return None
@@ -3124,11 +3061,11 @@ def _best_component_label_candidate(candidates: list[dict[str, object]]) -> str 
 
 
 def _component_labels_match(first: str, second: str) -> bool:
-    return _normalize_component_label(first) == _normalize_component_label(second)
+    return normalize_component_label(first) == normalize_component_label(second)
 
 
 def _component_label_is_group(value: str) -> bool:
-    label = _normalize_component_label(value.strip())
+    label = normalize_component_label(value.strip())
     if not label:
         return False
     if "," in label:
@@ -3137,8 +3074,8 @@ def _component_label_is_group(value: str) -> bool:
 
 
 def _component_label_contains(group: str, component: str) -> bool:
-    group = _normalize_component_label(group)
-    component = _normalize_component_label(component)
+    group = normalize_component_label(group)
+    component = normalize_component_label(component)
     if group == component:
         return True
     if "," in group:
@@ -3588,7 +3525,7 @@ def _semantic_relevance_counts(relationships: list[dict[str, object]]) -> dict[s
 
 def _target_semantic_relationship(value: SimbadRelationship) -> dict[str, object]:
     object_types = json.loads(value.related_object_types_json or "[]")
-    relevance = _simbad_component_relevance(value.related_object_type, object_types)
+    relevance = simbad_component_relevance(value.related_object_type, object_types)
     return {
         "related_oid": value.related_oid,
         "main_id": value.related_main_id,
@@ -3603,75 +3540,6 @@ def _target_semantic_relationship(value: SimbadRelationship) -> dict[str, object
         "bibcode": value.link_bibcode,
         "separation_arcsec": value.separation_arcsec,
     }
-
-
-def _simbad_component_relevance(
-    primary_type: str | None,
-    object_types: list[str],
-) -> str:
-    codes = {
-        _normalize_simbad_type(value)
-        for value in [primary_type, *object_types]
-        if value
-    }
-    if not codes:
-        return "unknown"
-    if codes & _SIMBAD_PLANETARY_OR_DISK_TYPES:
-        return "planetary_or_disk"
-    if codes & _SIMBAD_CONTEXTUAL_GROUP_TYPES:
-        return "contextual_group"
-    if any(_simbad_type_is_stellar_or_substellar(code) for code in codes):
-        return "stellar_or_substellar_component"
-    return "unknown"
-
-
-def _normalize_simbad_type(value: str) -> str:
-    return value.strip().lower()
-
-
-def _simbad_type_is_stellar_or_substellar(code: str) -> bool:
-    if "*" in code:
-        return True
-    return code in {
-        "star",
-        "bd",
-        "bd?",
-        "brown dwarf",
-        "low-mass*",
-    }
-
-
-_SIMBAD_PLANETARY_OR_DISK_TYPES = {
-    "pl",
-    "pl?",
-    "planet",
-    "exoplanet",
-    "disk",
-    "debrisdisk",
-    "debris disk",
-    "protoplanetarydisk",
-    "protoplanetary disk",
-}
-
-
-_SIMBAD_CONTEXTUAL_GROUP_TYPES = {
-    "cl*",
-    "assoc*",
-    "as*",
-    "assoc",
-    "association",
-    "mgr",
-    "moving group",
-    "cluster",
-    "open cluster",
-    "globular cluster",
-    "region",
-    "hii",
-    "molcld",
-    "cloud",
-    "neb",
-    "nebula",
-}
 
 
 def _target_semantic_identity_summary(value: dict[str, object]) -> dict[str, object]:
@@ -4159,7 +4027,7 @@ def _wds_record_has_unusable_separation(
 ) -> bool:
     if record.provider != "wds":
         return False
-    if record.separation_arcsec is not None and record.separation_arcsec >= WDS_UNUSABLE_SEPARATION_ARCSEC:
+    if record.separation_arcsec is not None and record.separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
         return True
     if raw_payload is None:
         raw_payload = _record_raw_payload(record)
@@ -4192,7 +4060,7 @@ def _record_position_kind(record: HierarchyRecord, raw_payload: dict[str, object
 def _hierarchy_separation_usable(provider: str, separation_arcsec: float | None) -> bool:
     if separation_arcsec is None:
         return False
-    if provider == "wds" and separation_arcsec >= WDS_UNUSABLE_SEPARATION_ARCSEC:
+    if provider == "wds" and separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
         return False
     return True
 
@@ -4240,12 +4108,10 @@ def _best_separation(current: object, new: float) -> float:
 
 
 def _parse_hierarchy_snapshot(provider: str, text: str) -> tuple[list[ParsedHierarchyRecord], int]:
+    definition = hierarchy_source(provider)
     rows = _parse_delimited_snapshot(provider, text)
     if rows is None:
-        rows = [
-            _parse_wds_fixed(line) if provider == "wds" else _parse_ccdm_fixed(line)
-            for line in text.splitlines()
-        ]
+        rows = [definition.fixed_width_parser(line) for line in text.splitlines()]
     parsed = [row for row in rows if row is not None]
     return parsed, len(rows) - len(parsed)
 
@@ -4295,9 +4161,7 @@ def _parseable_hierarchy_table(
     table_name: str,
     metadata: dict[str, object] | None = None,
 ) -> bool:
-    allowed = HIERARCHY_MAIN_TABLES.get(provider)
-    if not allowed:
-        return True
+    allowed = hierarchy_source(provider).main_table_aliases
     names = {
         table_name.strip().lower(),
         str((metadata or {}).get("name") or "").strip().lower(),

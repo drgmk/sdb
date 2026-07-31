@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from .catalog_results import effective_catalog_results
+from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
 from .database import init_database, make_session_factory
 from .decisions import configured_actor
 from .models import AstrometricSolution, CatalogRun, MatchCandidate, RawCatalogRow, Target
@@ -28,10 +29,7 @@ from .vocabulary import (
     review_priority_rank,
 )
 
-REFERENCE_ADAPTERS = (
-    "gaspar13", "v70a", "iras_psc", "iras_fsc", "hip2", "tdsc",
-    "ubvmeans", "paunzen15", "koen10",
-)
+REFERENCE_ADAPTERS = SNAPSHOT_CATALOG_PROVIDERS
 
 
 def _add_parser(subparsers, name: str, summary: str, detail: str, **kwargs):
@@ -650,10 +648,10 @@ def _batch_service(sessions, *, workers=None, offline=False, reporter=None):
     else:
         from .live_providers import AstroqueryGaia, AstroquerySimbad
         from .simbad_metadata import AstroquerySimbadMetadata
-        from .adapters.allwise import AllWiseAdapter
-        from .adapters.gaia import GaiaDr3Adapter
-        from .adapters.twomass import TwoMassAdapter
-        from .adapters.tycho2 import Tycho2Adapter
+        from .catalog_registry import (
+            REMOTE_CATALOG_PROVIDERS,
+            build_catalog_adapters,
+        )
 
         identity_factory = lambda: IdentityService(
             sessions,
@@ -663,12 +661,7 @@ def _batch_service(sessions, *, workers=None, offline=False, reporter=None):
         metadata_factory = lambda: MetadataService(sessions, AstroquerySimbadMetadata())
         catalog_factory = lambda: CatalogService(
             sessions,
-            {
-                "gaia_dr3": GaiaDr3Adapter(),
-                "tycho2": Tycho2Adapter(),
-                "2mass": TwoMassAdapter(),
-                "allwise": AllWiseAdapter(),
-            },
+            build_catalog_adapters(REMOTE_CATALOG_PROVIDERS),
         )
     return BatchService(
         sessions,
@@ -693,21 +686,18 @@ def _update_service(
         metadata_factory = lambda: MetadataService(sessions, None)
         catalog_factory = lambda: CatalogService(sessions, {})
     else:
-        from .adapters.allwise import AllWiseAdapter
-        from .adapters.gaia import GaiaDr3Adapter
-        from .adapters.twomass import TwoMassAdapter
-        from .adapters.tycho2 import Tycho2Adapter
+        from .catalog_registry import (
+            REMOTE_CATALOG_PROVIDERS,
+            build_catalog_adapters,
+        )
         from .simbad_metadata import AstroquerySimbadMetadata
 
         metadata_factory = lambda: MetadataService(
             sessions, AstroquerySimbadMetadata()
         )
-        catalog_factory = lambda: CatalogService(sessions, {
-            "gaia_dr3": GaiaDr3Adapter(),
-            "tycho2": Tycho2Adapter(),
-            "2mass": TwoMassAdapter(),
-            "allwise": AllWiseAdapter(),
-        })
+        catalog_factory = lambda: CatalogService(
+            sessions, build_catalog_adapters(REMOTE_CATALOG_PROVIDERS),
+        )
     return UpdateService(
         sessions,
         ReferenceStore(reference_database),
@@ -1961,6 +1951,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if result.failed_count or update_failed else 0
         try:
             with _provider_output_to_stderr():
+                from .ingestion import TargetIngestionPlan
+
                 if args.offline:
                     service = IdentityService(sessions)
                 else:
@@ -1973,7 +1965,7 @@ def main(argv: list[str] | None = None) -> int:
                         simbad=AstroquerySimbad(),
                         gaia=AstroqueryGaia(),
                     )
-                added = service.add(AddRequest(
+                added = TargetIngestionPlan(identity=service).identify(AddRequest(
                     name=args.name,
                     ra_deg=args.ra,
                     dec_deg=args.dec,
@@ -2022,25 +2014,15 @@ def main(argv: list[str] | None = None) -> int:
         if run is None:
             print("catalog candidate not found", file=sys.stderr)
             return 2
-        if run.provider in REFERENCE_ADAPTERS:
-            from .reference import ReferenceStore, snapshot_adapter
-            adapter = snapshot_adapter(
-                run.provider, ReferenceStore(args.reference_database)
+        from .catalog_registry import build_catalog_adapter
+        from .reference import ReferenceStore
+        try:
+            adapter = build_catalog_adapter(
+                run.provider,
+                reference_store=ReferenceStore(args.reference_database),
             )
-        elif run.provider == "2mass":
-            from .adapters.twomass import TwoMassAdapter
-            adapter = TwoMassAdapter()
-        elif run.provider == "allwise":
-            from .adapters.allwise import AllWiseAdapter
-            adapter = AllWiseAdapter()
-        elif run.provider == "gaia_dr3":
-            from .adapters.gaia import GaiaDr3Adapter
-            adapter = GaiaDr3Adapter()
-        elif run.provider == "tycho2":
-            from .adapters.tycho2 import Tycho2Adapter
-            adapter = Tycho2Adapter()
-        else:
-            print(f"catalog adapter is unavailable: {run.provider}", file=sys.stderr)
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
             return 2
         try:
             value = CatalogService(
@@ -2059,30 +2041,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             with _provider_output_to_stderr():
-                if args.provider in {
-                    "2mass", "allwise", "gaia_dr3", "tycho2",
-                    *REFERENCE_ADAPTERS,
-                }:
+                from .catalog_registry import CATALOG_PROVIDERS
+                if args.provider in CATALOG_PROVIDERS:
                     from .catalogs import CatalogService
-                    if args.provider in REFERENCE_ADAPTERS:
-                        from .reference import ReferenceStore, snapshot_adapter
-                        adapters = {
-                            args.provider: snapshot_adapter(
-                                args.provider,
-                                ReferenceStore(args.reference_database),
-                            )
-                        }
-                    else:
-                        from .adapters.allwise import AllWiseAdapter
-                        from .adapters.gaia import GaiaDr3Adapter
-                        from .adapters.twomass import TwoMassAdapter
-                        from .adapters.tycho2 import Tycho2Adapter
-                        adapters = {
-                            "gaia_dr3": GaiaDr3Adapter(),
-                            "tycho2": Tycho2Adapter(),
-                            "2mass": TwoMassAdapter(),
-                            "allwise": AllWiseAdapter(),
-                        }
+                    from .catalog_registry import build_catalog_adapter
+                    from .reference import ReferenceStore
+                    adapters = {args.provider: build_catalog_adapter(
+                        args.provider,
+                        reference_store=ReferenceStore(args.reference_database),
+                    )}
                     refreshed = CatalogService(
                         sessions, adapters,
                     ).refresh(
@@ -2653,6 +2620,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "review" and args.kind == "serve":
         from .catalog_setup import catalog_service_for_provider
+        from .reference import ReferenceStore
         from .review_ui import serve_review_ui
         from .update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
 
@@ -2700,6 +2668,7 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 catalog_coverage_providers=catalog_coverage_providers,
                 catalog_update_factory=catalog_update_factory,
+                reference_store=ReferenceStore(args.reference_database),
             )
         except (RuntimeError, ValueError) as error:
             print(str(error), file=sys.stderr)

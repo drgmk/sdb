@@ -12,7 +12,7 @@ from typing import TypedDict
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters import (
+from .catalog_policy import (
     catalog_band_wavelength_micron,
     catalog_source_display_name,
 )

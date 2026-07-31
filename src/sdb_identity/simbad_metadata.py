@@ -4,9 +4,6 @@ from typing import Any
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
-from astroquery.simbad import Simbad
-
-from .astroquery_config import configured_simbad_client
 from .metadata import (
     MetadataQueryContext,
     MetadataQueryResult,
@@ -15,34 +12,14 @@ from .metadata import (
     SimbadSnapshot,
 )
 from .providers import ProviderError
-from .live_providers import _set_http_timeout
-
-
-def _value(row: Any, *names: str):
-    columns = {str(name).lower(): name for name in getattr(row, "colnames", ())}
-    if isinstance(row, dict):
-        columns.update({str(name).lower(): name for name in row})
-    for name in names:
-        key = columns.get(name.lower())
-        if key is None:
-            continue
-        value = row[key]
-        if getattr(value, "mask", False) or value is None:
-            return None
-        return value.item() if hasattr(value, "item") else value
-    return None
-
-
-def _text(value) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        value = value.decode("utf-8")
-    return str(value).strip()
-
-
-def _float(value) -> float | None:
-    return None if value is None else float(value)
+from .simbad_transport import (
+    SimbadTapTransport,
+    adql_literal as _literal,
+    float_value as _float,
+    identifier_key as _identifier_key,
+    row_value as _value,
+    text_value as _text,
+)
 
 
 def _int(value) -> int | None:
@@ -65,14 +42,6 @@ def _json_row(row) -> dict[str, object]:
     return result
 
 
-def _literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _identifier_key(value: str) -> str:
-    return "".join(str(value).casefold().split())
-
-
 class AstroquerySimbadMetadata:
     name = "simbad"
     release = "SIMBAD TAP"
@@ -86,10 +55,14 @@ class AstroquerySimbadMetadata:
         b.otype, a.otypes
     """
 
-    def __init__(self, timeout_seconds: float = 30.0):
-        # Avoid the module-level SIMBAD client in concurrent workers.
-        self.client = configured_simbad_client(Simbad())
-        _set_http_timeout(self.client, timeout_seconds)
+    def __init__(
+        self,
+        timeout_seconds: float = 30.0,
+        *,
+        transport: SimbadTapTransport | None = None,
+    ):
+        self.transport = transport or SimbadTapTransport(timeout_seconds)
+        self.client = self.transport.client
 
     def query(self, context: MetadataQueryContext) -> MetadataQueryResult:
         rows = []
@@ -341,8 +314,5 @@ class AstroquerySimbadMetadata:
         return tuple(values)
 
     def _query_rows(self, query: str):
-        try:
-            table = self.client.query_tap(query)
-        except Exception as error:
-            raise ProviderError(f"SIMBAD metadata query failed: {error}", transient=True) from error
+        table = self.transport.query(query, operation="metadata query")
         return [] if table is None else list(table)

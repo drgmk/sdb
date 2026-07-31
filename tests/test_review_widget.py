@@ -5,11 +5,13 @@ import math
 
 import pytest
 
-from sdb_identity.adapters import catalog_source_display_name
+from sdb_identity.catalog_policy import catalog_source_display_name
 from sdb_identity.catalogs import CatalogService
-from sdb_identity.catalogs import CatalogAttributeValue
-from sdb_identity.catalogs import CatalogCandidate
-from sdb_identity.catalogs import MeasurementValue
+from sdb_identity.catalog_types import (
+    CatalogAttributeValue,
+    CatalogCandidate,
+    MeasurementValue,
+)
 from sdb_identity.hierarchy import HierarchyService
 from sdb_identity.models import (
     AstrometricSolution,

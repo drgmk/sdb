@@ -6,7 +6,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters import catalog_source_display_name
+from .catalog_policy import catalog_source_display_name
 from .astrometry import angular_separation_arcsec
 from .catalog_associations import catalog_target_candidates
 from .catalog_measurements import current_measurement_target_ids

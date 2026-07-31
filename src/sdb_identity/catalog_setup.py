@@ -6,10 +6,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_registry import (
+    REMOTE_CATALOG_PROVIDERS,
+    build_catalog_adapter,
+)
 from .catalogs import CatalogService
-
-
-REMOTE_CATALOG_PROVIDERS = ("2mass", "allwise", "gaia_dr3", "tycho2")
 
 
 def catalog_service_for_provider(
@@ -20,38 +21,13 @@ def catalog_service_for_provider(
     offline: bool,
     action: str = "accept_candidate",
 ) -> CatalogService:
-    if provider in _reference_providers():
-        from .reference import ReferenceStore, snapshot_adapter
-
-        adapter = snapshot_adapter(provider, ReferenceStore(reference_database))
-    elif offline and action == "retry":
+    if offline and action == "retry" and provider in REMOTE_CATALOG_PROVIDERS:
         raise ValueError(
             f"{provider} retry is unavailable while the review server is offline"
         )
-    elif provider == "2mass":
-        from .adapters.twomass import TwoMassAdapter
+    from .reference import ReferenceStore
 
-        adapter = TwoMassAdapter()
-    elif provider == "allwise":
-        from .adapters.allwise import AllWiseAdapter
-
-        adapter = AllWiseAdapter()
-    elif provider == "gaia_dr3":
-        from .adapters.gaia import GaiaDr3Adapter
-
-        adapter = GaiaDr3Adapter()
-    elif provider == "tycho2":
-        from .adapters.tycho2 import Tycho2Adapter
-
-        adapter = Tycho2Adapter()
-    else:
-        raise ValueError(f"catalog adapter is unavailable: {provider}")
+    adapter = build_catalog_adapter(
+        provider, reference_store=ReferenceStore(reference_database),
+    )
     return CatalogService(sessions, {provider: adapter})
-
-
-def _reference_providers() -> tuple[str, ...]:
-    # Enter through the adapter package so its reference/vizier dependency
-    # order is established before reference_definitions is evaluated.
-    from .adapters.reference import SNAPSHOT_CATALOGS
-
-    return tuple(SNAPSHOT_CATALOGS)

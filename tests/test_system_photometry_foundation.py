@@ -4,7 +4,7 @@ from astropy.table import Table
 from sqlalchemy import select
 
 from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
-from sdb_identity.adapters import catalog_band_wavelength_micron
+from sdb_identity.catalog_policy import catalog_band_wavelength_micron
 from sdb_identity.assignment_proposals import measurement_assignment_proposals
 from sdb_identity.assignment_review import build_measurement_assignment_review
 from sdb_identity.astrometry import propagate_to_epoch

@@ -12,7 +12,7 @@ from astroquery.vizier import Vizier
 
 from ..astroquery_config import configure_vizier_class
 from ..astrometry import angular_separation_arcsec
-from ..catalogs import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
 from ..catalog_provenance import (
     CatalogProvenance,
     vizier_access_url,

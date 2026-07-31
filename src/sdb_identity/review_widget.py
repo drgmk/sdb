@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters import catalog_source_display_name
+from .catalog_policy import catalog_source_display_name
 from .adapters.review_metadata import normalize_review_payload
 from .assignment_review import build_measurement_assignment_review
 from .catalog_provenance import vizier_entry_url
@@ -21,12 +21,12 @@ from .catalog_results import (
 from .astrometry import propagate_to_epoch
 from .hierarchy import (
     HierarchyService,
-    WDS_UNUSABLE_SEPARATION_ARCSEC,
     _GRAPH_EDGE_STATUSES,
     _graph_edge_row,
     _latest_graph_overrides,
     hierarchy_record_positions,
 )
+from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
 from .identity_results import effective_identity_candidate_ids
 from .models import (
     AstrometricSolution,
@@ -2551,7 +2551,7 @@ def _wds_blank_component_implies_ab(
 def _hierarchy_geometry_usable(record: HierarchyRecord) -> bool:
     if record.separation_arcsec is None or record.pa_deg is None:
         return False
-    if record.provider == "wds" and record.separation_arcsec >= WDS_UNUSABLE_SEPARATION_ARCSEC:
+    if record.provider == "wds" and record.separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
         return False
     return True
 
@@ -2559,7 +2559,7 @@ def _hierarchy_geometry_usable(record: HierarchyRecord) -> bool:
 def _wds_record_has_unusable_separation(record: HierarchyRecord) -> bool:
     if record.provider != "wds":
         return False
-    if record.separation_arcsec is not None and record.separation_arcsec >= WDS_UNUSABLE_SEPARATION_ARCSEC:
+    if record.separation_arcsec is not None and record.separation_arcsec >= UNUSABLE_SEPARATION_ARCSEC:
         return True
     return _hierarchy_raw_payload(record).get("unusable_separation_arcsec") is not None
 

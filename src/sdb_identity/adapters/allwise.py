@@ -8,7 +8,8 @@ from astropy.coordinates import SkyCoord
 from astroquery.ipac.irsa.core import IrsaClass
 import requests
 
-from ..catalogs import (
+from ..catalog_registry import catalog_provider
+from ..catalog_types import (
     CatalogAttributeValue,
     CatalogCandidate,
     CatalogQueryContext,
@@ -27,20 +28,21 @@ from .review_metadata import add_review_metadata, PositionUncertainty, ReviewFie
 
 ALLWISE_BACKEND_ENV = "SDB_ALLWISE_BACKEND"
 ALLWISE_BACKENDS = {"vizier", "irsa"}
+_PROVIDER = catalog_provider("allwise")
 
 
 class AllWiseAdapter(VizierConeAdapter):
     # Catalog identity and query policy.
-    name = "allwise"
-    display_name = "AllWISE"
-    release = "II/328/allwise"
+    name = _PROVIDER.key
+    display_name = _PROVIDER.display_name
+    release = _PROVIDER.catalog
     irsa_catalog = "allwise_p3as_psd"
     # AllWISE combines observations over roughly one year in 2010. Treat it as
     # an epoch-local positional catalog; its fitted PM is not used for matching.
-    query_epoch = 2010.5
-    radius_arcsec = 2.0
-    review_radius_arcsec = 15.0
-    bibcode = "2010AJ....140.1868W"
+    query_epoch = _PROVIDER.query_epoch
+    radius_arcsec = _PROVIDER.radius_arcsec
+    review_radius_arcsec = _PROVIDER.review_radius_arcsec
+    bibcode = _PROVIDER.bibliography
     source_id_columns = ("AllWISE",)
     # SIMBAD generally exposes AllWISE sources as WISEA J... identifiers.
     # This is declared here because the convention is catalog-specific.
@@ -51,12 +53,7 @@ class AllWiseAdapter(VizierConeAdapter):
         (2, BandDefinition("WISE12", "W3mag", "e_W3mag", 0.045), 0.0),
         (3, BandDefinition("WISE22", "W4mag", "e_W4mag", 0.057), 0.0),
     )
-    band_wavelengths_micron = (
-        ("WISE3P4", 3.3792),
-        ("WISE4P6", 4.6293),
-        ("WISE12", 12.3321),
-        ("WISE22", 22.2533),
-    )
+    band_wavelengths_micron = _PROVIDER.bands
     resolution_arcsec = (6.1, 6.4, 6.5, 12.0)
     timeout_seconds = 30.0
     # Provider columns exposed directly to match review.

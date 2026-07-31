@@ -37,6 +37,21 @@ from tests.test_system_expansion import _root_with_metadata
 from tests.test_system_photometry_foundation import _configured_system
 
 
+def test_catalog_overview_routes_are_structured_and_expandable(session_factory):
+    client = TestClient(create_review_app(session_factory))
+
+    response = client.get("/api/catalogs")
+    assert response.status_code == 200
+    assert response.json()["provider_count"] == 13
+    assert response.json()["remote_count"] == 4
+
+    page = client.get("/catalogs")
+    assert page.status_code == 200
+    assert "Catalog providers" in page.text
+    assert "<details>" in page.text
+    assert "I/259/suppl_2 is retained" in page.text
+
+
 def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     monkeypatch.setenv("SDB_ACTOR", "browser reviewer")
     system, component_a, component_b = _configured_system(session_factory)

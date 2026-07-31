@@ -8,7 +8,8 @@ from astropy.time import Time
 from astroquery.ipac.irsa import Irsa
 
 from ..astrometry import angular_separation_arcsec
-from ..catalogs import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_registry import catalog_provider
+from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
 from ..providers import ProviderError
 from .vizier import (
     BandDefinition,
@@ -22,21 +23,22 @@ from .review_metadata import add_review_metadata, PositionUncertainty, ReviewFie
 
 TWOMASS_BACKEND_ENV = "SDB_2MASS_BACKEND"
 TWOMASS_BACKENDS = {"vizier", "irsa"}
+_PROVIDER = catalog_provider("2mass")
 
 
 class TwoMassAdapter(VizierConeAdapter):
     # Catalog identity, observing epoch, and match policy.
-    name = "2mass"
-    display_name = "2MASS"
-    release = "II/246/out"
+    name = _PROVIDER.key
+    display_name = _PROVIDER.display_name
+    release = _PROVIDER.catalog
     irsa_catalog = "fp_psc"
     # The survey ran from roughly June 1997 through March 2001. Query at the
     # midpoint with a motion-expanded cone, then score at each row's Date.
-    query_epoch = 1999.33
+    query_epoch = _PROVIDER.query_epoch
     survey_half_span_years = 1.92
-    radius_arcsec = 2.0
-    review_radius_arcsec = 15.0
-    bibcode = "2003tmc..book.....C"
+    radius_arcsec = _PROVIDER.radius_arcsec
+    review_radius_arcsec = _PROVIDER.review_radius_arcsec
+    bibcode = _PROVIDER.bibliography
     source_id_columns = ("_2MASS", "2MASS")
     # SIMBAD identifiers are authoritative corroborating evidence after the
     # catalog position has independently fallen inside the propagated cone.
@@ -47,11 +49,7 @@ class TwoMassAdapter(VizierConeAdapter):
         (2, "KS", BandDefinition("2MKS", "Kmag", "e_Kmag", 0.01)),
     )
     # Read-mode variants (2MR1*/2MR2*) share these passbands.
-    band_wavelengths_micron = (
-        ("2MJ", 1.2376),
-        ("2MH", 1.6476),
-        ("2MKS", 2.1621),
-    )
+    band_wavelengths_micron = _PROVIDER.bands
     # Provider columns exposed directly to match review.
     review_fields = (
         ReviewField(

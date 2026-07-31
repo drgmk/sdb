@@ -9,7 +9,12 @@ from astropy.coordinates import SkyCoord
 from sqlalchemy import or_, select
 
 from ..astrometry import angular_separation_arcsec
-from ..catalogs import CatalogAttributeValue, CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_types import (
+    CatalogAttributeValue,
+    CatalogCandidate,
+    CatalogQueryContext,
+    MeasurementValue,
+)
 from ..catalog_provenance import (
     CatalogProvenance,
     provenance_from_payload,

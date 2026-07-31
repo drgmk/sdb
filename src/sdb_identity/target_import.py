@@ -6,7 +6,9 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hierarchy import HierarchyService, _simbad_component_relevance
+from .hierarchy import HierarchyService
+from .hierarchy_semantics import simbad_component_relevance
+from .ingestion import TargetIngestionPlan
 from .models import ExternalIdentifier, MetadataRun, SimbadMetadata, Target
 from .providers import Astrometry, SimbadDiscoveryProvider
 from .identifiers import normalize_identifier
@@ -147,7 +149,7 @@ def search_nearby_simbad(
                     normalize_identifier(neighbour.main_id)
                 )
             )
-            relevance = _simbad_component_relevance(
+            relevance = simbad_component_relevance(
                 neighbour.primary_object_type,
                 list(neighbour.object_types),
             )
@@ -200,6 +202,11 @@ class TargetImportService:
         self.identity = identity_service
         self.update = update_service
         self.hierarchy = hierarchy_service or HierarchyService(session_factory)
+        self.plan = TargetIngestionPlan(
+            identity=self.identity,
+            update=self.update,
+            hierarchy=self.hierarchy,
+        )
 
     def import_many(
         self,
@@ -224,7 +231,7 @@ class TargetImportService:
         successful_sdbids = []
         for name in requested:
             try:
-                added = self.identity.add(AddRequest(
+                added = self.plan.identify(AddRequest(
                     name=name,
                     command=f"{command}: {name}",
                 ))
@@ -245,24 +252,11 @@ class TargetImportService:
             successful_sdbids.append(added.sdbid)
 
         unique_sdbids = tuple(dict.fromkeys(successful_sdbids))
-        update_summary = (
-            None
-            if not unique_sdbids
-            else self.update.update_targets(
-                unique_sdbids,
-                providers=selected_providers,
-                force=False,
-            )
+        followup = self.plan.follow_up(
+            unique_sdbids,
+            providers=selected_providers,
+            hierarchy_radius_arcsec=hierarchy_radius_arcsec,
         )
-        hierarchy_matches = []
-        if unique_sdbids:
-            for provider in ("wds", "ccdm"):
-                result = self.hierarchy.match_targets(
-                    provider,
-                    unique_sdbids,
-                    radius_arcsec=hierarchy_radius_arcsec,
-                )
-                hierarchy_matches.append(asdict(result))
         return TargetImportResult(
             requested_count=len(requested),
             succeeded_count=sum(item.status != "failed" for item in items),
@@ -271,8 +265,8 @@ class TargetImportService:
             failed_count=sum(item.status == "failed" for item in items),
             providers=selected_providers,
             items=tuple(items),
-            update_summary=update_summary,
-            hierarchy_matches=tuple(hierarchy_matches),
+            update_summary=followup.update_summary,
+            hierarchy_matches=followup.hierarchy_matches,
         )
 
 

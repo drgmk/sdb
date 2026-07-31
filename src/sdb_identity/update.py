@@ -12,13 +12,17 @@ from .metadata import MetadataService
 from .models import CatalogRun, MetadataRun, Target
 from .progress import NULL_PROGRESS, ProgressReporter
 from .reference_application import ReferenceApplicationService
-from .reference_definitions import SNAPSHOT_CATALOGS
+from .catalog_registry import (
+    REMOTE_CATALOG_PROVIDERS,
+    SNAPSHOT_CATALOG_PROVIDERS,
+)
 from .reference_store import ReferenceStore
 from .targets import resolve_target
 from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 
-REMOTE_CATALOGS = ("gaia_dr3", "tycho2", "2mass", "allwise")
+REMOTE_CATALOGS = REMOTE_CATALOG_PROVIDERS
+SNAPSHOT_CATALOGS = SNAPSHOT_CATALOG_PROVIDERS
 DEFAULT_PROVIDERS = ("simbad", *REMOTE_CATALOGS, *SNAPSHOT_CATALOGS)
 
 

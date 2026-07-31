@@ -6,7 +6,8 @@ from astropy.table import Table
 from astroquery.vizier import Vizier
 
 from ..astroquery_config import configure_vizier_class
-from ..catalogs import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..catalog_registry import catalog_provider
+from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
 from ..catalog_provenance import (
     CatalogProvenance,
     vizier_entry_url,
@@ -19,18 +20,19 @@ from .review_metadata import add_review_metadata, PositionUncertainty, ReviewFie
 
 
 _GAIA_DR3_IDENTIFIER = re.compile(r"^Gaia\s+DR3\s+(\d+)$", re.IGNORECASE)
+_PROVIDER = catalog_provider("gaia_dr3")
 
 
 class GaiaDr3Adapter:
     """Retrieve native Gaia DR3 photometry for an established Gaia source."""
 
     # Catalog identity and source-ID-based query policy.
-    name = "gaia_dr3"
-    display_name = "Gaia DR3"
-    release = "I/355/gaiadr3"
-    query_epoch = 2016.0
+    name = _PROVIDER.key
+    display_name = _PROVIDER.display_name
+    release = _PROVIDER.catalog
+    query_epoch = _PROVIDER.query_epoch
     timeout_seconds = 30.0
-    bibcode = "2023A&A...674A...1G"
+    bibcode = _PROVIDER.bibliography
     # Native photometric bands and their flux/quality support columns.
     bands = (
         ("GAIA.G", "Gmag", "e_Gmag", "FG", "e_FG", "o_Gmag", None, None),
@@ -43,11 +45,7 @@ class GaiaDr3Adapter:
             "NRPcont", "NRPblend",
         ),
     )
-    band_wavelengths_micron = (
-        ("GAIA.BP", 0.5129),
-        ("GAIA.G", 0.6425),
-        ("GAIA.RP", 0.7799),
-    )
+    band_wavelengths_micron = _PROVIDER.bands
     # Provider columns exposed directly to match review.
     review_fields = (
         ReviewField(

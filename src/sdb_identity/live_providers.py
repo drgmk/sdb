@@ -4,12 +4,10 @@ from typing import Any
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
-from astroquery.simbad import Simbad
 from astroquery.vizier import Vizier
-from requests.adapters import HTTPAdapter
 
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
-from .astroquery_config import configure_vizier_class, configured_simbad_client
+from .astroquery_config import configure_vizier_class
 from .providers import (
     Astrometry,
     Candidate,
@@ -17,70 +15,45 @@ from .providers import (
     ProviderError,
     SimbadNeighbour,
 )
-
-
-class _TimeoutHTTPAdapter(HTTPAdapter):
-    def __init__(self, timeout_seconds: float):
-        self.timeout_seconds = timeout_seconds
-        super().__init__()
-
-    def send(self, request, **kwargs):
-        if kwargs.get("timeout") is None:
-            kwargs["timeout"] = self.timeout_seconds
-        return super().send(request, **kwargs)
+from .simbad_transport import (
+    SimbadTapTransport,
+    adql_literal as _literal,
+    float_value as _float,
+    identifier_key as _identifier_key,
+    row_value as _value,
+    set_http_timeout,
+    text_value as _text,
+)
 
 
 def _set_http_timeout(client, timeout_seconds: float) -> None:
-    adapter = _TimeoutHTTPAdapter(timeout_seconds)
-    sessions = {client._session, client.tap._session}
-    for session in sessions:
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-
-
-def _value(row: Any, *names: str):
-    columns = {str(name).lower(): name for name in getattr(row, "colnames", ())}
-    if isinstance(row, dict):
-        columns.update({str(name).lower(): name for name in row})
-    for name in names:
-        key = columns.get(name.lower())
-        if key is None:
-            continue
-        value = row[key]
-        if getattr(value, "mask", False):
-            return None
-        if value is None:
-            return None
-        return value.item() if hasattr(value, "item") else value
-    return None
-
-
-def _text(value) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    return str(value).strip()
-
-
-def _float(value) -> float | None:
-    return None if value is None else float(value)
-
-
-def _literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _identifier_key(value: str) -> str:
-    return " ".join(str(value).upper().split())
+    """Backward-compatible alias for non-SIMBAD astroquery clients."""
+    set_http_timeout(client, timeout_seconds)
 
 
 class AstroquerySimbad:
     name = "simbad"
 
-    def __init__(self, timeout_seconds: float = 30.0):
-        self.client = configured_simbad_client(Simbad())
-        _set_http_timeout(self.client, timeout_seconds)
+    def __init__(
+        self,
+        timeout_seconds: float = 30.0,
+        *,
+        transport: SimbadTapTransport | None = None,
+    ):
+        self.transport = transport or SimbadTapTransport(timeout_seconds)
+        self.client = self.transport.client
+
+    def _query(self, adql: str, *, operation: str):
+        transport = getattr(self, "transport", None)
+        if transport is not None:
+            return transport.query(adql, operation=operation)
+        # Supports lightweight parser tests constructed without __init__.
+        try:
+            return self.client.query_tap(adql)
+        except Exception as error:
+            raise ProviderError(
+                f"SIMBAD {operation} failed: {error}", transient=True,
+            ) from error
 
     def resolve_name(self, name: str) -> NameResolution | None:
         literal = "'" + name.replace("'", "''") + "'"
@@ -92,22 +65,17 @@ class AstroquerySimbad:
             FROM basic AS b JOIN ident AS i ON i.oidref=b.oid
             WHERE i.id={literal}
         """
-        try:
-            table = self.client.query_tap(query)
-        except Exception as error:  # astroquery exposes several transport exception types
-            raise ProviderError(f"SIMBAD query failed: {error}", transient=True) from error
+        table = self._query(query, operation="query")
         if table is None or len(table) == 0:
             return None
         if len(table) > 1:
             raise ProviderError(f"SIMBAD identifier is ambiguous: {name}")
         parsed = self.parse_row(table[0])
         oid = int(_value(table[0], "oid"))
-        try:
-            identifiers = self.client.query_tap(
-                f"SELECT id FROM ident WHERE oidref={oid}"
-            )
-        except Exception as error:
-            raise ProviderError(f"SIMBAD identifier query failed: {error}", transient=True) from error
+        identifiers = self._query(
+            f"SELECT id FROM ident WHERE oidref={oid}",
+            operation="identifier query",
+        )
         values = tuple(
             value
             for value in (_text(_value(row, "id")) for row in identifiers)
@@ -151,12 +119,7 @@ class AstroquerySimbad:
             )
             ORDER BY separation_deg
         """
-        try:
-            table = self.client.query_tap(query)
-        except Exception as error:
-            raise ProviderError(
-                f"SIMBAD region query failed: {error}", transient=True
-            ) from error
+        table = self._query(query, operation="region query")
         result = []
         for row in (() if table is None else table):
             parsed = self.parse_row(row)
@@ -204,10 +167,7 @@ class AstroquerySimbad:
             JOIN basic AS b ON i.oidref=b.oid
             WHERE i.id IN ({literals})
         """
-        try:
-            table = self.client.query_tap(query)
-        except Exception as error:
-            raise ProviderError(f"SIMBAD bulk query failed: {error}", transient=True) from error
+        table = self._query(query, operation="bulk query")
         names_by_key: dict[str, list[str]] = {}
         for name in unique_names:
             names_by_key.setdefault(_identifier_key(name), []).append(name)
@@ -257,14 +217,10 @@ class AstroquerySimbad:
         if not oids:
             return {}
         literals = ", ".join(str(oid) for oid in oids)
-        try:
-            rows = self.client.query_tap(
-                f"SELECT oidref, id FROM ident WHERE oidref IN ({literals})"
-            )
-        except Exception as error:
-            raise ProviderError(
-                f"SIMBAD bulk identifier query failed: {error}", transient=True
-            ) from error
+        rows = self._query(
+            f"SELECT oidref, id FROM ident WHERE oidref IN ({literals})",
+            operation="bulk identifier query",
+        )
         values: dict[int, list[str]] = {oid: [] for oid in oids}
         if rows is None:
             return {oid: () for oid in oids}
