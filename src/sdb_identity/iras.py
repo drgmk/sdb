@@ -15,6 +15,7 @@ from .models import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
+from .vocabulary import ProviderRunStatus
 
 
 IRAS_PROVIDERS = ("iras_psc", "iras_fsc")
@@ -73,7 +74,7 @@ def reconcile_iras_target(session: Session, target_id: int) -> IrasDetectionFami
             CatalogRun.target_id == target_id,
             CatalogRun.provider.in_(IRAS_PROVIDERS),
             CatalogRun.is_current.is_(True),
-            CatalogRun.status == "match",
+            CatalogRun.status == ProviderRunStatus.MATCH,
         ))
     }
     if set(runs) != set(IRAS_PROVIDERS):

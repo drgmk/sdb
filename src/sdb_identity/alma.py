@@ -13,12 +13,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .adapters.vizier import row_float, row_payload, row_text
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
-from .dirty import find_target
 from .models import (
     AlmaMember, AlmaMemberPosition, AlmaObservation, AlmaSyncChunk, AlmaSyncRun,
     AstrometricSolution,
 )
 from .providers import Astrometry, ProviderError
+from .targets import resolve_target
 
 
 ALMA_COLUMNS = (
@@ -383,7 +383,7 @@ class AlmaArchiveService:
         if radius_arcsec <= 0:
             raise ValueError("radius must be positive")
         with self.sessions() as session:
-            target = find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             solution = session.get(AstrometricSolution, target.canonical_astrometry_id)

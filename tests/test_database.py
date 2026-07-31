@@ -83,12 +83,11 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0049_catalog_provenance_locator"
+    assert version == "0050_measurement_eligibility"
     assert {
-        "photometry_overrides",
+        "measurement_eligibility_actions",
         "dataset_revisions", "curated_records",
         "curated_association_actions",
-        "curated_photometry_overrides",
         "reference_application_runs", "reference_application_items",
         "reference_application_records",
         "catalog_match_overrides",
@@ -118,10 +117,9 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "pm_ra_cosdec_masyr", "pm_dec_masyr", "proper_motion_bibcode",
     } <= simbad_metadata_columns
     assert {
-        "photometry_override_history",
+        "measurement_eligibility_history",
         "unresolved_curated_records",
         "curated_association_history",
-        "curated_photometry_override_history",
         "reference_application_status", "unmatched_reference_records",
         "catalog_match_override_history",
         "current_catalog_attributes", "catalog_attribute_conflicts",
@@ -245,5 +243,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0049_catalog_provenance_locator"
+    assert version == "0050_measurement_eligibility"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

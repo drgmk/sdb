@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .assignment_proposals import measurement_assignment_proposals
 from .decisions import configured_actor, resolve_reason
-from .dirty import find_target
 from .photometry import assign_measurement_target
 from .progress import NULL_PROGRESS, ProgressReporter
 from .samples import SampleService
+from .targets import resolve_target
 
 
 def apply_measurement_assignment_proposals(
@@ -191,7 +191,7 @@ def _references(
     if sample is not None:
         return [value.sdbid for value in SampleService(session_factory).members(sample)]
     with session_factory() as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         return [target.sdbid]

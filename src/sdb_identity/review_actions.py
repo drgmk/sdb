@@ -9,26 +9,36 @@ from sqlalchemy.orm import Session, sessionmaker
 from .adapters import catalog_source_display_name
 from .astrometry import angular_separation_arcsec
 from .catalog_associations import catalog_target_candidates
+from .catalog_measurements import current_measurement_target_ids
 from .decisions import DecisionContext
-from .dirty import find_target, mark_export_dirty
+from .dirty import mark_export_dirty
 from .effective_assignments import effective_measurement_assignments
+from .measurement_eligibility import effective_measurement_eligibility
 from .models import (
     CatalogDetection,
     CatalogRun,
     CatalogTargetAssociationAction,
     MeasurementAssociationAction,
+    MeasurementEligibilityAction,
     MeasurementTargetAssociation,
     NormalizedMeasurement,
-    PhotometryOverride,
     RawCatalogRow,
     Target,
     TargetLifecycleAction,
 )
 from .providers import Astrometry
-from .target_lifecycle import TARGET_ROLES, TARGET_STATES
+from .targets import resolve_target
+from .vocabulary import (
+    MeasurementAssociationActionKind,
+    MeasurementTargetRole,
+    TargetRole,
+    TargetState,
+)
 
 
-_REVIEW_STATES = TARGET_STATES - {"superseded"}
+_REVIEW_STATES = frozenset(
+    value for value in TargetState if value is not TargetState.SUPERSEDED
+)
 
 
 def review_catalog_target_association_decision(
@@ -53,7 +63,7 @@ def review_catalog_target_association_decision(
         raise ValueError("catalog association action must be accept or reject")
     context = session_factory.begin() if apply else session_factory()
     with context as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         detection = session.get(CatalogDetection, detection_id)
@@ -222,58 +232,63 @@ def review_photometry_eligibility_decision(
     reason: str | None = None,
     expected_token: str | None = None,
 ) -> dict[str, object]:
-    """Preview or atomically append target/provider/band fit overrides."""
+    """Preview or atomically append measurement-level fit actions."""
     if not changes:
         raise ValueError("at least one fit-eligibility change is required")
     context = session_factory.begin() if apply else session_factory()
     with context as session:
         normalized: list[dict[str, object]] = []
-        seen: set[tuple[int, str, str]] = set()
+        seen: set[int] = set()
         for value in changes:
-            target_reference = value.get("target")
-            if target_reference in {None, ""}:
-                raise ValueError("each fit-eligibility change requires a target")
-            target = find_target(session, str(target_reference))
-            if target is None:
-                raise KeyError(f"target not found: {target_reference}")
-            provider = str(value.get("provider") or "").strip().lower()
-            band = str(value.get("band") or "").strip().upper()
-            if not provider or not band:
+            try:
+                measurement_id = int(value.get("measurement_id"))
+            except (TypeError, ValueError):
                 raise ValueError(
-                    "each fit-eligibility change requires provider and band"
-                )
+                    "each fit-eligibility change requires a measurement_id"
+                ) from None
+            measurement = session.get(
+                NormalizedMeasurement, measurement_id,
+            )
+            if measurement is None:
+                raise KeyError(f"measurement not found: {measurement_id}")
             excluded = value.get("excluded")
             if not isinstance(excluded, bool):
                 raise ValueError("excluded must be true or false")
-            key = (target.id, provider, band)
-            if key in seen:
+            if measurement.id in seen:
                 raise ValueError(
-                    f"duplicate fit-eligibility change: {target.sdbid} {provider} {band}"
+                    "duplicate fit-eligibility change: "
+                    f"measurement {measurement.id}"
                 )
-            seen.add(key)
+            seen.add(measurement.id)
             latest = session.scalar(
-                select(PhotometryOverride)
+                select(MeasurementEligibilityAction)
                 .where(
-                    PhotometryOverride.target_id == target.id,
-                    PhotometryOverride.provider == provider,
-                    PhotometryOverride.band == band,
+                    MeasurementEligibilityAction.measurement_id
+                    == measurement.id,
                 )
-                .order_by(PhotometryOverride.id.desc())
+                .order_by(MeasurementEligibilityAction.id.desc())
                 .limit(1)
             )
+            current = effective_measurement_eligibility(
+                session, [measurement.id],
+            )[measurement.id]
+            target = session.get(Target, measurement.target_id)
             normalized.append({
-                "target_id": target.id,
-                "sdbid": target.sdbid,
-                "provider": provider,
-                "band": band,
-                "current_override_id": None if latest is None else latest.id,
-                "current_excluded": None if latest is None else latest.excluded,
+                "measurement_id": measurement.id,
+                "target_id": measurement.target_id,
+                "sdbid": None if target is None else target.sdbid,
+                "provider": measurement.provider,
+                "band": measurement.band,
+                "current_action_id": None if latest is None else latest.id,
+                "current_excluded": current.excluded,
+                "current_basis": current.basis,
                 "desired_excluded": excluded,
-                "has_change": latest is None or latest.excluded != excluded,
+                "has_change": current.excluded != excluded,
             })
 
         normalized.sort(key=lambda row: (
             str(row["sdbid"]), str(row["provider"]), str(row["band"]),
+            int(row["measurement_id"]),
         ))
         token = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
         result: dict[str, object] = {
@@ -284,8 +299,8 @@ def review_photometry_eligibility_decision(
             "suggested_reason": _eligibility_suggested_reason(normalized),
             "notes": [
                 "fit eligibility is independent of measurement ownership",
-                "overrides apply to the measurement origin target, provider, and band",
-                "previous overrides remain in the append-only audit history",
+                "actions apply to one canonical normalized measurement",
+                "previous actions remain in the append-only audit history",
             ],
         }
         if not apply:
@@ -303,30 +318,33 @@ def review_photometry_eligibility_decision(
         for value in normalized:
             if not value["has_change"]:
                 continue
-            override = PhotometryOverride(
-                target_id=int(value["target_id"]),
-                provider=str(value["provider"]),
-                band=str(value["band"]),
+            action = MeasurementEligibilityAction(
+                measurement_id=int(value["measurement_id"]),
                 excluded=bool(value["desired_excluded"]),
                 actor=decision.actor,
                 reason=decision.reason,
             )
-            session.add(override)
+            session.add(action)
             session.flush()
-            applied_ids.append(override.id)
-            mark_export_dirty(
-                session,
-                int(value["target_id"]),
-                source_type="review_photometry_eligibility",
-                source_id=override.id,
-                reason="reviewed photometry fit eligibility changed",
-            )
+            applied_ids.append(action.id)
+            affected = current_measurement_target_ids(
+                session, [int(value["measurement_id"])],
+            ).get(int(value["measurement_id"]), set())
+            affected.add(int(value["target_id"]))
+            for target_id in affected:
+                mark_export_dirty(
+                    session,
+                    target_id,
+                    source_type="review_photometry_eligibility",
+                    source_id=action.id,
+                    reason="reviewed photometry fit eligibility changed",
+                )
         return {
             **result,
             "mode": "applied",
             "applied": {
-                "overrides_added": len(applied_ids),
-                "override_ids": applied_ids,
+                "actions_added": len(applied_ids),
+                "action_ids": applied_ids,
             },
         }
 
@@ -343,15 +361,16 @@ def review_target_lifecycle_decision(
     expected_token: str | None = None,
 ) -> dict[str, object]:
     """Preview or atomically apply the fitted-model/measurement-scope role."""
-    role = role.strip().lower()
-    state = state.strip().lower()
-    if role not in TARGET_ROLES:
-        raise ValueError(f"role must be one of {sorted(TARGET_ROLES)}")
+    role = TargetRole.parse(role, "role")
+    state = TargetState.parse(state, "state")
     if state not in _REVIEW_STATES:
-        raise ValueError(f"state must be one of {sorted(_REVIEW_STATES)}")
+        raise ValueError(
+            "state must be one of "
+            f"{sorted(value.value for value in _REVIEW_STATES)}"
+        )
     context = session_factory.begin() if apply else session_factory()
     with context as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         latest = session.scalar(
@@ -360,15 +379,20 @@ def review_target_lifecycle_decision(
             .order_by(TargetLifecycleAction.id.desc())
             .limit(1)
         )
-        current_role = "unspecified" if latest is None else latest.role
-        current_state = "active" if latest is None else latest.state
+        current_role = (
+            TargetRole.UNSPECIFIED.value if latest is None else latest.role
+        )
+        current_state = (
+            TargetState.ACTIVE.value if latest is None else latest.state
+        )
         reconciliation = []
-        if role == "physical":
+        if role is TargetRole.PHYSICAL:
             scope_rows = list(session.scalars(
                 select(MeasurementTargetAssociation)
                 .where(
                     MeasurementTargetAssociation.target_id == target.id,
-                    MeasurementTargetAssociation.role == "composite_scope",
+                    MeasurementTargetAssociation.role
+                    == MeasurementTargetRole.COMPOSITE_SCOPE,
                 )
                 .order_by(MeasurementTargetAssociation.measurement_id)
             ))
@@ -376,7 +400,8 @@ def review_target_lifecycle_decision(
                 select(MeasurementTargetAssociation.measurement_id)
                 .where(
                     MeasurementTargetAssociation.target_id == target.id,
-                    MeasurementTargetAssociation.role == "contributor",
+                    MeasurementTargetAssociation.role
+                    == MeasurementTargetRole.CONTRIBUTOR,
                 )
             ))
             reconciliation = [{
@@ -384,8 +409,8 @@ def review_target_lifecycle_decision(
                 "measurement_id": row.measurement_id,
                 "target_id": target.id,
                 "sdbid": target.sdbid,
-                "from_role": "composite_scope",
-                "to_role": "contributor",
+                "from_role": MeasurementTargetRole.COMPOSITE_SCOPE.value,
+                "to_role": MeasurementTargetRole.CONTRIBUTOR.value,
                 "add_contributor": row.measurement_id not in existing_contributors,
             } for row in scope_rows]
         token = hashlib.sha256(json.dumps({
@@ -403,7 +428,7 @@ def review_target_lifecycle_decision(
             "state_token": token,
             "target": _target_row(target),
             "current": {"role": current_role, "state": current_state},
-            "desired": {"role": role, "state": state},
+            "desired": {"role": role.value, "state": state.value},
             "has_changes": (
                 (role, state) != (current_role, current_state)
                 or bool(reconciliation)
@@ -430,8 +455,8 @@ def review_target_lifecycle_decision(
         if (role, state) != (current_role, current_state):
             action = TargetLifecycleAction(
                 target_id=target.id,
-                role=role,
-                state=state,
+                role=role.value,
+                state=state.value,
                 actor=decision.actor,
                 reason=decision.reason,
             )
@@ -464,8 +489,11 @@ def review_target_lifecycle_decision(
         }
 
 
-def _lifecycle_interpretation(role: str) -> dict[str, object]:
-    if role == "physical":
+def _lifecycle_interpretation(
+    role: str | TargetRole,
+) -> dict[str, object]:
+    role = TargetRole.parse(role, "role")
+    if role is TargetRole.PHYSICAL:
         return {
             "model_target": True,
             "summary": "fit one photospheric model for this target",
@@ -474,7 +502,7 @@ def _lifecycle_interpretation(role: str) -> dict[str, object]:
                 "prevent combined-light modelling"
             ),
         }
-    if role == "composite":
+    if role is TargetRole.COMPOSITE:
         return {
             "model_target": False,
             "summary": "use this target only as a measurement scope",
@@ -509,7 +537,7 @@ def _apply_lifecycle_assignment_reconciliation(
         session.add(MeasurementAssociationAction(
             measurement_id=association.measurement_id,
             target_id=association.target_id,
-            action="unassign",
+            action=MeasurementAssociationActionKind.UNASSIGN.value,
             role=association.role,
             method="lifecycle_role_reconciliation",
             weight=association.weight,
@@ -522,15 +550,15 @@ def _apply_lifecycle_assignment_reconciliation(
             session.add(MeasurementTargetAssociation(
                 measurement_id=value["measurement_id"],
                 target_id=value["target_id"],
-                role="contributor",
+                role=MeasurementTargetRole.CONTRIBUTOR.value,
                 method="lifecycle_role_reconciliation",
                 note=reason,
             ))
             session.add(MeasurementAssociationAction(
                 measurement_id=value["measurement_id"],
                 target_id=value["target_id"],
-                action="assign",
-                role="contributor",
+                action=MeasurementAssociationActionKind.ASSIGN.value,
+                role=MeasurementTargetRole.CONTRIBUTOR.value,
                 method="lifecycle_role_reconciliation",
                 actor=actor,
                 reason=reason,
@@ -561,8 +589,8 @@ def review_detection_decision(
     contributor_references: list[str | int] | tuple[str | int, ...] = (),
     include_composite_scope: bool,
     measurement_ids: list[int] | tuple[int, ...] | None = None,
-    target_role: str | None = None,
-    target_state: str | None = None,
+    target_role: str | TargetRole | None = None,
+    target_state: str | TargetState | None = None,
     apply: bool = False,
     actor: str | None = None,
     reason: str | None = None,
@@ -571,10 +599,16 @@ def review_detection_decision(
     """Preview or atomically apply one reviewed catalog-detection decision."""
     if (target_role is None) != (target_state is None):
         raise ValueError("target_role and target_state must be supplied together")
-    if target_role is not None and target_role not in TARGET_ROLES:
-        raise ValueError(f"target_role must be one of {sorted(TARGET_ROLES)}")
-    if target_state is not None and target_state not in _REVIEW_STATES:
-        raise ValueError(f"target_state must be one of {sorted(_REVIEW_STATES)}")
+    if target_role is not None:
+        target_role = TargetRole.parse(target_role, "target_role").value
+    if target_state is not None:
+        parsed_state = TargetState.parse(target_state, "target_state")
+        if parsed_state not in _REVIEW_STATES:
+            raise ValueError(
+                "target_state must be one of "
+                f"{sorted(value.value for value in _REVIEW_STATES)}"
+            )
+        target_state = parsed_state.value
 
     context = session_factory.begin() if apply else session_factory()
     with context as session:
@@ -657,13 +691,13 @@ def _decision_snapshot(
     detection = session.get(CatalogDetection, detection_id)
     if detection is None:
         raise KeyError(f"catalog detection not found: {detection_id}")
-    scope_target = find_target(session, scope_target_reference)
+    scope_target = resolve_target(session, scope_target_reference)
     if scope_target is None:
         raise KeyError(f"target not found: {scope_target_reference}")
     contributors = []
     seen = set()
     for reference in contributor_references:
-        target = find_target(session, reference)
+        target = resolve_target(session, reference)
         if target is None:
             raise KeyError(f"contributor target not found: {reference}")
         if target.id not in seen:
@@ -784,8 +818,16 @@ def _decision_snapshot(
         .order_by(TargetLifecycleAction.id.desc())
         .limit(1)
     )
-    current_role = "unspecified" if latest_lifecycle is None else latest_lifecycle.role
-    current_state = "active" if latest_lifecycle is None else latest_lifecycle.state
+    current_role = (
+        TargetRole.UNSPECIFIED.value
+        if latest_lifecycle is None
+        else latest_lifecycle.role
+    )
+    current_state = (
+        TargetState.ACTIVE.value
+        if latest_lifecycle is None
+        else latest_lifecycle.state
+    )
     lifecycle_change = None
     if target_role is not None and (target_role, target_state) != (current_role, current_state):
         lifecycle_change = {
@@ -935,7 +977,7 @@ def _remove_assignments(
         session.add(MeasurementAssociationAction(
             measurement_id=row.measurement_id,
             target_id=row.target_id,
-            action="unassign",
+            action=MeasurementAssociationActionKind.UNASSIGN.value,
             role=row.role,
             method="review_ui_detection",
             weight=row.weight,
@@ -962,7 +1004,7 @@ def _add_assignments(
         session.add(MeasurementAssociationAction(
             measurement_id=value["measurement_id"],
             target_id=value["target_id"],
-            action="assign",
+            action=MeasurementAssociationActionKind.ASSIGN.value,
             role=value["role"],
             method="review_ui_detection",
             actor=actor,

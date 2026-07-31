@@ -10,6 +10,7 @@ from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
+from sdb_identity.models import NormalizedMeasurement
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateSummary
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, simbad_result
@@ -367,9 +368,21 @@ def test_cli_photometry_override_history(tmp_path, capsys):
     capsys.readouterr()
     sessions = make_session_factory(database)
     target = IdentityService(sessions).add(AddRequest(ra_deg=10, dec_deg=-20))
+    CatalogService(sessions, {
+        "allwise": FakeCatalog(
+            [candidate(
+                "cli-wise",
+                measurements=[measurement("WISE3P4", 8.1)],
+            )],
+            name="allwise",
+            release="test",
+        ),
+    }).refresh(target.sdbid, "allwise")
+    with sessions() as session:
+        measurement_id = session.scalar(select(NormalizedMeasurement.id))
     assert main([
-        "--database", str(database), "photometry", "exclude", target.sdbid,
-        "WISE3P4", "--provider", "allwise", "--actor", "grant",
+        "--database", str(database), "photometry", "exclude",
+        str(measurement_id), "--actor", "grant",
         "--reason", "blended",
     ]) == 0
     excluded = json.loads(capsys.readouterr().out)
@@ -514,7 +527,7 @@ def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
 
 def _add_alias(sessions, sdbid, value):
     from sdb_identity.models import ExternalIdentifier, Target
-    from sdb_identity.service import normalize_identifier
+    from sdb_identity.identifiers import normalize_identifier
 
     with sessions() as session:
         target_id = session.scalar(select(Target.id).where(Target.sdbid == sdbid))

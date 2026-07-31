@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astropy.table import Table
+from sqlalchemy import select
 
 from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
 from sdb_identity.adapters import catalog_band_wavelength_micron
@@ -23,11 +24,11 @@ from sdb_identity.photometry import (
     assign_measurement_target,
     list_measurement_assignment_history,
     list_measurement_target_assignments,
-    set_photometry_override,
+    set_measurement_eligibility,
     unassign_measurement_target,
 )
 from sdb_identity.service import AddRequest, IdentityService
-from sdb_identity.service import normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.proposal_application import apply_measurement_assignment_proposals
 from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
@@ -792,11 +793,11 @@ def test_derived_assignment_preserves_excluded_measurement_until_overridden(
     )
     assert list(before["exclude"]) == [1]
 
-    set_photometry_override(
+    with session_factory() as session:
+        measurement_id = session.scalar(select(NormalizedMeasurement.id))
+    set_measurement_eligibility(
         session_factory,
-        component_a.sdbid,
-        provider="2mass",
-        band="2MJ",
+        measurement_id,
         excluded=False,
         actor="reviewer",
         reason="visual inspection accepts provider-flagged measurement",

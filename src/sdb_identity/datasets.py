@@ -17,18 +17,20 @@ from .models import (
     CatalogRun,
     CatalogDetection,
     CuratedAssociationAction,
-    CuratedPhotometryOverride,
     CuratedRecord,
     DatasetRevision,
     ExportDirtyTarget,
     ExternalIdentifier,
+    MeasurementEligibilityAction,
     NormalizedMeasurement,
     RawCatalogRow,
     Target,
 )
 from .decisions import DecisionContext
 from .dirty import clear_export_dirty, mark_export_dirty
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
+from .targets import resolve_target
+from .vocabulary import ProviderRunStatus
 
 
 REQUIRED_SUBMM_COLUMNS = {
@@ -299,7 +301,7 @@ class CuratedDatasetService:
                 target_id=target_id,
                 provider="submm_obs",
                 release=release,
-                status="match",
+                status=ProviderRunStatus.MATCH,
                 is_current=True,
                 query_ra_deg=target.ra2000_deg,
                 query_dec_deg=target.dec2000_deg,
@@ -482,7 +484,7 @@ class CuratedDatasetService:
     ) -> CuratedAssociationAction:
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
-            target = self._target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             decision = DecisionContext.resolve(
@@ -558,7 +560,7 @@ class CuratedDatasetService:
         excluded: bool,
         actor: str | None,
         reason: str | None = None,
-    ) -> CuratedPhotometryOverride:
+    ) -> MeasurementEligibilityAction:
         with self.session_factory() as session, session.begin():
             revision, record = self._current_record(session, dataset, record_no)
             decision = DecisionContext.resolve(
@@ -569,18 +571,40 @@ class CuratedDatasetService:
                     f"record {record_no} photometry"
                 ),
             )
-            override = CuratedPhotometryOverride(
-                dataset=dataset,
-                record_no=record_no,
+            measurement = session.scalar(
+                select(NormalizedMeasurement)
+                .join(
+                    RawCatalogRow,
+                    RawCatalogRow.id
+                    == NormalizedMeasurement.raw_row_id,
+                )
+                .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
+                .where(
+                    CatalogRun.is_current.is_(True),
+                    CatalogRun.provider == dataset,
+                    RawCatalogRow.source_id == f"{dataset}:{record_no}",
+                )
+            )
+            if measurement is None:
+                raise KeyError(
+                    f"current measurement not found: {dataset} record {record_no}"
+                )
+            action = MeasurementEligibilityAction(
+                measurement_id=measurement.id,
                 excluded=excluded,
                 actor=decision.actor,
                 reason=decision.reason,
             )
-            session.add(override)
+            session.add(action)
             if record.target_id is not None:
-                self._dirty(session, revision.id, record.target_id, "record photometry override")
+                self._dirty(
+                    session,
+                    revision.id,
+                    record.target_id,
+                    "record measurement eligibility changed",
+                )
             session.flush()
-            return override
+            return action
 
     def pending(self, dataset: str = "submm_obs") -> list[tuple[ExportDirtyTarget, Target]]:
         with self.session_factory() as session:
@@ -605,22 +629,10 @@ class CuratedDatasetService:
 
     def mark_exported(self, dataset: str, target_reference: str | int) -> int:
         with self.session_factory() as session, session.begin():
-            target = self._target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             return clear_export_dirty(session, target.id)
-
-    @staticmethod
-    def _target(session: Session, reference: str | int) -> Target | None:
-        if isinstance(reference, int) or str(reference).isdigit():
-            return session.get(Target, int(reference))
-        target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
-        if target is not None:
-            return target
-        identifier = session.scalar(select(ExternalIdentifier).where(
-            ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-        ).limit(1))
-        return None if identifier is None else session.get(Target, identifier.target_id)
 
     @staticmethod
     def _current_record(session, dataset, record_no):

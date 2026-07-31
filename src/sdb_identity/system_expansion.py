@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
 from .decisions import DecisionContext
-from .dirty import find_target, mark_export_dirty
+from .dirty import mark_export_dirty
 from .hierarchy import (
     HierarchyService,
     _component_label_from_identifier,
@@ -26,8 +26,11 @@ from .models import (
     TargetSystemMember,
 )
 from .providers import Astrometry
-from .service import AddRequest, IdentityService, UnresolvedTarget, normalize_identifier
+from .identifiers import normalize_identifier
+from .service import AddRequest, IdentityService, UnresolvedTarget
 from .target_lifecycle import set_target_lifecycle, target_lifecycle_status
+from .targets import resolve_target
+from .vocabulary import ProviderRunStatus, TargetRole, TargetState
 
 
 @dataclass(frozen=True)
@@ -61,7 +64,7 @@ def preview_immediate_relatives(
 ) -> list[dict[str, object]]:
     """Classify current, immediate SIMBAD relationships without recursion."""
     with session_factory() as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         run = session.scalar(
@@ -76,7 +79,7 @@ def preview_immediate_relatives(
         )
         if run is None:
             raise ValueError("target has no current SIMBAD metadata; run sdb update --providers simbad")
-        if run.status != "match":
+        if run.status != ProviderRunStatus.MATCH:
             raise ValueError(f"current SIMBAD metadata status is {run.status}, not match")
         relationships = list(session.scalars(
             select(SimbadRelationship)
@@ -106,6 +109,11 @@ def preview_immediate_relatives(
             matched = _find_related_target(session, relationship)
             component = _component_label_from_identifier(relationship.related_main_id)
             role = _suggested_role(relationship.direction, component)
+            state = (
+                TargetState.SYSTEM_ONLY
+                if role is TargetRole.COMPOSITE
+                else TargetState.ACTIVE
+            )
             reconciliation_missing: list[str] = []
             if relevance == "contextual_group":
                 action = "context_only"
@@ -122,10 +130,8 @@ def preview_immediate_relatives(
                     related=matched,
                     relationship=relationship,
                     component=component,
-                    related_role=role,
-                    related_state=(
-                        "system_only" if role == "composite" else "active"
-                    ),
+                    related_role=role.value,
+                    related_state=state.value,
                 )
                 if reconciliation_missing:
                     action = "reconcile"
@@ -162,8 +168,8 @@ def preview_immediate_relatives(
                 "spectral_type": relationship.related_spectral_type,
                 "component_relevance": relevance,
                 "component_label": component,
-                "suggested_role": role,
-                "suggested_state": "system_only" if role == "composite" else "active",
+                "suggested_role": role.value,
+                "suggested_state": state.value,
                 "action": action,
                 "reason": reason,
                 "reconciliation_missing": reconciliation_missing,
@@ -193,7 +199,7 @@ def import_immediate_relatives(
 ) -> RelativeImportResult:
     preview = preview_immediate_relatives(session_factory, target_reference)
     with session_factory() as session:
-        requested = find_target(session, target_reference)
+        requested = resolve_target(session, target_reference)
         if requested is None:
             raise KeyError(f"target not found: {target_reference}")
         requested_sdbid = requested.sdbid
@@ -282,7 +288,10 @@ def import_immediate_relatives(
             actor=decision.actor,
             reason=decision.reason,
         )
-        if relative["direction"] == "parent" and relative["suggested_role"] == "composite":
+        if (
+            relative["direction"] == "parent"
+            and relative["suggested_role"] == TargetRole.COMPOSITE
+        ):
             system.name = _promote_system_primary(
                 session_factory, system.id, target_sdbid,
             )
@@ -366,10 +375,12 @@ def _relative_reconciliation_missing(
 
     if relationship.direction == "child":
         parent_id, child_id = requested.id, related.id
-        requested_role, requested_state = "composite", "system_only"
+        requested_role = TargetRole.COMPOSITE
+        requested_state = TargetState.SYSTEM_ONLY
     else:
         parent_id, child_id = related.id, requested.id
-        requested_role, requested_state = "physical", "active"
+        requested_role = TargetRole.PHYSICAL
+        requested_state = TargetState.ACTIVE
     if not _target_has_lifecycle(
         session, requested.id, requested_role, requested_state,
     ):
@@ -424,7 +435,7 @@ def _find_related_target(
         .where(
             SimbadMetadata.oid == relationship.related_oid,
             MetadataRun.is_current.is_(True),
-            MetadataRun.status == "match",
+            MetadataRun.status == ProviderRunStatus.MATCH,
         )
         .order_by(MetadataRun.id.desc())
         .limit(1)
@@ -467,10 +478,12 @@ def _find_related_target(
     return None
 
 
-def _suggested_role(direction: str, component: str | None) -> str:
+def _suggested_role(
+    direction: str, component: str | None,
+) -> TargetRole:
     if direction == "parent" or _group_component(component):
-        return "composite"
-    return "physical"
+        return TargetRole.COMPOSITE
+    return TargetRole.PHYSICAL
 
 
 def _group_component(component: str | None) -> bool:
@@ -487,7 +500,7 @@ def _find_or_create_expansion_system(
     requested_sdbid: str,
 ) -> TargetSystem:
     with session_factory() as session:
-        requested = find_target(session, requested_sdbid)
+        requested = resolve_target(session, requested_sdbid)
         row = session.scalar(
             select(TargetSystem)
             .join(TargetSystemMember, TargetSystemMember.system_id == TargetSystem.id)
@@ -526,7 +539,7 @@ def _apply_inferred_lifecycle(
     component = context["component_assignment"].get("semantic_component")
     if component:
         with session_factory.begin() as session:
-            target = find_target(session, target_sdbid)
+            target = resolve_target(session, target_sdbid)
             member = session.scalar(select(TargetSystemMember).where(
                 TargetSystemMember.system_id == system_id,
                 TargetSystemMember.target_id == target.id,
@@ -536,12 +549,18 @@ def _apply_inferred_lifecycle(
     if kind in {"system_or_parent", "subsystem"}:
         _set_lifecycle_if_changed(
             session_factory, target_sdbid,
-            role="composite", state="system_only", actor=actor, reason=reason,
+            role=TargetRole.COMPOSITE,
+            state=TargetState.SYSTEM_ONLY,
+            actor=actor,
+            reason=reason,
         )
     elif kind == "component":
         _set_lifecycle_if_changed(
             session_factory, target_sdbid,
-            role="physical", state="active", actor=actor, reason=reason,
+            role=TargetRole.PHYSICAL,
+            state=TargetState.ACTIVE,
+            actor=actor,
+            reason=reason,
         )
 
 
@@ -549,8 +568,8 @@ def _set_lifecycle_if_changed(
     session_factory: sessionmaker[Session],
     target_sdbid: str,
     *,
-    role: str,
-    state: str,
+    role: str | TargetRole,
+    state: str | TargetState,
     actor: str,
     reason: str,
 ) -> None:
@@ -578,8 +597,8 @@ def _ensure_simbad_relationship(
     reason: str,
 ) -> None:
     with session_factory.begin() as session:
-        requested = find_target(session, requested_sdbid)
-        related = find_target(session, relative_sdbid)
+        requested = resolve_target(session, requested_sdbid)
+        related = resolve_target(session, relative_sdbid)
         if relative["direction"] == "child":
             parent_id, child_id = requested.id, related.id
         else:
@@ -627,7 +646,7 @@ def _promote_system_primary(
 ) -> str:
     with session_factory.begin() as session:
         system = session.get(TargetSystem, system_id)
-        target = find_target(session, target_sdbid)
+        target = resolve_target(session, target_sdbid)
         system.primary_target_id = target.id
         primary_identity = IdentityService._target_primary_identity(session, target)
         preferred_name = None if not primary_identity else f"{primary_identity} system"

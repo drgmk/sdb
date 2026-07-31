@@ -19,7 +19,7 @@ from .twomass import TwoMassAdapter
 from .tycho2 import Tycho2Adapter
 from .vizier import BandDefinition, VizierConeAdapter
 from ..reference_definitions import SNAPSHOT_CATALOGS
-from ..service import normalize_identifier
+from ..identifiers import normalize_identifier
 
 
 _IDENTIFIER_ADAPTERS = {

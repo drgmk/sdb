@@ -9,20 +9,19 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .dirty import find_target
+from .catalog_measurements import current_measurement_target_ids
 from .models import (
     CatalogMatchOverride,
     CatalogTargetAssociationAction,
     CatalogDetection,
     CuratedAssociationAction,
-    CuratedPhotometryOverride,
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     MatchCandidate,
     MatchDecision,
     MeasurementAssociationAction,
+    MeasurementEligibilityAction,
     NormalizedMeasurement,
-    PhotometryOverride,
     Sample,
     SampleMembershipAction,
     StructuralEdge,
@@ -32,6 +31,7 @@ from .models import (
     TargetLifecycleAction,
     TargetSystemMember,
 )
+from .targets import resolve_target
 
 
 def system_decision_history(
@@ -41,7 +41,7 @@ def system_decision_history(
     include_system: bool = True,
 ) -> list[dict[str, object]]:
     with session_factory() as session:
-        requested = find_target(session, target_reference)
+        requested = resolve_target(session, target_reference)
         if requested is None:
             raise KeyError(f"target not found: {target_reference}")
         target_ids = _system_target_ids(session, requested.id) if include_system else {requested.id}
@@ -87,13 +87,31 @@ def system_decision_history(
                 action.action,
             ))
 
-        for action in session.scalars(
-            select(PhotometryOverride)
-            .where(PhotometryOverride.target_id.in_(target_ids))
-        ):
+        eligibility_actions = list(session.execute(
+            select(MeasurementEligibilityAction, NormalizedMeasurement)
+            .join(
+                NormalizedMeasurement,
+                NormalizedMeasurement.id
+                == MeasurementEligibilityAction.measurement_id,
+            )
+        ))
+        eligibility_targets = current_measurement_target_ids(
+            session,
+            [action.measurement_id for action, _measurement in eligibility_actions],
+        )
+        for action, measurement in eligibility_actions:
+            related_target_ids = {
+                measurement.target_id,
+                *eligibility_targets.get(measurement.id, set()),
+            }
+            if related_target_ids.isdisjoint(target_ids):
+                continue
             rows.append(_row(
                 action, "photometry_eligibility",
-                f"{targets[action.target_id]}:{action.provider}:{action.band}",
+                (
+                    f"measurement:{measurement.id}:"
+                    f"{measurement.provider}:{measurement.band}"
+                ),
                 "exclude" if action.excluded else "include",
             ))
 
@@ -162,27 +180,6 @@ def system_decision_history(
                 f"{action.dataset}:record:{action.record_no}",
                 action.action,
             ))
-
-        curated_record_keys = set(session.execute(
-            select(
-                CuratedAssociationAction.dataset,
-                CuratedAssociationAction.record_no,
-            )
-            .where(CuratedAssociationAction.target_id.in_(target_ids))
-        ))
-        if curated_record_keys:
-            datasets = {dataset for dataset, _ in curated_record_keys}
-            for action in session.scalars(
-                select(CuratedPhotometryOverride)
-                .where(CuratedPhotometryOverride.dataset.in_(datasets))
-            ):
-                if (action.dataset, action.record_no) not in curated_record_keys:
-                    continue
-                rows.append(_row(
-                    action, "curated_photometry",
-                    f"{action.dataset}:record:{action.record_no}",
-                    "exclude" if action.excluded else "include",
-                ))
 
         for action, candidate in session.execute(
             select(HierarchyMatchAction, HierarchyMatchCandidate)

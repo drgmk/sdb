@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import pending_export_targets
 from .catalog_measurements import current_measurements_for_target
+from .measurement_eligibility import effective_measurement_eligibility
 from .models import (
     CatalogRun,
     CuratedRecord,
@@ -15,21 +16,18 @@ from .models import (
     ExternalIdentifier,
     IrasDetectionFamily,
     MetadataRun,
-    PhotometryOverride,
     Sample,
     SampleExportRun,
 )
 from .samples import SampleService
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
 from .update import DEFAULT_PROVIDERS
+from .vocabulary import PROVIDER_REVIEW_STATUSES
 
 
 DEFAULT_READINESS_PROVIDERS = (
     "simbad", "gaia_dr3", "tycho2", "2mass", "allwise",
 )
-FAILURE_STATUSES = {"ambiguous", "transient_failure", "permanent_failure"}
-
-
 @dataclass(frozen=True)
 class ReadinessSummary:
     sample: str
@@ -74,22 +72,17 @@ class ReadinessService:
                             "blocker", "missing_provider", target, provider,
                             "no current provider result",
                         ))
-                    elif run.status in FAILURE_STATUSES:
+                    elif run.status in PROVIDER_REVIEW_STATUSES:
                         issues.append(self._issue(
                             "blocker", "provider_result", target, provider,
                             run.status, error=run.error,
                         ))
                 measurements = current_measurements_for_target(session, target.id)
-                overrides = {
-                    (value.provider, value.band): value
-                    for value in session.scalars(
-                        select(PhotometryOverride)
-                        .where(PhotometryOverride.target_id == target.id)
-                        .order_by(PhotometryOverride.id)
-                    )
-                }
+                eligibility = effective_measurement_eligibility(
+                    session, [value.id for value in measurements],
+                )
                 excluded = sum(
-                    overrides.get((value.provider, value.band), value).excluded
+                    eligibility[value.id].excluded
                     for value in measurements
                 )
                 shared = sum(value.ownership_scope == "shared" for value in measurements)

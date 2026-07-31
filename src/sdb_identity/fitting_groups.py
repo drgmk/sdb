@@ -9,13 +9,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .adapters import catalog_source_display_name
 from .catalog_measurements import current_measurement_encounters
-from .dirty import find_target
 from .effective_assignments import effective_measurement_assignments
+from .measurement_eligibility import effective_measurement_eligibility
 from .models import (
     CatalogDetectionProvenance,
     MeasurementTargetAssociation,
     NormalizedMeasurement,
-    PhotometryOverride,
     RawCatalogRow,
     Target,
     TargetLifecycleAction,
@@ -23,9 +22,13 @@ from .models import (
     TargetSystemMember,
 )
 from .samples import SampleService
-
-
-_INACTIVE_STATES = {"suppressed", "superseded", "archived"}
+from .targets import resolve_target
+from .vocabulary import (
+    INACTIVE_TARGET_STATES,
+    MeasurementTargetRole,
+    TargetRole,
+    TargetState,
+)
 
 
 def fitting_group_report(
@@ -103,20 +106,21 @@ def fitting_group_report(
         )
         lifecycle = _lifecycle(session, context_target_ids)
         systems = _system_context(session, context_target_ids)
-        overrides = _overrides(
-            session, {row.target_id for row in measurements.values()}
+        eligibility = effective_measurement_eligibility(
+            session, measurement_ids,
         )
 
     target_rows = {}
     model_target_ids = set()
     for target_id, target in targets.items():
         status = lifecycle.get(target_id, {
-            "role": "unspecified", "state": "active",
+            "role": TargetRole.UNSPECIFIED.value,
+            "state": TargetState.ACTIVE.value,
             "action_id": None,
         })
         model_target = (
-            status["role"] != "composite"
-            and status["state"] not in _INACTIVE_STATES
+            status["role"] != TargetRole.COMPOSITE
+            and status["state"] not in INACTIVE_TARGET_STATES
         )
         if model_target:
             model_target_ids.add(target_id)
@@ -126,7 +130,7 @@ def fitting_group_report(
             "role": status["role"],
             "state": status["state"],
             "model_target": model_target,
-            "role_review_required": status["role"] == "unspecified",
+            "role_review_required": status["role"] == TargetRole.UNSPECIFIED,
             "selected": target_id in selected,
             "systems": systems.get(target_id, []),
         }
@@ -139,19 +143,22 @@ def fitting_group_report(
     for measurement_id, measurement in measurements.items():
         assigned = associations_by_measurement.get(measurement_id, [])
         contributor_ids = sorted({
-            row.target_id for row in assigned if row.role == "contributor"
+            row.target_id
+            for row in assigned
+            if row.role == MeasurementTargetRole.CONTRIBUTOR
         })
         active_contributor_ids = [
             target_id for target_id in contributor_ids
             if target_id in model_target_ids
         ]
         composite_scope_ids = sorted({
-            row.target_id for row in assigned if row.role == "composite_scope"
+            row.target_id
+            for row in assigned
+            if row.role == MeasurementTargetRole.COMPOSITE_SCOPE
         })
-        excluded, exclusion_basis = _effective_exclusion(
-            measurement,
-            overrides=overrides,
-        )
+        eligibility_row = eligibility[measurement_id]
+        excluded = eligibility_row.excluded
+        exclusion_basis = eligibility_row.basis
         fit_enabled = not excluded and bool(active_contributor_ids)
         flags = []
         if not assigned:
@@ -164,11 +171,11 @@ def fitting_group_report(
                 for target_id in composite_scope_ids
                 if target_id in target_rows
             }
-            if "composite" in scope_roles:
+            if TargetRole.COMPOSITE in scope_roles:
                 flags.append("composite_scope_without_physical_contributor")
-            if "unspecified" in scope_roles:
+            if TargetRole.UNSPECIFIED in scope_roles:
                 flags.append("scope_assignment_requires_target_role_review")
-            if "physical" in scope_roles:
+            if TargetRole.PHYSICAL in scope_roles:
                 flags.append("physical_target_assigned_as_composite_scope")
         if set(contributor_ids) - set(active_contributor_ids):
             flags.append("inactive_or_nonphysical_contributor")
@@ -215,6 +222,8 @@ def fitting_group_report(
             "provider_excluded": measurement.excluded,
             "fit_excluded": excluded,
             "exclusion_basis": exclusion_basis,
+            "exclusion_reason": eligibility_row.reason,
+            "eligibility_action_id": eligibility_row.action_id,
             "fit_enabled": fit_enabled,
             "current_encounter": measurement_id in current_measurement_ids,
             "contributor_target_ids": contributor_ids,
@@ -369,7 +378,8 @@ def fitting_group_report(
             "context_target_count": len(target_rows),
             "model_target_count": len(model_target_ids),
             "composite_target_count": sum(
-                row["role"] == "composite" for row in target_rows.values()
+                row["role"] == TargetRole.COMPOSITE
+                for row in target_rows.values()
             ),
             "fitting_group_count": len(groups),
             "measurement_count": len(measurement_values),
@@ -404,7 +414,7 @@ def fitting_group_report(
             "composite_targets_are_not_model_nodes": all(
                 target_id not in model_target_ids
                 for target_id, row in target_rows.items()
-                if row["role"] == "composite"
+                if row["role"] == TargetRole.COMPOSITE
             ),
         },
         "notes": [
@@ -425,7 +435,7 @@ def _selected_targets(
 ) -> set[int]:
     if sample is not None:
         return {row.id for row in SampleService(session_factory).members(sample)}
-    target = find_target(session, target_reference)
+    target = resolve_target(session, target_reference)
     if target is None:
         raise KeyError(f"target not found: {target_reference}")
     return {target.id}
@@ -529,35 +539,6 @@ def _system_context(
                 "primary": system.primary_target_id == member.target_id,
             })
     return dict(result)
-
-
-def _overrides(
-    session: Session, target_ids: set[int]
-) -> dict[tuple[int, str, str], PhotometryOverride]:
-    result = {}
-    for chunk in _chunks(target_ids):
-        for row in session.scalars(
-            select(PhotometryOverride)
-            .where(PhotometryOverride.target_id.in_(chunk))
-            .order_by(PhotometryOverride.id)
-        ):
-            result[(row.target_id, row.provider, row.band)] = row
-    return result
-
-
-def _effective_exclusion(
-    measurement: NormalizedMeasurement,
-    *,
-    overrides: dict[tuple[int, str, str], PhotometryOverride],
-) -> tuple[bool, str]:
-    override = overrides.get((
-        measurement.target_id, measurement.provider.lower(), measurement.band.upper()
-    ))
-    excluded = measurement.excluded if override is None else override.excluded
-    basis = "provider_excluded" if measurement.excluded else "included"
-    if override is not None:
-        basis = "manual_exclude_override" if override.excluded else "manual_include_override"
-    return excluded, basis
 
 
 def _group_id(sdbids: list[str]) -> str:

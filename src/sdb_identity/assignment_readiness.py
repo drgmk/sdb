@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .fitting_groups import fitting_group_report
 from .system_expansion import preview_immediate_relatives
+from .vocabulary import TargetRole, review_priority_rank
 
 
 _SCOPE_FLAGS = {
@@ -94,9 +95,8 @@ def assignment_readiness_report(
             "available_relatives": relatives,
             "measurement_ids": sorted(row["measurement_id"] for row in measurements),
         })
-    priority_order = {"highest": 0, "high": 1, "medium": 2, "low": 3}
     rows.sort(key=lambda row: (
-        priority_order.get(str(row["priority"]), 9), str(row["sdbid"]),
+        -review_priority_rank(str(row["priority"])), str(row["sdbid"]),
     ))
 
     unassigned = [
@@ -201,7 +201,7 @@ def _classification(
     importable_relative_count: int,
     already_imported_relative_count: int,
 ) -> tuple[str, str, str]:
-    if role == "composite":
+    if role == TargetRole.COMPOSITE:
         if imported_physical_count or already_imported_relative_count:
             return (
                 "confirmed_composite_missing_contributors", "highest",
@@ -216,7 +216,7 @@ def _classification(
             "confirmed_composite_contributors_unknown", "highest",
             "review hierarchy and identify physical contributors",
         )
-    if role == "physical":
+    if role == TargetRole.PHYSICAL:
         return (
             "physical_target_used_as_composite_scope", "highest",
             "correct the scope assignment or revise target role",

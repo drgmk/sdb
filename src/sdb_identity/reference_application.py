@@ -15,6 +15,7 @@ from .providers import Astrometry
 from .adapters.reference import snapshot_adapter
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .reference_store import ReferenceStore, utcnow
+from .vocabulary import ProviderRunStatus
 
 @dataclass(frozen=True)
 class ReferenceApplicationResult:
@@ -163,7 +164,7 @@ class ReferenceApplicationService:
             for run in session.scalars(select(CatalogRun).where(
                 CatalogRun.provider == adapter.name,
                 CatalogRun.is_current.is_(True),
-                CatalogRun.status == "match",
+                CatalogRun.status == ProviderRunStatus.MATCH,
                 CatalogRun.selected_source_id.is_not(None),
             )):
                 current_selected[run.selected_source_id].append(run.target_id)
@@ -179,7 +180,7 @@ class ReferenceApplicationService:
                 if selected_ids:
                     status = "matched"
                 elif candidate_ids:
-                    status = "ambiguous"
+                    status = ProviderRunStatus.AMBIGUOUS
                 else:
                     status = "unmatched"
                 session.add(ReferenceApplicationRecord(
@@ -191,9 +192,15 @@ class ReferenceApplicationService:
                     selected_target_ids_json=json.dumps(selected_ids),
                 ))
             application.refreshed_count = len(results)
-            application.match_count = sum(value.status == "match" for value in results)
-            application.ambiguous_count = sum(value.status == "ambiguous" for value in results)
-            application.no_match_count = sum(value.status == "no_match" for value in results)
+            application.match_count = sum(
+                value.status == ProviderRunStatus.MATCH for value in results
+            )
+            application.ambiguous_count = sum(
+                value.status == ProviderRunStatus.AMBIGUOUS for value in results
+            )
+            application.no_match_count = sum(
+                value.status == ProviderRunStatus.NO_MATCH for value in results
+            )
             application.unmatched_row_count = len(current_hashes) - len(candidate_targets)
             application.status = "completed"
             application.completed_at = utcnow()

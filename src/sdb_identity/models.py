@@ -742,12 +742,12 @@ class ImportJob(Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class PhotometryOverride(AuditedActionMixin, Base):
-    __tablename__ = "photometry_overrides"
+class MeasurementEligibilityAction(AuditedActionMixin, Base):
+    __tablename__ = "measurement_eligibility_actions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
-    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    band: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    measurement_id: Mapped[int] = mapped_column(
+        ForeignKey("normalized_measurements.id"), nullable=False, index=True
+    )
     excluded: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
@@ -792,14 +792,6 @@ class CuratedAssociationAction(AuditedActionMixin, Base):
     record_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(20), nullable=False)
     target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"), index=True)
-
-
-class CuratedPhotometryOverride(AuditedActionMixin, Base):
-    __tablename__ = "curated_photometry_overrides"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    dataset: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    record_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    excluded: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class ReferenceApplicationRun(Base):

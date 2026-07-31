@@ -6,12 +6,13 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .dirty import find_target
 from .hierarchy import HierarchyService, _simbad_component_relevance
 from .models import ExternalIdentifier, MetadataRun, SimbadMetadata, Target
 from .providers import Astrometry, SimbadDiscoveryProvider
-from .service import AddRequest, IdentityService, UnresolvedTarget, normalize_identifier
+from .identifiers import normalize_identifier
+from .service import AddRequest, IdentityService, UnresolvedTarget
 from .update import UpdateService, UpdateSummary
+from .targets import resolve_target
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,7 @@ def search_nearby_simbad(
     if limit < 1 or limit > 500:
         raise ValueError("SIMBAD search limit must be between 1 and 500")
     with session_factory() as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         target_id = target.id

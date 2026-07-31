@@ -14,7 +14,8 @@ from sdb_identity.models import (
 )
 from sdb_identity.readiness import ReadinessService
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.test_metadata import FakeMetadataProvider
 

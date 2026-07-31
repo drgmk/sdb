@@ -14,7 +14,10 @@ from sdb_identity.models import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from sdb_identity.photometry import assign_measurement_target, set_photometry_override
+from sdb_identity.photometry import (
+    assign_measurement_target,
+    set_measurement_eligibility,
+)
 from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
 from tests.test_catalog import FakeCatalog, candidate
@@ -91,15 +94,15 @@ def test_excluded_shared_measurement_is_context_until_manually_included(session_
         for group in excluded["groups"]
     )
 
-    set_photometry_override(
-        session_factory, system.sdbid, provider="allwise", band="WISE22",
+    set_measurement_eligibility(
+        session_factory, measurement.id,
         excluded=False, actor="test", reason="reviewed as usable",
     )
     included = fitting_group_report(
         session_factory, target_reference=component_b.sdbid,
     )
     assert included["summary"]["fitting_group_count"] == 1
-    assert included["measurements"][0]["exclusion_basis"] == "manual_include_override"
+    assert included["measurements"][0]["exclusion_basis"] == "manual_include_action"
     assert included["measurements"][0]["fit_enabled"] is True
 
 

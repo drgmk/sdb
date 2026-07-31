@@ -23,7 +23,9 @@ from .models import (
     Target,
 )
 from .decisions import DecisionContext
+from .identifiers import normalize_identifier
 from .providers import Astrometry, Candidate, GaiaProvider, NullGaia, NullSimbad, ProviderError, SimbadProvider
+from .vocabulary import ProviderRunStatus
 
 _GAIA_DR3_IDENTIFIER = re.compile(r"^Gaia\s+DR3\s+(\d+)$", re.IGNORECASE)
 _COMPONENT_IDENTITY_RE = re.compile(
@@ -60,12 +62,6 @@ class AddResult:
     sdbid: str
     created: bool
     astrometry_source: str
-
-
-def normalize_identifier(value: str) -> str:
-    return " ".join(value.upper().split())
-
-
 def _component_identity_qualifier(value: str | None) -> str | None:
     if not value:
         return None
@@ -177,7 +173,16 @@ class IdentityService:
                     resolution_error = str(error)
                     resolution = None
                 else:
-                    self._outcome(session, submission.id, self.simbad.name, "match" if resolution else "no_match")
+                    self._outcome(
+                        session,
+                        submission.id,
+                        self.simbad.name,
+                        (
+                            ProviderRunStatus.MATCH
+                            if resolution
+                            else ProviderRunStatus.NO_MATCH
+                        ),
+                    )
                 if resolution:
                     identity_main_id = resolution.main_id
                     resolved = resolution.astrometry.with_source(
@@ -217,7 +222,16 @@ class IdentityService:
                 self._outcome(session, submission.id, self.gaia.name, self._error_status(error), str(error))
                 gaia_candidates = []
             else:
-                self._outcome(session, submission.id, self.gaia.name, "match" if gaia_candidates else "no_match")
+                self._outcome(
+                    session,
+                    submission.id,
+                    self.gaia.name,
+                    (
+                        ProviderRunStatus.MATCH
+                        if gaia_candidates
+                        else ProviderRunStatus.NO_MATCH
+                    ),
+                )
 
             for candidate in gaia_candidates:
                 separation = angular_separation_arcsec(
@@ -459,7 +473,7 @@ class IdentityService:
             .where(
                 SimbadMetadata.target_id == target.id,
                 MetadataRun.is_current.is_(True),
-                MetadataRun.status == "match",
+                MetadataRun.status == ProviderRunStatus.MATCH,
             )
             .order_by(MetadataRun.id.desc())
             .limit(1)
@@ -558,12 +572,28 @@ class IdentityService:
                 existing.add(normalized)
 
     @staticmethod
-    def _outcome(session, submission_id, provider, status, message=None):
-        session.add(ProviderOutcome(submission_id=submission_id, provider=provider, status=status, message=message))
+    def _outcome(
+        session,
+        submission_id,
+        provider,
+        status: str | ProviderRunStatus,
+        message=None,
+    ):
+        value = ProviderRunStatus.parse(status, "provider status")
+        session.add(ProviderOutcome(
+            submission_id=submission_id,
+            provider=provider,
+            status=value.value,
+            message=message,
+        ))
 
     @staticmethod
-    def _error_status(error: ProviderError) -> str:
-        return "transient_failure" if error.transient else "permanent_failure"
+    def _error_status(error: ProviderError) -> ProviderRunStatus:
+        return (
+            ProviderRunStatus.TRANSIENT_FAILURE
+            if error.transient
+            else ProviderRunStatus.PERMANENT_FAILURE
+        )
 
 
 def identifiers_from_pairs(values: Sequence[tuple[str, str]]) -> list[str]:

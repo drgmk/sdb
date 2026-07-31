@@ -15,7 +15,6 @@ from .assignment_review import build_measurement_assignment_review
 from .catalog_provenance import vizier_entry_url
 
 from .astrometry import propagate_to_epoch
-from .dirty import find_target
 from .hierarchy import (
     HierarchyService,
     WDS_UNUSABLE_SEPARATION_ARCSEC,
@@ -40,9 +39,11 @@ from .models import (
     Target,
 )
 from .providers import Astrometry
+from .targets import resolve_target
 from .ubv_components import decode_ubv_component
 from .tdsc_components import decode_tdsc_component
 from .v70a_components import decode_v70a_component
+from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 _HIERARCHY_VIZIER_LOCATORS = {
@@ -168,7 +169,7 @@ def build_review_sky_view(
             raise ValueError("review radius must be between 1 and 600 arcsec")
     system_context = None
     with session_factory() as session:
-        target = find_target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         center = _target_center(session, target)
@@ -1804,7 +1805,7 @@ def _catalog_points(
         ):
             runs.append(current)
         if (
-            latest.status in {"transient_failure", "permanent_failure"}
+            latest.status in PROVIDER_FAILURE_STATUSES
             and (current is None or latest.id != current.id)
             and (run_statuses is None or latest.status in run_statuses)
         ):
@@ -1818,7 +1819,7 @@ def _catalog_points(
             .order_by(RawCatalogRow.accepted.desc(), RawCatalogRow.score.desc(), RawCatalogRow.id)
         ))
         if not rows:
-            if run.status not in {"transient_failure", "permanent_failure"}:
+            if run.status not in PROVIDER_FAILURE_STATUSES:
                 continue
             ra2000, dec2000, pm_ra, pm_dec, pm_source, note = (
                 _display_position_2000(

@@ -20,7 +20,7 @@ from .catalog_provenance import materialize_catalog_documentation
 from .providers import ProviderError
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .serialization import safe_json as _safe_json
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
 from .snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
 from .serialization import row_float, row_payload, row_text
 

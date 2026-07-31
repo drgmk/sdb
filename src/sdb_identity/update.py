@@ -8,13 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalogs import CatalogService
-from .dirty import find_target
 from .metadata import MetadataService
 from .models import CatalogRun, MetadataRun, Target
 from .progress import NULL_PROGRESS, ProgressReporter
 from .reference_application import ReferenceApplicationService
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .reference_store import ReferenceStore
+from .targets import resolve_target
+from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 REMOTE_CATALOGS = ("gaia_dr3", "tycho2", "2mass", "allwise")
@@ -85,7 +86,7 @@ class UpdateService:
             for provider in group
         )
         with self.sessions() as session:
-            target = find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             target_id, sdbid = target.id, target.sdbid
@@ -196,7 +197,7 @@ class UpdateService:
         targets = []
         with self.sessions() as session:
             for reference in target_references:
-                target = find_target(session, reference)
+                target = resolve_target(session, reference)
                 if target is None:
                     raise KeyError(f"target not found: {reference}")
                 targets.append((target.id, target.sdbid))
@@ -279,7 +280,7 @@ class UpdateService:
         for result in refreshed:
             action = (
                 "failed"
-                if result.status in {"transient_failure", "permanent_failure"}
+                if result.status in PROVIDER_FAILURE_STATUSES
                 else "refreshed"
             )
             items.append(UpdateItem(
@@ -319,7 +320,7 @@ class UpdateService:
         for result in refreshed:
             action = (
                 "failed"
-                if result.status in {"transient_failure", "permanent_failure"}
+                if result.status in PROVIDER_FAILURE_STATUSES
                 else "refreshed"
             )
             items.append(UpdateItem(
@@ -452,7 +453,7 @@ class UpdateService:
                     return UpdateItem(target_id, sdbid, provider, "skipped", "current")
                 result = self.catalog_factory().refresh(target_id, provider)
             action = "refreshed"
-            if result.status in {"transient_failure", "permanent_failure"}:
+            if result.status in PROVIDER_FAILURE_STATUSES:
                 action = "failed"
             return UpdateItem(
                 target_id,

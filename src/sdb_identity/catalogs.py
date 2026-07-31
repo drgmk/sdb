@@ -31,7 +31,8 @@ from .models import (
 )
 from .photometry_semantics import validate_photometry_semantics
 from .providers import Astrometry, ProviderError
-from .service import normalize_identifier
+from .targets import resolve_target
+from .vocabulary import PROVIDER_FAILURE_STATUSES, ProviderRunStatus
 
 
 LOGGER = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ class CatalogRefreshResult:
     run_id: int
     target_id: int
     provider: str
-    status: str
+    status: ProviderRunStatus
     candidate_count: int
     measurement_count: int
     selected_source_id: str | None = None
@@ -175,7 +176,7 @@ class CatalogService:
             raise KeyError(f"unknown catalog provider: {provider}")
         adapter = self.adapters[provider]
         with self.sessions() as session:
-            target = self._find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
@@ -216,10 +217,10 @@ class CatalogService:
                 .where(
                     CatalogRun.target_id == target.id,
                     CatalogRun.provider == adapter.name,
-                    CatalogRun.status == "running",
+                    CatalogRun.status == ProviderRunStatus.RUNNING,
                 )
                 .values(
-                    status="transient_failure",
+                    status=ProviderRunStatus.TRANSIENT_FAILURE,
                     error="superseded after interrupted refresh",
                     completed_at=datetime.now(timezone.utc),
                     is_current=False,
@@ -230,7 +231,7 @@ class CatalogService:
                 batch_request_id=batch_request_id,
                 provider=adapter.name,
                 release=adapter.release,
-                status="running",
+                status=ProviderRunStatus.RUNNING,
                 is_current=False,
                 query_ra_deg=query_astrometry.ra_deg,
                 query_dec_deg=query_astrometry.dec_deg,
@@ -248,7 +249,11 @@ class CatalogService:
                     else preloaded_candidates
                 )
             except ProviderError as error:
-                run.status = "transient_failure" if error.transient else "permanent_failure"
+                run.status = (
+                    ProviderRunStatus.TRANSIENT_FAILURE
+                    if error.transient
+                    else ProviderRunStatus.PERMANENT_FAILURE
+                )
                 run.error = str(error)
                 run.completed_at = datetime.now(timezone.utc)
                 session.commit()
@@ -256,7 +261,7 @@ class CatalogService:
                     run.id,
                     target.id,
                     provider,
-                    run.status,
+                    ProviderRunStatus.parse(run.status, "catalog status"),
                     0,
                     0,
                     error=str(error),
@@ -322,11 +327,11 @@ class CatalogService:
 
             measurement_count = 0
             if not scored:
-                run.status = "no_match"
+                run.status = ProviderRunStatus.NO_MATCH
             elif selected_index is None:
-                run.status = "ambiguous"
+                run.status = ProviderRunStatus.AMBIGUOUS
             else:
-                run.status = "match"
+                run.status = ProviderRunStatus.MATCH
                 selected = scored[selected_index][0]
                 run.selected_source_id = selected.source_id
                 measurement_count = normalized_counts[selected_index]
@@ -378,7 +383,7 @@ class CatalogService:
                 run.id,
                 target.id,
                 provider,
-                run.status,
+                ProviderRunStatus.parse(run.status, "catalog status"),
                 len(scored),
                 measurement_count,
                 run.selected_source_id,
@@ -516,7 +521,7 @@ class CatalogService:
 
     def _context(self, target_reference, adapter) -> CatalogQueryContext:
         with self.sessions() as session:
-            target = self._find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
@@ -924,20 +929,6 @@ class CatalogService:
             raise RuntimeError("failed to create or retrieve canonical measurement")
         return measurement
 
-    @staticmethod
-    def _find_target(session: Session, reference: str | int) -> Target | None:
-        if isinstance(reference, int) or str(reference).isdigit():
-            return session.get(Target, int(reference))
-        target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
-        if target is not None:
-            return target
-        identifier = session.scalar(
-            select(ExternalIdentifier).where(
-                ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-            ).limit(1)
-        )
-        return None if identifier is None else session.get(Target, identifier.target_id)
-
     def override_candidate(
         self,
         raw_row_id: int,
@@ -975,7 +966,7 @@ class CatalogService:
                 target_id=previous.target_id,
                 provider=previous.provider,
                 release=previous.release,
-                status="match",
+                status=ProviderRunStatus.MATCH,
                 is_current=True,
                 query_ra_deg=previous.query_ra_deg,
                 query_dec_deg=previous.query_dec_deg,
@@ -1060,7 +1051,7 @@ class CatalogService:
                 replacement.id,
                 previous.target_id,
                 previous.provider,
-                "match",
+                ProviderRunStatus.MATCH,
                 replacement.candidate_count,
                 measurement_count,
                 candidate.source_id,
@@ -1080,7 +1071,7 @@ class CatalogService:
                 raise KeyError(f"catalog run not found: {run_id}")
             if not previous.is_current:
                 raise ValueError("catalog run is no longer current")
-            if previous.status != "ambiguous":
+            if previous.status != ProviderRunStatus.AMBIGUOUS:
                 raise ValueError("reviewed no-match requires a current ambiguous result")
             decision = DecisionContext.resolve(
                 actor=actor,
@@ -1094,7 +1085,7 @@ class CatalogService:
                 target_id=previous.target_id,
                 provider=previous.provider,
                 release=previous.release,
-                status="no_match",
+                status=ProviderRunStatus.NO_MATCH,
                 is_current=True,
                 query_ra_deg=previous.query_ra_deg,
                 query_dec_deg=previous.query_dec_deg,
@@ -1149,7 +1140,7 @@ class CatalogService:
                 replacement.id,
                 previous.target_id,
                 previous.provider,
-                "no_match",
+                ProviderRunStatus.NO_MATCH,
                 previous.candidate_count,
                 0,
             )
@@ -1166,7 +1157,7 @@ class CatalogService:
             previous = session.get(CatalogRun, run_id)
             if previous is None:
                 raise KeyError(f"catalog run not found: {run_id}")
-            if previous.status not in {"transient_failure", "permanent_failure"}:
+            if previous.status not in PROVIDER_FAILURE_STATUSES:
                 raise ValueError("retry requires a failed catalog run")
             latest_id = session.scalar(
                 select(CatalogRun.id)
@@ -1217,7 +1208,7 @@ class CatalogService:
             .where(
                 RawCatalogRow.detection_id == detection_id,
                 RawCatalogRow.accepted.is_(True),
-                CatalogRun.status == "match",
+                CatalogRun.status == ProviderRunStatus.MATCH,
                 (CatalogRun.is_current.is_(True)) | (CatalogRun.id == run_id),
             )
         ))

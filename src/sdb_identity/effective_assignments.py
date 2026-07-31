@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session
 
 from .catalog_measurements import current_measurement_target_ids
 from .models import MeasurementTargetAssociation, TargetLifecycleAction
-
-
-_INACTIVE_STATES = {"suppressed", "superseded", "archived"}
+from .vocabulary import (
+    INACTIVE_TARGET_STATES,
+    MeasurementTargetRole,
+    TargetRole,
+    TargetState,
+)
 
 
 @dataclass(frozen=True)
@@ -86,17 +89,19 @@ def effective_measurement_assignments(
             continue
         target_id = target_ids[0]
         status = lifecycle.get(target_id)
-        role = "unspecified" if status is None else status.role
-        state = "active" if status is None else status.state
-        if state in _INACTIVE_STATES:
+        role = TargetRole.UNSPECIFIED if status is None else status.role
+        state = TargetState.ACTIVE if status is None else status.state
+        if state in INACTIVE_TARGET_STATES:
             continue
         assignment_role = (
-            "composite_scope" if role == "composite" else "contributor"
+            MeasurementTargetRole.COMPOSITE_SCOPE
+            if role == TargetRole.COMPOSITE
+            else MeasurementTargetRole.CONTRIBUTOR
         )
         result.append(EffectiveMeasurementAssignment(
             measurement_id=measurement_id,
             target_id=target_id,
-            role=assignment_role,
+            role=assignment_role.value,
             method="catalog_association_default",
             weight=None,
             note="Derived from one accepted catalog-source association",

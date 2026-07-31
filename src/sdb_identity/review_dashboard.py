@@ -8,9 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .assignment_readiness import assignment_readiness_report
 from .fitting_groups import fitting_group_report
 from .models import ExternalIdentifier
-
-
-_PRIORITY_ORDER = {"highest": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+from .vocabulary import INACTIVE_TARGET_STATES, ReviewPriority, review_priority_rank
 
 
 def review_dashboard_report(
@@ -99,14 +97,18 @@ def review_dashboard_report(
         })
 
     rows.sort(key=lambda row: (
-        _PRIORITY_ORDER.get(str(row["priority"]), 9), str(row["sdbid"]),
+        -review_priority_rank(str(row["priority"])), str(row["sdbid"]),
     ))
     return {
         "selection": graph["selection"],
         "summary": {
             "target_count": len(rows),
-            "actionable_target_count": sum(row["priority"] != "none" for row in rows),
-            "clean_target_count": sum(row["priority"] == "none" for row in rows),
+            "actionable_target_count": sum(
+                row["priority"] != ReviewPriority.NONE for row in rows
+            ),
+            "clean_target_count": sum(
+                row["priority"] == ReviewPriority.NONE for row in rows
+            ),
             "scope_blocker_target_count": len(scope_by_target),
             "mixed_ownership_target_count": sum(
                 row["mixed_detection_count"] > 0 for row in rows
@@ -243,7 +245,7 @@ def _target_classification(
             "no_current_photometry", "medium",
             "refresh providers or confirm that no catalog photometry is expected",
         )
-    if target["state"] in {"suppressed", "superseded", "archived"}:
+    if target["state"] in INACTIVE_TARGET_STATES:
         return (
             "inactive_target", "none", "no action; target is not active",
         )

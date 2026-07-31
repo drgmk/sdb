@@ -30,7 +30,8 @@ from sdb_identity.review_widget import (
     build_review_sky_view,
     render_review_sky_html,
 )
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, gaia_candidate, simbad_result
 

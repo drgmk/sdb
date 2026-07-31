@@ -6,92 +6,105 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
-from .decisions import DecisionContext, validate_enum_field
-from .catalog_measurements import current_measurement_encounters
-from .models import (
-    CatalogRun, ExternalIdentifier, MeasurementAssociationAction,
-    MeasurementTargetAssociation, NormalizedMeasurement,
-    PhotometryOverride, RawCatalogRow, Target,
+from .decisions import DecisionContext
+from .catalog_measurements import (
+    current_measurement_encounters,
+    current_measurement_target_ids,
 )
-from .service import normalize_identifier
+from .models import (
+    CatalogRun, MeasurementAssociationAction,
+    MeasurementEligibilityAction,
+    MeasurementTargetAssociation, NormalizedMeasurement,
+    RawCatalogRow, Target,
+)
+from .targets import resolve_target
+from .vocabulary import (
+    MeasurementAssociationActionKind,
+    MeasurementTargetRole,
+    ReviewPriority,
+    review_priority_rank,
+)
 
 
-def _target(session: Session, reference: str | int) -> Target | None:
-    if isinstance(reference, int) or str(reference).isdigit():
-        return session.get(Target, int(reference))
-    target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
-    if target is not None:
-        return target
-    identifier = session.scalar(
-        select(ExternalIdentifier).where(
-            ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-        ).limit(1)
-    )
-    return None if identifier is None else session.get(Target, identifier.target_id)
-
-
-def set_photometry_override(
+def set_measurement_eligibility(
     session_factory: sessionmaker[Session],
-    target_reference: str | int,
+    measurement_id: int,
     *,
-    provider: str,
-    band: str,
     excluded: bool,
     actor: str | None,
     reason: str | None = None,
-) -> PhotometryOverride:
-    if not provider.strip() or not band.strip():
-        raise ValueError("provider and band are required")
+) -> MeasurementEligibilityAction:
     with session_factory.begin() as session:
-        target = _target(session, target_reference)
-        if target is None:
-            raise KeyError(f"target not found: {target_reference}")
+        measurement = session.get(NormalizedMeasurement, measurement_id)
+        if measurement is None:
+            raise KeyError(f"measurement not found: {measurement_id}")
         decision = DecisionContext.resolve(
             actor=actor,
             reason=reason,
             suggested_reason=(
-                f"{'Excluded' if excluded else 'Included'} {target.sdbid} "
-                f"{provider.strip().lower()} {band.strip().upper()} for fitting and export"
+                f"{'Excluded' if excluded else 'Included'} measurement "
+                f"{measurement.id} ({measurement.provider} {measurement.band}) "
+                "for fitting and export"
             ),
         )
-        value = PhotometryOverride(
-            target_id=target.id,
-            provider=provider.strip().lower(),
-            band=band.strip().upper(),
+        value = MeasurementEligibilityAction(
+            measurement_id=measurement.id,
             excluded=excluded,
             actor=decision.actor,
             reason=decision.reason,
         )
         session.add(value)
         session.flush()
-        mark_export_dirty(
-            session,
-            target.id,
-            source_type="photometry_override",
-            source_id=value.id,
-            reason=f"{value.provider} {value.band} photometry override",
-        )
+        affected = current_measurement_target_ids(
+            session, [measurement.id],
+        ).get(measurement.id, set())
+        affected.add(measurement.target_id)
+        for target_id in affected:
+            mark_export_dirty(
+                session,
+                target_id,
+                source_type="measurement_eligibility",
+                source_id=value.id,
+                reason=(
+                    f"{measurement.provider} {measurement.band} "
+                    "measurement eligibility changed"
+                ),
+            )
     return value
 
 
-def list_photometry_overrides(
+def list_measurement_eligibility_actions(
     session_factory: sessionmaker[Session],
     target_reference: str | int,
-) -> list[PhotometryOverride]:
+) -> list[MeasurementEligibilityAction]:
     with session_factory() as session:
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
+        measurement_ids = {
+            encounter.measurement.id
+            for encounter in current_measurement_encounters(
+                session, [target.id], require_match=False,
+            )
+        }
+        measurement_ids.update(session.scalars(
+            select(NormalizedMeasurement.id).where(
+                NormalizedMeasurement.target_id == target.id
+            )
+        ))
+        if not measurement_ids:
+            return []
         return list(
             session.scalars(
-                select(PhotometryOverride)
-                .where(PhotometryOverride.target_id == target.id)
-                .order_by(PhotometryOverride.id)
+                select(MeasurementEligibilityAction)
+                .where(
+                    MeasurementEligibilityAction.measurement_id.in_(
+                        measurement_ids
+                    )
+                )
+                .order_by(MeasurementEligibilityAction.id)
             )
         )
-
-
-MEASUREMENT_TARGET_ROLES = {"contributor", "composite_scope"}
 
 
 @dataclass(frozen=True)
@@ -115,13 +128,13 @@ def assign_measurement_target(
     measurement_id: int,
     target_reference: str | int,
     *,
-    role: str = "contributor",
+    role: str | MeasurementTargetRole = MeasurementTargetRole.CONTRIBUTOR,
     method: str = "manual",
     weight: float | None = None,
     actor: str | None,
     reason: str | None = None,
 ) -> MeasurementTargetAssociation:
-    role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
+    role = MeasurementTargetRole.parse(role, "role")
     method = method.strip().lower()
     if not method:
         raise ValueError("method is required")
@@ -131,7 +144,7 @@ def assign_measurement_target(
         measurement = session.get(NormalizedMeasurement, measurement_id)
         if measurement is None:
             raise KeyError(f"measurement not found: {measurement_id}")
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         decision = DecisionContext.resolve(
@@ -145,13 +158,13 @@ def assign_measurement_target(
         association = session.scalar(select(MeasurementTargetAssociation).where(
             MeasurementTargetAssociation.measurement_id == measurement.id,
             MeasurementTargetAssociation.target_id == target.id,
-            MeasurementTargetAssociation.role == role,
+            MeasurementTargetAssociation.role == role.value,
         ))
         if association is None:
             association = MeasurementTargetAssociation(
                 measurement_id=measurement.id,
                 target_id=target.id,
-                role=role,
+                role=role.value,
                 method=method,
                 weight=weight,
                 note=decision.reason,
@@ -164,8 +177,8 @@ def assign_measurement_target(
         action = MeasurementAssociationAction(
             measurement_id=measurement.id,
             target_id=target.id,
-            action="assign",
-            role=role,
+            action=MeasurementAssociationActionKind.ASSIGN.value,
+            role=role.value,
             method=method,
             weight=weight,
             actor=decision.actor,
@@ -189,22 +202,22 @@ def unassign_measurement_target(
     measurement_id: int,
     target_reference: str | int,
     *,
-    role: str = "contributor",
+    role: str | MeasurementTargetRole = MeasurementTargetRole.CONTRIBUTOR,
     actor: str | None,
     reason: str | None = None,
 ) -> MeasurementAssociationAction:
-    role = validate_enum_field(role, MEASUREMENT_TARGET_ROLES, "role")
+    role = MeasurementTargetRole.parse(role, "role")
     with session_factory.begin() as session:
         measurement = session.get(NormalizedMeasurement, measurement_id)
         if measurement is None:
             raise KeyError(f"measurement not found: {measurement_id}")
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         association = session.scalar(select(MeasurementTargetAssociation).where(
             MeasurementTargetAssociation.measurement_id == measurement.id,
             MeasurementTargetAssociation.target_id == target.id,
-            MeasurementTargetAssociation.role == role,
+            MeasurementTargetAssociation.role == role.value,
         ))
         if association is None:
             raise KeyError("current measurement assignment not found")
@@ -219,7 +232,7 @@ def unassign_measurement_target(
         action = MeasurementAssociationAction(
             measurement_id=measurement.id,
             target_id=target.id,
-            action="unassign",
+            action=MeasurementAssociationActionKind.UNASSIGN.value,
             role=association.role,
             method=association.method,
             weight=association.weight,
@@ -245,7 +258,7 @@ def list_measurement_target_assignments(
     target_reference: str | int,
 ) -> list[dict[str, object]]:
     with session_factory() as session:
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         rows = session.execute(
@@ -278,7 +291,7 @@ def list_measurement_assignment_history(
     target_reference: str | int,
 ) -> list[MeasurementAssociationAction]:
     with session_factory() as session:
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         return list(session.scalars(select(MeasurementAssociationAction).where(
@@ -291,7 +304,7 @@ def review_photometry_associations(
     target_reference: str | int,
 ) -> list[PhotometryReviewRow]:
     with session_factory() as session:
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         rows: list[PhotometryReviewRow] = []
@@ -429,7 +442,7 @@ def photometry_review_queue(
     with session_factory() as session:
         targets: list[Target] = []
         for reference in target_references:
-            target = _target(session, reference)
+            target = resolve_target(session, reference)
             if target is None:
                 raise KeyError(f"target not found: {reference}")
             targets.append(target)
@@ -450,7 +463,7 @@ def photometry_review_queue(
         for row in review_rows:
             context = band_context.get((row.provider, str(row.band))) if row.band else None
             signal, priority, action = _photometry_queue_signal(row, context)
-            if priority == "none":
+            if priority is ReviewPriority.NONE:
                 continue
             target_rows.append({
                 "sdbid": sdbid,
@@ -461,7 +474,7 @@ def photometry_review_queue(
                 "measurement_id": row.measurement_id,
                 "raw_row_id": row.raw_row_id,
                 "signal": signal,
-                "priority": priority,
+                "priority": priority.value,
                 "predicted_scope": None if context is None else context.get("predicted_ownership_scope"),
                 "predicted_blend_state": None if context is None else context.get("predicted_blend_state"),
                 "stored_scope": row.ownership_scope,
@@ -479,7 +492,7 @@ def photometry_review_queue(
                 "measurement_id": None,
                 "raw_row_id": None,
                 "signal": "no photometry review item",
-                "priority": "none",
+                "priority": ReviewPriority.NONE.value,
                 "predicted_scope": None,
                 "predicted_blend_state": None,
                 "stored_scope": None,
@@ -500,20 +513,36 @@ def photometry_review_queue(
 def _photometry_queue_signal(
     row: PhotometryReviewRow,
     context: dict[str, object] | None,
-) -> tuple[str, str, str]:
+) -> tuple[str, ReviewPriority, str]:
     if row.measurement_id is None and row.raw_row_id is not None:
-        return "unaccepted catalog neighbour", "medium", "review; exclude the band if it is not this target's light"
+        return (
+            "unaccepted catalog neighbour",
+            ReviewPriority.MEDIUM,
+            "review; exclude the band if it is not this target's light",
+        )
     if row.ownership_scope == "shared":
-        return "shared catalog source", "high", "inspect shared-source export exclusion"
+        return (
+            "shared catalog source",
+            ReviewPriority.HIGH,
+            "inspect shared-source export exclusion",
+        )
     if context is not None:
         predicted_scope = str(context.get("predicted_ownership_scope") or "")
         predicted_blend = str(context.get("predicted_blend_state") or "")
         if predicted_scope in {"shared", "system", "ambiguous"}:
-            return f"predicted {predicted_scope}", "high", "assign contributing targets after review"
+            return (
+                f"predicted {predicted_scope}",
+                ReviewPriority.HIGH,
+                "assign contributing targets after review",
+            )
         if predicted_blend == "blended":
-            return "likely blended at catalog resolution", "high", "assign contributing targets after review"
-    return "clean automatic association", "none", "none"
+            return (
+                "likely blended at catalog resolution",
+                ReviewPriority.HIGH,
+                "assign contributing targets after review",
+            )
+    return "clean automatic association", ReviewPriority.NONE, "none"
 
 
 def _queue_priority_rank(priority: str) -> int:
-    return {"none": 0, "low": 1, "medium": 2, "high": 3}.get(priority, 0)
+    return review_priority_rank(priority)

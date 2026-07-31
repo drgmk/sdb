@@ -17,6 +17,15 @@ from .decisions import configured_actor
 from .models import AstrometricSolution, CatalogRun, MatchCandidate, RawCatalogRow, Target
 from .providers import ProviderError
 from .service import AddRequest, IdentityService, UnresolvedTarget
+from .targets import resolve_target, resolve_targets
+from .vocabulary import (
+    MeasurementTargetRole,
+    ProviderRunStatus,
+    ReviewPriority,
+    TargetRole,
+    TargetState,
+    review_priority_rank,
+)
 
 REFERENCE_ADAPTERS = (
     "gaspar13", "v70a", "iras_psc", "iras_fsc", "hip2", "tdsc",
@@ -265,8 +274,12 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_target_state.add_argument("target")
     hierarchy_set_target_state = _add_parser(hierarchy_commands, "set-target-state", "Record an audited target role and lifecycle state.", "Use physical for fitted stellar components and composite for scopes such as AB. Suppressed, archived, system-only, and superseded states are recorded now but do not alter export until an explicit policy is enabled.")
     hierarchy_set_target_state.add_argument("target")
-    hierarchy_set_target_state.add_argument("--role", choices=["unspecified", "physical", "composite"], required=True)
-    hierarchy_set_target_state.add_argument("--state", choices=["active", "system_only", "review_only", "suppressed", "superseded", "archived"], required=True)
+    hierarchy_set_target_state.add_argument(
+        "--role", choices=TargetRole.choices(), required=True,
+    )
+    hierarchy_set_target_state.add_argument(
+        "--state", choices=TargetState.choices(), required=True,
+    )
     hierarchy_set_target_state.add_argument("--superseded-by")
     _add_actor_argument(hierarchy_set_target_state)
     _add_reason_argument(hierarchy_set_target_state)
@@ -276,7 +289,11 @@ def parser() -> argparse.ArgumentParser:
     hierarchy_review_queue.add_argument("--sample")
     hierarchy_review_queue.add_argument("--all", action="store_true", dest="review_all")
     hierarchy_review_queue.add_argument("--provider")
-    hierarchy_review_queue.add_argument("--min-priority", choices=["none", "low", "medium", "high", "highest"], help="priority view only")
+    hierarchy_review_queue.add_argument(
+        "--min-priority",
+        choices=ReviewPriority.choices(),
+        help="priority view only",
+    )
     hierarchy_review_queue.add_argument("--blended-only", action="store_true", help="blend view only")
     hierarchy_review_queue.add_argument("--review-required", action="store_true", help="blend view only")
     hierarchy_review_queue.add_argument(
@@ -415,13 +432,11 @@ def parser() -> argparse.ArgumentParser:
     photometry = _add_parser(commands, "photometry", "Review and override normalized photometry inclusion.", "Use this to exclude or re-include specific band/provider measurements while preserving the raw provider row. Overrides are audited and affect future exports.")
     photometry_commands = photometry.add_subparsers(dest="photometry_command", required=True)
     for action in ("exclude", "include"):
-        command = _add_parser(photometry_commands, action, f"{action.title()} one normalized photometry measurement.", "This records an audited override for a band/provider pair without deleting raw provider data. Excluded measurements remain inspectable and can be included again later.")
-        command.add_argument("target")
-        command.add_argument("band")
-        command.add_argument("--provider", required=True)
+        command = _add_parser(photometry_commands, action, f"{action.title()} one normalized photometry measurement.", "This records an audited action for one canonical measurement without deleting provider data. Excluded measurements remain inspectable and can be included again later.")
+        command.add_argument("measurement_id", type=int)
         _add_actor_argument(command)
         _add_reason_argument(command)
-    photometry_list = _add_parser(photometry_commands, "overrides", "List photometry inclusion/exclusion overrides for a target.", "Shows the append-only include/exclude override decisions recorded for a target's measurements, with actor and reason. It does not list the measurements themselves; use `photometry review` for association context.")
+    photometry_list = _add_parser(photometry_commands, "overrides", "List photometry inclusion/exclusion actions for a target.", "Shows the append-only include/exclude decisions recorded for a target's measurements, with actor and reason. It does not list the measurements themselves; use `photometry review` for association context.")
     photometry_list.add_argument("target")
     photometry_review = _add_parser(photometry_commands, "review", "Review current photometry association context for a target.", "Lists current normalized measurements plus unaccepted current raw catalog rows. This is read-only and intended to precede assign (ownership) and include/exclude (fit eligibility) decisions.")
     photometry_review.add_argument("target")
@@ -453,7 +468,11 @@ def parser() -> argparse.ArgumentParser:
     photometry_assign = _add_parser(photometry_commands, "assign", "Assign one measurement to a contributing target or composite scope.", "Creates or updates the current many-to-many assignment and appends an audit action. This records ownership for future joint fitting but does not yet change legacy exports.")
     photometry_assign.add_argument("measurement_id", type=int)
     photometry_assign.add_argument("target")
-    photometry_assign.add_argument("--role", choices=["contributor", "composite_scope"], default="contributor")
+    photometry_assign.add_argument(
+        "--role",
+        choices=MeasurementTargetRole.choices(),
+        default=MeasurementTargetRole.CONTRIBUTOR.value,
+    )
     photometry_assign.add_argument("--method", default="manual")
     photometry_assign.add_argument("--weight", type=float)
     _add_actor_argument(photometry_assign)
@@ -461,7 +480,11 @@ def parser() -> argparse.ArgumentParser:
     photometry_unassign = _add_parser(photometry_commands, "unassign", "Remove a current measurement assignment while preserving its history.", "Deletes only the materialized current assignment and appends an unassign action. Provider rows, normalized photometry, and earlier assignment actions remain intact.")
     photometry_unassign.add_argument("measurement_id", type=int)
     photometry_unassign.add_argument("target")
-    photometry_unassign.add_argument("--role", choices=["contributor", "composite_scope"], default="contributor")
+    photometry_unassign.add_argument(
+        "--role",
+        choices=MeasurementTargetRole.choices(),
+        default=MeasurementTargetRole.CONTRIBUTOR.value,
+    )
     _add_actor_argument(photometry_unassign)
     _add_reason_argument(photometry_unassign)
     photometry_assignment_history = _add_parser(photometry_commands, "assignment-history", "List append-only measurement assignment actions.", "Shows every assign and unassign action for a target, including actor, reason, method, role, and optional response weight.")
@@ -724,7 +747,7 @@ def _provider_output_to_stderr():
 
 
 def _photometry_review_priority_rank(priority: str) -> int:
-    return {"none": 0, "low": 1, "medium": 2, "high": 3, "highest": 4}.get(priority, 0)
+    return review_priority_rank(priority)
 
 
 def _review_page_filename(sdbid: str) -> str:
@@ -1788,7 +1811,7 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_json(args, {"exported": exported, "failed": failed}, sort_keys=True))
         return 1 if failed else 0
     if args.command == "update":
-        from .dirty import find_target, pending_export_targets
+        from .dirty import pending_export_targets
         from .export import export_ipac
         from .update import DEFAULT_PROVIDERS
 
@@ -1853,7 +1876,7 @@ def main(argv: list[str] | None = None) -> int:
                     ]
                 else:
                     with sessions() as session:
-                        target = find_target(session, args.target)
+                        target = resolve_target(session, args.target)
                     dirty_ids = {
                         value[0].id for value in pending_export_targets(sessions)
                     }
@@ -2127,19 +2150,17 @@ def main(argv: list[str] | None = None) -> int:
             assign_measurement_target,
             list_measurement_assignment_history,
             list_measurement_target_assignments,
-            list_photometry_overrides,
+            list_measurement_eligibility_actions,
             review_photometry_associations,
-            set_photometry_override,
+            set_measurement_eligibility,
             unassign_measurement_target,
         )
 
         try:
             if args.photometry_command in {"exclude", "include"}:
-                value = set_photometry_override(
+                value = set_measurement_eligibility(
                     sessions,
-                    args.target,
-                    provider=args.provider,
-                    band=args.band,
+                    args.measurement_id,
                     excluded=args.photometry_command == "exclude",
                     actor=args.actor,
                     reason=args.reason,
@@ -2148,21 +2169,19 @@ def main(argv: list[str] | None = None) -> int:
                 for value in values:
                     print(_format_json(args, {
                         "id": value.id,
-                        "target_id": value.target_id,
-                        "provider": value.provider,
-                        "band": value.band,
+                        "measurement_id": value.measurement_id,
                         "excluded": value.excluded,
                         "actor": value.actor,
                         "reason": value.reason,
                         "created_at": value.created_at.isoformat(),
                     }, sort_keys=True))
             elif args.photometry_command == "overrides":
-                for value in list_photometry_overrides(sessions, args.target):
+                for value in list_measurement_eligibility_actions(
+                    sessions, args.target,
+                ):
                     print(_format_json(args, {
                         "id": value.id,
-                        "target_id": value.target_id,
-                        "provider": value.provider,
-                        "band": value.band,
+                        "measurement_id": value.measurement_id,
                         "excluded": value.excluded,
                         "actor": value.actor,
                         "reason": value.reason,
@@ -2416,16 +2435,7 @@ def main(argv: list[str] | None = None) -> int:
         from .models import CatalogAttribute, MetadataRun, SimbadMetadata
 
         with sessions() as session:
-            target = session.scalar(select(Target).where(Target.sdbid == args.target))
-            if target is None and args.target.isdigit():
-                target = session.get(Target, int(args.target))
-            if target is None:
-                from .service import normalize_identifier
-                from .models import ExternalIdentifier
-                identifier = session.scalar(select(ExternalIdentifier).where(
-                    ExternalIdentifier.normalized_value == normalize_identifier(args.target)
-                ).limit(1))
-                target = None if identifier is None else session.get(Target, identifier.target_id)
+            target = resolve_target(session, args.target)
             if target is None:
                 print("target not found", file=sys.stderr)
                 return 2
@@ -2435,7 +2445,7 @@ def main(argv: list[str] | None = None) -> int:
                 .where(
                     CatalogAttribute.target_id == target.id,
                     CatalogRun.is_current.is_(True),
-                    CatalogRun.status == "match",
+                    CatalogRun.status == ProviderRunStatus.MATCH,
                 )
                 .order_by(CatalogAttribute.key, CatalogAttribute.provider)
             )
@@ -2460,7 +2470,7 @@ def main(argv: list[str] | None = None) -> int:
                 .where(
                     SimbadMetadata.target_id == target.id,
                     MetadataRun.is_current.is_(True),
-                    MetadataRun.status == "match",
+                    MetadataRun.status == ProviderRunStatus.MATCH,
                 )
             )
             if simbad is not None:
@@ -2552,8 +2562,9 @@ def main(argv: list[str] | None = None) -> int:
                     actor=args.actor, reason=args.reason,
                 )
                 print(_format_json(args, {
-                    "override_id": value.id, "dataset": value.dataset,
-                    "record_no": value.record_no, "excluded": value.excluded,
+                    "action_id": value.id,
+                    "measurement_id": value.measurement_id,
+                    "excluded": value.excluded,
                 }, sort_keys=True))
             elif args.dataset_command == "pending":
                 for dirty, target in service.pending(args.dataset):
@@ -2692,7 +2703,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     with sessions() as session:
         if args.command == "status":
-            from .dirty import resolve_targets
             targets = resolve_targets(session, args.target)
             if not targets:
                 print(f"target not found: {args.target}", file=sys.stderr)
@@ -2724,7 +2734,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "runs":
             from .models import MetadataRun
-            from .dirty import resolve_targets
 
             targets = resolve_targets(session, args.target)
             if not targets:
@@ -2809,7 +2818,7 @@ def main(argv: list[str] | None = None) -> int:
                 .join(Target, Target.id == CatalogRun.target_id)
                 .where(
                     CatalogRun.is_current.is_(True),
-                    CatalogRun.status == "ambiguous",
+                    CatalogRun.status == ProviderRunStatus.AMBIGUOUS,
                 )
                 .order_by(CatalogRun.id, RawCatalogRow.score.desc())
             )

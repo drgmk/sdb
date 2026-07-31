@@ -12,7 +12,6 @@ from .adapters import (
     catalog_source_id_matches_identifiers,
 )
 from .catalog_measurements import current_measurement_encounters
-from .dirty import find_target
 from .effective_assignments import effective_measurement_assignments
 from .models import (
     AstrometricSolution,
@@ -25,9 +24,8 @@ from .models import (
 from .providers import Astrometry
 from .ubv_components import decode_ubv_component
 from .tdsc_components import decode_tdsc_component
-
-
-_INACTIVE_STATES = {"suppressed", "superseded", "archived"}
+from .targets import resolve_target
+from .vocabulary import INACTIVE_TARGET_STATES, TargetRole, TargetState
 _AMBIGUOUS_SCOPES = {"ambiguous", "neighbour_context", "reject"}
 _SIMBAD_IDENTIFIER_SOURCES = {"simbad", "simbad_metadata"}
 
@@ -56,7 +54,7 @@ def measurement_assignment_proposals(
             target_context_loader = hierarchy.target_context
 
     with session_factory() as session:
-        requested = find_target(session, target_reference)
+        requested = resolve_target(session, target_reference)
         if requested is None:
             raise KeyError(f"target not found: {target_reference}")
         targets = _proposal_targets(session, requested, system_context)
@@ -305,10 +303,18 @@ def _proposal_origin(
         for target in encountered
     }
     if measurement.ownership_scope in {"system", "shared"}:
-        composites = [target for target in encountered if roles[target.id] == "composite"]
+        composites = [
+            target
+            for target in encountered
+            if roles[target.id] == TargetRole.COMPOSITE
+        ]
         if len(composites) == 1:
             return composites[0]
-    physical = [target for target in encountered if roles[target.id] == "physical"]
+    physical = [
+        target
+        for target in encountered
+        if roles[target.id] == TargetRole.PHYSICAL
+    ]
     if raw is not None and physical:
         source = Astrometry(raw.ra_deg, raw.dec_deg, raw.epoch)
         return min(physical, key=lambda target: angular_separation_arcsec(
@@ -466,7 +472,7 @@ def _candidate_rows(
         lifecycle_row = lifecycle.get(target.sdbid) or {}
         semantic_row = semantic.get(target.sdbid) or {}
         role, role_basis = effective_target_role(lifecycle_row, semantic_row)
-        state = str(lifecycle_row.get("state") or "active")
+        state = str(lifecycle_row.get("state") or TargetState.ACTIVE)
         identifier_sources = _matching_identifier_sources(
             provider,
             source_id,
@@ -479,7 +485,7 @@ def _candidate_rows(
             "target_role": role,
             "target_role_basis": role_basis,
             "target_state": state,
-            "eligible": state not in _INACTIVE_STATES,
+            "eligible": state not in INACTIVE_TARGET_STATES,
             "identifier_match": bool(identifier_sources),
             "identifier_sources": list(identifier_sources),
             "identifier_authority": _identifier_authority(identifier_sources)
@@ -523,14 +529,14 @@ def _effective_prediction(
         return prediction
     composites = [
         row for row in candidates
-        if row["eligible"] and row["target_role"] == "composite"
+        if row["eligible"] and row["target_role"] == TargetRole.COMPOSITE
     ]
     if len(composites) != 1:
         return prediction
     physical_in_beam = [
         row for row in candidates
         if row["eligible"]
-        and row["target_role"] == "physical"
+        and row["target_role"] == TargetRole.PHYSICAL
         and row["separation_arcsec"] <= resolution
     ]
     if len(physical_in_beam) < 2:
@@ -550,15 +556,15 @@ def effective_target_role(
     lifecycle: dict[str, object],
     semantic: dict[str, object],
 ) -> tuple[str, str]:
-    explicit = str(lifecycle.get("role") or "unspecified")
-    if explicit != "unspecified":
+    explicit = str(lifecycle.get("role") or TargetRole.UNSPECIFIED)
+    if explicit != TargetRole.UNSPECIFIED:
         return explicit, "target_lifecycle"
     kind = str(semantic.get("kind") or "unknown")
     labels = semantic.get("component_label_candidates") or []
     label = "" if not labels else str(labels[0].get("label") or "")
     if kind == "system_or_parent" or _group_component_label(label):
-        return "composite", "simbad_semantics"
-    return "physical", "default_or_component_semantics"
+        return TargetRole.COMPOSITE.value, "simbad_semantics"
+    return TargetRole.PHYSICAL.value, "default_or_component_semantics"
 
 
 def _group_component_label(value: str) -> bool:
@@ -576,8 +582,12 @@ def _propose_assignments(
 ) -> tuple[list[dict[str, object]], str, str]:
     scope = prediction["predicted_ownership_scope"]
     eligible = [row for row in candidates if row["eligible"]]
-    physical = [row for row in eligible if row["target_role"] == "physical"]
-    composites = [row for row in eligible if row["target_role"] == "composite"]
+    physical = [
+        row for row in eligible if row["target_role"] == TargetRole.PHYSICAL
+    ]
+    composites = [
+        row for row in eligible if row["target_role"] == TargetRole.COMPOSITE
+    ]
     identifier_physical = [row for row in physical if row["identifier_preferred"]]
     identifier_composite = [row for row in composites if row["identifier_preferred"]]
     simbad_identifier_composite = [

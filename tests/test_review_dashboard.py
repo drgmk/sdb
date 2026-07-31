@@ -7,7 +7,8 @@ from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_dashboard import review_dashboard_report
 from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from tests.test_review_actions import _wise_measurements
 
 
@@ -92,7 +93,10 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
     assert rows[clean.sdbid]["classification"] == "assigned_clean"
     assert rows[clean.sdbid]["display_name"] == "HD 123"
     assert rows[clean.sdbid]["priority"] == "none"
-    assert rows[unassigned.sdbid]["classification"] == "unassigned_photometry"
+    assert (
+        rows[unassigned.sdbid]["classification"]
+        == "unassigned_excluded_photometry"
+    )
     assert rows[unassigned.sdbid]["unassigned_detection_count"] == 1
     assert rows[mixed.sdbid]["classification"] == "mixed_band_ownership"
     assert rows[mixed.sdbid]["mixed_detection_count"] == 1

@@ -8,7 +8,6 @@ boilerplate so every decision path raises identical, consistent errors.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 import os
 
@@ -64,12 +63,3 @@ def validate_actor_reason(actor: str | None, reason: str | None) -> tuple[str, s
     if not clean_actor or not clean_reason:
         raise ValueError("actor and reason are required")
     return clean_actor, clean_reason
-
-
-def validate_enum_field(value: str, allowed: Iterable[str], field_name: str) -> str:
-    """Validate and normalize an enum-style field (lower-cased, stripped)."""
-    clean = value.strip().lower()
-    allowed_set = set(allowed)
-    if clean not in allowed_set:
-        raise ValueError(f"{field_name} must be one of {sorted(allowed_set)}")
-    return clean

@@ -8,7 +8,8 @@ from sdb_identity.catalogs import CatalogCandidate, CatalogService
 from sdb_identity.cli import main
 from sdb_identity.identifier_audit import audit_catalog_identifiers
 from sdb_identity.models import ExternalIdentifier
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog
 
 

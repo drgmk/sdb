@@ -38,7 +38,8 @@ from sdb_identity.reference import (
 from sdb_identity.adapters.reference import TdscSnapshotAdapter
 from sdb_identity.reference_definitions import V70A_DEFINITION
 from sdb_identity.reference_definitions import UBVMEANS_DEFINITION
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.ubv_components import decode_ubv_component
 from sdb_identity.v70a_components import decode_v70a_component
 

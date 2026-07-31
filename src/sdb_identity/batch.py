@@ -20,12 +20,22 @@ from .models import ImportItem, ImportJob, ImportRun
 from .progress import NULL_PROGRESS, ProgressReporter
 from .providers import NameResolution, ProviderError
 from .service import AddRequest, IdentityService, UnresolvedTarget
+from .vocabulary import PROVIDER_REVIEW_STATUSES, ProviderRunStatus
 
 
 STAGE_ORDER = ("identity", "simbad", "gaia_dr3", "tycho2", "2mass", "allwise")
-SUCCESS_STATUSES = {"succeeded", "no_match"}
-FAILURE_STATUSES = {"transient_failure", "permanent_failure", "ambiguous"}
+SUCCESS_STATUSES = {"succeeded", ProviderRunStatus.NO_MATCH}
+FAILURE_STATUSES = set(PROVIDER_REVIEW_STATUSES)
 TERMINAL_STATUSES = SUCCESS_STATUSES | FAILURE_STATUSES | {"skipped"}
+_PROVIDER_JOB_STATUS = {
+    ProviderRunStatus.MATCH: "succeeded",
+    ProviderRunStatus.NO_MATCH: ProviderRunStatus.NO_MATCH.value,
+    ProviderRunStatus.AMBIGUOUS: ProviderRunStatus.AMBIGUOUS.value,
+    ProviderRunStatus.TRANSIENT_FAILURE:
+        ProviderRunStatus.TRANSIENT_FAILURE.value,
+    ProviderRunStatus.PERMANENT_FAILURE:
+        ProviderRunStatus.PERMANENT_FAILURE.value,
+}
 
 
 @dataclass(frozen=True)
@@ -154,7 +164,11 @@ class BatchService:
                     for job_id in job_ids:
                         self._finish(
                             job_id,
-                            "transient_failure" if transient else "permanent_failure",
+                            (
+                                ProviderRunStatus.TRANSIENT_FAILURE
+                                if transient
+                                else ProviderRunStatus.PERMANENT_FAILURE
+                            ),
                             error=f"{type(error).__name__}: {error}",
                             skip_downstream=not transient,
                         )
@@ -186,9 +200,12 @@ class BatchService:
     def retry(self, run_id: int, *, failures: str = "transient") -> int:
         if failures not in {"transient", "all"}:
             raise ValueError("failures must be 'transient' or 'all'")
-        statuses = {"transient_failure"}
+        statuses = {ProviderRunStatus.TRANSIENT_FAILURE}
         if failures == "all":
-            statuses |= {"permanent_failure", "ambiguous"}
+            statuses |= {
+                ProviderRunStatus.PERMANENT_FAILURE,
+                ProviderRunStatus.AMBIGUOUS,
+            }
         with self.sessions.begin() as session:
             run = session.get(ImportRun, run_id)
             if run is None:
@@ -329,7 +346,11 @@ class BatchService:
             result = identity.add(request)
             self._finish(job_id, "succeeded", target_id=result.target_id)
         except UnresolvedTarget as error:
-            status = "transient_failure" if error.transient else "permanent_failure"
+            status = (
+                ProviderRunStatus.TRANSIENT_FAILURE
+                if error.transient
+                else ProviderRunStatus.PERMANENT_FAILURE
+            )
             self._finish(
                 job_id,
                 status,
@@ -339,7 +360,7 @@ class BatchService:
         except (ValueError, KeyError) as error:
             self._finish(
                 job_id,
-                "permanent_failure",
+                ProviderRunStatus.PERMANENT_FAILURE,
                 error=str(error),
                 skip_downstream=True,
             )
@@ -347,7 +368,11 @@ class BatchService:
             transient = self._is_transient_exception(error)
             self._finish(
                 job_id,
-                "transient_failure" if transient else "permanent_failure",
+                (
+                    ProviderRunStatus.TRANSIENT_FAILURE
+                    if transient
+                    else ProviderRunStatus.PERMANENT_FAILURE
+                ),
                 error=f"{type(error).__name__}: {error}",
                 skip_downstream=not transient,
             )
@@ -399,7 +424,11 @@ class BatchService:
                 for job_id in grouped_job_ids:
                     self._finish(
                         job_id,
-                        "transient_failure" if transient else "permanent_failure",
+                        (
+                            ProviderRunStatus.TRANSIENT_FAILURE
+                            if transient
+                            else ProviderRunStatus.PERMANENT_FAILURE
+                        ),
                         error=f"{type(error).__name__}: {error}",
                     )
             return
@@ -413,16 +442,10 @@ class BatchService:
         ):
             result = result_by_target.get(target_id)
             if result is None:
-                status = "transient_failure"
+                status = ProviderRunStatus.TRANSIENT_FAILURE
                 error = f"{stage} bulk refresh returned no result for target {target_id}"
             else:
-                status = {
-                    "match": "succeeded",
-                    "no_match": "no_match",
-                    "ambiguous": "ambiguous",
-                    "transient_failure": "transient_failure",
-                    "permanent_failure": "permanent_failure",
-                }[result.status]
+                status = _PROVIDER_JOB_STATUS[result.status]
                 error = result.error
             for job_id in grouped_job_ids:
                 self._finish(job_id, status, error=error)
@@ -456,24 +479,31 @@ class BatchService:
                 result = self.catalog_factory().refresh(target_id, stage)
             else:
                 raise ValueError(f"unknown import stage: {stage}")
-            status = {
-                "match": "succeeded",
-                "no_match": "no_match",
-                "ambiguous": "ambiguous",
-                "transient_failure": "transient_failure",
-                "permanent_failure": "permanent_failure",
-            }[result.status]
+            status = _PROVIDER_JOB_STATUS[result.status]
             self._finish(job_id, status, error=getattr(result, "error", None))
         except UnresolvedTarget as error:
-            status = "transient_failure" if error.transient else "permanent_failure"
+            status = (
+                ProviderRunStatus.TRANSIENT_FAILURE
+                if error.transient
+                else ProviderRunStatus.PERMANENT_FAILURE
+            )
             self._finish(job_id, status, error=str(error), skip_downstream=not error.transient)
         except (ValueError, KeyError) as error:
-            self._finish(job_id, "permanent_failure", error=str(error), skip_downstream=stage == "identity")
+            self._finish(
+                job_id,
+                ProviderRunStatus.PERMANENT_FAILURE,
+                error=str(error),
+                skip_downstream=stage == "identity",
+            )
         except Exception as error:
             transient = self._is_transient_exception(error)
             self._finish(
                 job_id,
-                "transient_failure" if transient else "permanent_failure",
+                (
+                    ProviderRunStatus.TRANSIENT_FAILURE
+                    if transient
+                    else ProviderRunStatus.PERMANENT_FAILURE
+                ),
                 error=f"{type(error).__name__}: {error}",
                 skip_downstream=stage == "identity" and not transient,
             )
@@ -494,7 +524,7 @@ class BatchService:
             job.status = status
             job.last_error = error
             job.completed_at = now
-            if status == "transient_failure":
+            if status == ProviderRunStatus.TRANSIENT_FAILURE:
                 job.next_retry_at = now + timedelta(seconds=min(300, 2 ** job.attempts))
             else:
                 job.next_retry_at = None
@@ -529,7 +559,11 @@ class BatchService:
                 )
                 all_statuses.extend(statuses)
                 if any(status in FAILURE_STATUSES for status in statuses):
-                    item.status = "failed" if "ambiguous" not in statuses else "review"
+                    item.status = (
+                        "failed"
+                        if ProviderRunStatus.AMBIGUOUS not in statuses
+                        else "review"
+                    )
                 elif any(status in {"pending", "running"} for status in statuses):
                     item.status = "pending"
                 elif any(status == "skipped" for status in statuses):

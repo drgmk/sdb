@@ -21,7 +21,7 @@ from .catalog_measurements import (
     current_measurement_encounters,
     current_measurements_for_target,
 )
-from .dirty import find_target, mark_export_dirty
+from .dirty import mark_export_dirty
 from .decisions import DecisionContext
 from .effective_assignments import effective_measurement_assignments
 from .models import (
@@ -49,8 +49,10 @@ from .models import (
     utcnow,
 )
 from .providers import Astrometry, ProviderError
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
+from .targets import resolve_target
 from .snapshots import SnapshotClient, VizierSnapshotClient
+from .vocabulary import ProviderRunStatus, ReviewPriority, review_priority_rank
 
 
 HIERARCHY_CATALOGS = {
@@ -866,7 +868,7 @@ class HierarchyService:
         min_priority: str | None = None,
     ) -> list[dict[str, object]]:
         provider_value = None if provider is None else provider.lower().strip()
-        min_rank = 0 if min_priority is None else _review_priority_rank(min_priority)
+        min_rank = 0 if min_priority is None else review_priority_rank(min_priority)
         rows = []
         for reference in target_references:
             context = self.target_context(reference, include_diagnostics=True)
@@ -884,13 +886,13 @@ class HierarchyService:
                 ]
                 _refresh_photometry_band_summaries(photometry)
             row = _review_queue_row(context, photometry)
-            if _review_priority_rank(str(row["priority"])) < min_rank:
+            if review_priority_rank(str(row["priority"])) < min_rank:
                 continue
             rows.append(row)
         return sorted(
             rows,
             key=lambda row: (
-                -_review_priority_rank(str(row["priority"])),
+                -review_priority_rank(str(row["priority"])),
                 str(row["sdbid"]),
             ),
         )
@@ -2265,7 +2267,7 @@ def _system_simbad_metadata(
             MetadataRun.target_id.in_(target_ids),
             MetadataRun.provider == "simbad",
             MetadataRun.is_current.is_(True),
-            MetadataRun.status == "match",
+            MetadataRun.status == ProviderRunStatus.MATCH,
         )
         .order_by(MetadataRun.target_id, MetadataRun.id.desc())
     )
@@ -3404,22 +3406,6 @@ def _target_photometry_context_summary(value: dict[str, object]) -> dict[str, ob
     }
 
 
-_REVIEW_PRIORITY_RANKS = {
-    "none": 0,
-    "low": 1,
-    "medium": 2,
-    "high": 3,
-    "highest": 4,
-}
-
-
-def _review_priority_rank(value: str) -> int:
-    key = value.lower().strip()
-    if key not in _REVIEW_PRIORITY_RANKS:
-        raise ValueError(f"unknown review priority: {value}")
-    return _REVIEW_PRIORITY_RANKS[key]
-
-
 def _review_queue_row(
     context: dict[str, object],
     photometry: dict[str, object],
@@ -3447,31 +3433,31 @@ def _review_queue_row(
     review_required = bool(context["review_required"] or photometry["review_required"])
 
     if likely_blended and basis == "candidate_review":
-        priority = "highest"
+        priority = ReviewPriority.HIGHEST
         reason = "likely blended photometry depends on unaccepted hierarchy candidates"
     elif accepted_count == 0 and candidate_system_count > 1:
-        priority = "high"
+        priority = ReviewPriority.HIGH
         reason = "multiple candidate hierarchy systems need a decision"
     elif assignment_status == "semantic_geometry_conflict":
-        priority = "high"
+        priority = ReviewPriority.HIGH
         reason = "SIMBAD semantic component and provider geometry disagree"
     elif review_required or diagnostic_count:
-        priority = "medium"
+        priority = ReviewPriority.MEDIUM
         reason = "hierarchy diagnostics or photometry context require review"
     elif candidate_count and accepted_count == 0:
-        priority = "low"
+        priority = ReviewPriority.LOW
         reason = "single clean hierarchy candidate has not been accepted"
     elif accepted_count:
-        priority = "low"
+        priority = ReviewPriority.LOW
         reason = "accepted hierarchy decision present"
     else:
-        priority = "none"
+        priority = ReviewPriority.NONE
         reason = "no hierarchy review item"
 
     sdbid = str(context["target"]["sdbid"])
     return {
         "sdbid": sdbid,
-        "priority": priority,
+        "priority": priority.value,
         "reason": reason,
         "candidate_count": candidate_count,
         "accepted_count": accepted_count,
@@ -3709,7 +3695,7 @@ def _target_semantic_identity_summary(value: dict[str, object]) -> dict[str, obj
 def _find_required_target(session: Session, reference: str | int | None) -> Target:
     if reference is None:
         raise ValueError("target reference is required")
-    target = find_target(session, reference)
+    target = resolve_target(session, reference)
     if target is None:
         raise KeyError(f"target not found: {reference}")
     return target

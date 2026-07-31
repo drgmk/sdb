@@ -14,6 +14,7 @@ from .models import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
+from .vocabulary import ProviderRunStatus
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,7 @@ def _effective_detection_target_ids(
     if ids is not None:
         query = query.where(RawCatalogRow.detection_id.in_(ids))
     if require_match:
-        query = query.where(CatalogRun.status == "match")
+        query = query.where(CatalogRun.status == ProviderRunStatus.MATCH)
     implicit: dict[int, dict[int, int]] = {}
     for raw_row, run, provider in session.execute(query):
         target_rows = implicit.setdefault(raw_row.detection_id, {})
@@ -177,7 +178,7 @@ def current_measurement_encounters(
         )
     )
     if require_match:
-        query = query.where(CatalogRun.status == "match")
+        query = query.where(CatalogRun.status == ProviderRunStatus.MATCH)
     latest_actions: dict[
         tuple[int, int], CatalogTargetAssociationAction
     ] = {}

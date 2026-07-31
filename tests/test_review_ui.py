@@ -16,10 +16,10 @@ from sdb_identity.models import (
     CatalogMatchOverride,
     CatalogTargetAssociationAction,
     ExternalIdentifier,
+    MeasurementEligibilityAction,
     MeasurementTargetAssociation,
     MetadataRun,
     NormalizedMeasurement,
-    PhotometryOverride,
     RawCatalogRow,
     SimbadMetadata,
 )
@@ -27,7 +27,8 @@ from sdb_identity.providers import ProviderError, SimbadNeighbour
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateItem, UpdateSummary
 from tests.fakes import FakeSimbad, astrometry, simbad_result
 from tests.test_review_actions import _wise_measurements
@@ -212,9 +213,9 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
 
     eligibility_preview = client.post("/api/eligibility/preview", json={
         "changes": [{
-            "target": system.sdbid,
-            "provider": "allwise",
-            "band": "WISE22",
+            "measurement_id": next(
+                row.id for row in measurements if row.band == "WISE22"
+            ),
             "excluded": True,
         }],
     })
@@ -225,9 +226,9 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     )
     eligibility_apply = client.post("/api/eligibility/apply", json={
         "changes": [{
-            "target": system.sdbid,
-            "provider": "allwise",
-            "band": "WISE22",
+            "measurement_id": next(
+                row.id for row in measurements if row.band == "WISE22"
+            ),
             "excluded": True,
         }],
         "actor": "browser reviewer",
@@ -235,11 +236,12 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
         "state_token": eligibility_value["state_token"],
     })
     assert eligibility_apply.status_code == 200
-    assert eligibility_apply.json()["applied"]["overrides_added"] == 1
+    assert eligibility_apply.json()["applied"]["actions_added"] == 1
     with session_factory() as session:
-        override = session.scalar(select(PhotometryOverride))
-    assert (override.target_id, override.provider, override.band, override.excluded) == (
-        system.target_id, "allwise", "WISE22", True,
+        action = session.scalar(select(MeasurementEligibilityAction))
+    assert (action.measurement_id, action.excluded) == (
+        next(row.id for row in measurements if row.band == "WISE22"),
+        True,
     )
 
     lifecycle_preview = client.post("/api/lifecycle/preview", json={

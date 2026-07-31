@@ -7,7 +7,8 @@ from sdb_identity.datasets import CuratedDatasetService
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.export import export_ipac
 from sdb_identity.models import CatalogRun, ExportDirtyTarget, ExternalIdentifier
-from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.service import AddRequest, IdentityService
 
 
 COLUMNS = (

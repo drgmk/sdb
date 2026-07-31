@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .models import CatalogRun, ExternalIdentifier, RawCatalogRow, Target
 from .reference_definitions import SNAPSHOT_CATALOGS
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
+from .vocabulary import ProviderRunStatus
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def audit_catalog_identifiers(
             for run in session.scalars(select(CatalogRun).where(
                 CatalogRun.provider == provider,
                 CatalogRun.is_current.is_(True),
-                CatalogRun.status == "match",
+                CatalogRun.status == ProviderRunStatus.MATCH,
             ))
         }
         results = []

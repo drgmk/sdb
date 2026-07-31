@@ -7,7 +7,6 @@ from sdb_identity.decisions import (
     configured_actor,
     resolve_reason,
     validate_actor_reason,
-    validate_enum_field,
 )
 
 
@@ -19,15 +18,6 @@ def test_validate_actor_reason_strips_and_returns():
 def test_validate_actor_reason_requires_both(actor, reason):
     with pytest.raises(ValueError, match="actor and reason are required"):
         validate_actor_reason(actor, reason)
-
-
-def test_validate_enum_field_normalizes():
-    assert validate_enum_field(" Physical ", {"physical", "composite"}, "role") == "physical"
-
-
-def test_validate_enum_field_rejects_unknown():
-    with pytest.raises(ValueError, match=r"role must be one of \['composite', 'physical'\]"):
-        validate_enum_field("bogus", {"physical", "composite"}, "role")
 
 
 def test_decision_context_uses_configured_actor_and_suggested_reason(monkeypatch):

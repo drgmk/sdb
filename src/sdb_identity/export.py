@@ -8,35 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
-    CuratedPhotometryOverride,
     ExternalIdentifier,
-    IrasBandSelection,
-    IrasDetectionFamily,
     MetadataRun,
-    PhotometryOverride,
     SimbadMetadata,
     Target,
 )
-from .catalog_measurements import (
-    current_catalog_detection_target_pairs,
-    current_measurement_encounters,
-)
-from .service import normalize_identifier
+from .catalog_measurements import current_measurement_encounters
 from .dirty import clear_export_dirty
-
-
-def _target(session: Session, reference: str | int) -> Target | None:
-    if isinstance(reference, int) or str(reference).isdigit():
-        return session.get(Target, int(reference))
-    target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
-    if target:
-        return target
-    identifier = session.scalar(
-        select(ExternalIdentifier).where(
-            ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-        ).limit(1)
-    )
-    return None if identifier is None else session.get(Target, identifier.target_id)
+from .measurement_eligibility import effective_measurement_eligibility
+from .targets import resolve_target
+from .vocabulary import ProviderRunStatus
 
 
 def export_ipac(
@@ -46,14 +27,11 @@ def export_ipac(
 ) -> Path:
     output = Path(output)
     with session_factory() as session:
-        target = _target(session, target_reference)
+        target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         encounters = current_measurement_encounters(session, [target.id])
         measurements = [row.measurement for row in encounters]
-        encounter_raw_by_measurement = {
-            row.measurement.id: row.raw_row for row in encounters
-        }
         identifiers = list(
             session.scalars(
                 select(ExternalIdentifier)
@@ -67,99 +45,31 @@ def export_ipac(
             .where(
                 SimbadMetadata.target_id == target.id,
                 MetadataRun.is_current.is_(True),
-                MetadataRun.status == "match",
+                MetadataRun.status == ProviderRunStatus.MATCH,
             )
         )
-        overrides = list(
-            session.scalars(
-                select(PhotometryOverride)
-                .where(PhotometryOverride.target_id == target.id)
-                .order_by(PhotometryOverride.id)
-            )
+        eligibility = effective_measurement_eligibility(
+            session, [value.id for value in measurements],
         )
-        curated_overrides = list(session.scalars(
-            select(CuratedPhotometryOverride).order_by(CuratedPhotometryOverride.id)
-        ))
-        detection_targets: dict[int, set[int]] = {}
-        for detection_id, source_target_id in (
-            current_catalog_detection_target_pairs(session)
-        ):
-            detection_targets.setdefault(detection_id, set()).add(
-                source_target_id
-            )
-        shared_detection_ids = {
-            detection_id
-            for detection_id, source_target_ids in detection_targets.items()
-            if len(source_target_ids) > 1
-        }
-        iras_alternate_ids = set(session.scalars(
-            select(IrasBandSelection.alternate_measurement_id)
-            .join(
-                IrasDetectionFamily,
-                IrasDetectionFamily.id == IrasBandSelection.family_id,
-            )
-            .where(
-                IrasDetectionFamily.target_id == target.id,
-                IrasDetectionFamily.is_current.is_(True),
-                IrasDetectionFamily.status == "associated",
-            )
-        ))
 
     band_order = {"J": 0, "H": 1, "KS": 2}
     measurements.sort(key=lambda value: band_order.get(value.band.replace("2MR1", "").replace("2MR2", "").replace("2M", ""), 99))
-    latest_overrides = {
-        (value.provider, value.band): value
-        for value in overrides
-    }
-    latest_curated_overrides = {
-        (value.dataset, value.record_no): value
-        for value in curated_overrides
-    }
-    tdsc_preferred_bands = set()
-    for value in measurements:
-        if value.provider != "tdsc":
-            continue
-        override = latest_overrides.get((value.provider, value.band))
-        excluded = value.excluded if override is None else override.excluded
-        if not excluded:
-            tdsc_preferred_bands.add(value.band)
     rows = []
     for value in measurements:
-        override = latest_overrides.get((value.provider.lower(), value.band.upper()))
-        raw = encounter_raw_by_measurement.get(value.id)
-        curated_override = None
-        if raw is not None and raw.source_id.startswith(f"{value.provider}:"):
-            try:
-                record_no = int(raw.source_id.rsplit(":", 1)[1])
-            except ValueError:
-                record_no = None
-            if record_no is not None:
-                curated_override = latest_curated_overrides.get((value.provider, record_no))
-        effective_override = curated_override or override
-        shared_source = value.detection_id in shared_detection_ids
-        excluded = value.excluded if effective_override is None else effective_override.excluded
-        if shared_source and effective_override is None:
-            excluded = True
-        iras_alternate = value.id in iras_alternate_ids
-        if iras_alternate and effective_override is None:
-            excluded = True
-        optical_alternate = (
-            value.provider == "tycho2" and value.band in tdsc_preferred_bands
-        )
-        if optical_alternate and effective_override is None:
-            excluded = True
+        eligibility_row = eligibility[value.id]
+        excluded = eligibility_row.excluded
         note2 = value.note2
-        if shared_source:
+        if eligibility_row.basis == "shared_detection":
             suffix = "Blend:shared catalog source; component export excluded"
             note2 = f"{note2}; {suffix}" if note2 else suffix
-        if iras_alternate:
+        if eligibility_row.basis == "iras_alternate":
             suffix = "IRAS duplicate:alternate PSC/FSC measurement"
             note2 = f"{note2}; {suffix}" if note2 else suffix
-        if optical_alternate:
+        if eligibility_row.basis == "tdsc_preferred":
             suffix = "Optical duplicate:TDSC component photometry preferred"
             note2 = f"{note2}; {suffix}" if note2 else suffix
-        if effective_override is not None:
-            suffix = f"Override:{effective_override.reason}"
+        if eligibility_row.action_id is not None:
+            suffix = f"Override:{eligibility_row.reason}"
             note2 = f"{note2}; {suffix}" if note2 else suffix
         rows.append(
             (

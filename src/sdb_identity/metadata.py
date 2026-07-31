@@ -20,7 +20,12 @@ from .models import (
     UserNote,
 )
 from .providers import Astrometry, ProviderError
-from .service import normalize_identifier
+from .identifiers import normalize_identifier
+from .targets import resolve_target
+from .vocabulary import (
+    PROVIDER_QUERY_RESULT_STATUSES,
+    ProviderRunStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -73,7 +78,7 @@ class SimbadSnapshot:
 
 @dataclass(frozen=True)
 class MetadataQueryResult:
-    status: str
+    status: str | ProviderRunStatus
     candidates: tuple[SimbadSnapshot, ...] = field(default_factory=tuple)
 
 
@@ -101,7 +106,7 @@ class MetadataRefreshResult:
     run_id: int
     target_id: int
     provider: str
-    status: str
+    status: ProviderRunStatus
     candidate_count: int
     main_id: str | None = None
     error: str | None = None
@@ -116,7 +121,7 @@ class MetadataService:
         if self.provider is None:
             raise RuntimeError("metadata refresh requires a provider")
         with self.sessions() as session:
-            target = self._find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             context = self._context(session, target)
@@ -134,10 +139,10 @@ class MetadataService:
                 .where(
                     MetadataRun.target_id == target.id,
                     MetadataRun.provider == self.provider.name,
-                    MetadataRun.status == "running",
+                    MetadataRun.status == ProviderRunStatus.RUNNING,
                 )
                 .values(
-                    status="transient_failure",
+                    status=ProviderRunStatus.TRANSIENT_FAILURE,
                     error="superseded after interrupted refresh",
                     completed_at=datetime.now(timezone.utc),
                     is_current=False,
@@ -147,7 +152,7 @@ class MetadataService:
                 target_id=target.id,
                 provider=self.provider.name,
                 release=self.provider.release,
-                status="running",
+                status=ProviderRunStatus.RUNNING,
                 is_current=False,
                 query_identifier=context.preferred_identifier,
             )
@@ -159,7 +164,11 @@ class MetadataService:
             try:
                 result = self.provider.query(context)
             except ProviderError as error:
-                run.status = "transient_failure" if error.transient else "permanent_failure"
+                run.status = (
+                    ProviderRunStatus.TRANSIENT_FAILURE
+                    if error.transient
+                    else ProviderRunStatus.PERMANENT_FAILURE
+                )
                 run.error = str(error)
                 run.completed_at = datetime.now(timezone.utc)
                 session.commit()
@@ -167,14 +176,15 @@ class MetadataService:
                     run.id,
                     target.id,
                     self.provider.name,
-                    run.status,
+                    ProviderRunStatus.parse(run.status, "metadata status"),
                     0,
                     error=str(error),
                 )
 
-            if result.status not in {"match", "no_match", "ambiguous"}:
+            result_status = ProviderRunStatus.parse(result.status, "metadata status")
+            if result_status not in PROVIDER_QUERY_RESULT_STATUSES:
                 raise ValueError(f"invalid metadata result status: {result.status}")
-            run.status = result.status
+            run.status = result_status
             run.candidate_count = len(result.candidates)
             run.raw_response_json = json.dumps(
                 [candidate.raw for candidate in result.candidates],
@@ -182,7 +192,7 @@ class MetadataService:
                 ensure_ascii=False,
             )
             main_id = None
-            if result.status == "match":
+            if result_status is ProviderRunStatus.MATCH:
                 if len(result.candidates) != 1:
                     raise ValueError("metadata match must contain exactly one candidate")
                 value = result.candidates[0]
@@ -270,7 +280,7 @@ class MetadataService:
                 run.id,
                 target.id,
                 self.provider.name,
-                run.status,
+                ProviderRunStatus.parse(run.status, "metadata status"),
                 run.candidate_count,
                 main_id,
             )
@@ -287,7 +297,7 @@ class MetadataService:
         with self.sessions() as session:
             contexts = []
             for reference in references:
-                target = self._find_target(session, reference)
+                target = resolve_target(session, reference)
                 if target is None:
                     raise KeyError(f"target not found: {reference}")
                 contexts.append(self._context(session, target))
@@ -312,10 +322,10 @@ class MetadataService:
                     .where(
                         MetadataRun.target_id == context.target_id,
                         MetadataRun.provider == self.provider.name,
-                        MetadataRun.status == "running",
+                        MetadataRun.status == ProviderRunStatus.RUNNING,
                     )
                     .values(
-                        status="transient_failure",
+                        status=ProviderRunStatus.TRANSIENT_FAILURE,
                         error="superseded after interrupted refresh",
                         completed_at=datetime.now(timezone.utc),
                         is_current=False,
@@ -325,7 +335,7 @@ class MetadataService:
                     target_id=context.target_id,
                     provider=self.provider.name,
                     release=self.provider.release,
-                    status="running",
+                    status=ProviderRunStatus.RUNNING,
                     is_current=False,
                     query_identifier=context.preferred_identifier,
                 )
@@ -337,7 +347,11 @@ class MetadataService:
         try:
             results_by_target = self.provider.query_many(tuple(contexts))
         except ProviderError as error:
-            status = "transient_failure" if error.transient else "permanent_failure"
+            status = (
+                ProviderRunStatus.TRANSIENT_FAILURE
+                if error.transient
+                else ProviderRunStatus.PERMANENT_FAILURE
+            )
             completed_at = datetime.now(timezone.utc)
             with self.sessions() as session:
                 for context in contexts:
@@ -362,7 +376,10 @@ class MetadataService:
         with self.sessions() as session:
             for context in contexts:
                 run = session.get(MetadataRun, run_ids[context.target_id])
-                result = results_by_target.get(context.target_id, MetadataQueryResult("no_match"))
+                result = results_by_target.get(
+                    context.target_id,
+                    MetadataQueryResult(ProviderRunStatus.NO_MATCH),
+                )
                 values.append(self._store_result(
                     session,
                     run,
@@ -379,9 +396,10 @@ class MetadataService:
         result: MetadataQueryResult,
         previous_signature: tuple[str, str | None] | None,
     ) -> MetadataRefreshResult:
-        if result.status not in {"match", "no_match", "ambiguous"}:
+        result_status = ProviderRunStatus.parse(result.status, "metadata status")
+        if result_status not in PROVIDER_QUERY_RESULT_STATUSES:
             raise ValueError(f"invalid metadata result status: {result.status}")
-        run.status = result.status
+        run.status = result_status
         run.candidate_count = len(result.candidates)
         run.raw_response_json = json.dumps(
             [candidate.raw for candidate in result.candidates],
@@ -389,7 +407,7 @@ class MetadataService:
             ensure_ascii=False,
         )
         main_id = None
-        if result.status == "match":
+        if result_status is ProviderRunStatus.MATCH:
             if len(result.candidates) != 1:
                 raise ValueError("metadata match must contain exactly one candidate")
             value = result.candidates[0]
@@ -476,7 +494,7 @@ class MetadataService:
             run.id,
             run.target_id,
             self.provider.name,
-            run.status,
+            ProviderRunStatus.parse(run.status, "metadata status"),
             run.candidate_count,
             main_id,
         )
@@ -487,7 +505,7 @@ class MetadataService:
         if not actor.strip():
             raise ValueError("note actor cannot be empty")
         with self.sessions.begin() as session:
-            target = self._find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             note = UserNote(target_id=target.id, actor=actor.strip(), text=text.strip())
@@ -497,7 +515,7 @@ class MetadataService:
 
     def list_notes(self, target_reference: str | int) -> list[UserNote]:
         with self.sessions() as session:
-            target = self._find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             return list(
@@ -541,20 +559,6 @@ class MetadataService:
                 solution.source_id,
             )
         return MetadataQueryContext(target.id, target.sdbid, names, astrometry)
-
-    @staticmethod
-    def _find_target(session: Session, reference: str | int) -> Target | None:
-        if isinstance(reference, int) or str(reference).isdigit():
-            return session.get(Target, int(reference))
-        target = session.scalar(select(Target).where(Target.sdbid == str(reference)))
-        if target:
-            return target
-        identifier = session.scalar(
-            select(ExternalIdentifier).where(
-                ExternalIdentifier.normalized_value == normalize_identifier(str(reference))
-            ).limit(1)
-        )
-        return None if identifier is None else session.get(Target, identifier.target_id)
 
     @staticmethod
     def _store_identifiers(

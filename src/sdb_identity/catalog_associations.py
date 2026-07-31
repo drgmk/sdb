@@ -25,6 +25,7 @@ from .models import (
     Target,
 )
 from .providers import Astrometry
+from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 DEFAULT_CATALOG_MATCH_RADIUS_ARCSEC = 2.0
@@ -114,7 +115,7 @@ def catalog_coverage_by_target(
             for provider in missing
             if (
                 (latest := latest_by_pair.get((target.id, provider))) is not None
-                and latest.status in {"transient_failure", "permanent_failure"}
+                and latest.status in PROVIDER_FAILURE_STATUSES
             )
         )
         normalization_gaps = [

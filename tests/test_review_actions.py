@@ -6,9 +6,9 @@ from sqlalchemy import select
 from sdb_identity.catalogs import CatalogService, MeasurementValue
 from sdb_identity.models import (
     MeasurementAssociationAction,
+    MeasurementEligibilityAction,
     MeasurementTargetAssociation,
     NormalizedMeasurement,
-    PhotometryOverride,
     TargetLifecycleAction,
 )
 from sdb_identity.photometry import assign_measurement_target
@@ -54,18 +54,17 @@ def _wise_measurements(
 
 def test_fit_eligibility_review_appends_atomic_band_overrides(session_factory):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    _wise_measurements(session_factory, target, excluded_band="WISE22")
+    measurements = _wise_measurements(
+        session_factory, target, excluded_band="WISE22",
+    )
+    by_band = {row.band: row for row in measurements}
     changes = [
         {
-            "target": target.sdbid,
-            "provider": "allwise",
-            "band": "WISE22",
+            "measurement_id": by_band["WISE22"].id,
             "excluded": False,
         },
         {
-            "target": target.sdbid,
-            "provider": "allwise",
-            "band": "WISE3P4",
+            "measurement_id": by_band["WISE3P4"].id,
             "excluded": True,
         },
     ]
@@ -86,15 +85,19 @@ def test_fit_eligibility_review_appends_atomic_band_overrides(session_factory):
         reason="inspected quality flags",
         expected_token=preview["state_token"],
     )
-    assert applied["applied"]["overrides_added"] == 2
+    assert applied["applied"]["actions_added"] == 2
     with session_factory() as session:
-        overrides = list(session.scalars(
-            select(PhotometryOverride).order_by(PhotometryOverride.band)
+        actions = list(session.scalars(
+            select(MeasurementEligibilityAction).order_by(
+                MeasurementEligibilityAction.measurement_id
+            )
         ))
-    assert [(row.band, row.excluded) for row in overrides] == [
-        ("WISE22", False),
-        ("WISE3P4", True),
-    ]
+    assert {
+        row.measurement_id: row.excluded for row in actions
+    } == {
+        by_band["WISE22"].id: False,
+        by_band["WISE3P4"].id: True,
+    }
 
     repeated = review_photometry_eligibility_decision(
         session_factory, changes=changes,
@@ -107,11 +110,10 @@ def test_fit_eligibility_review_can_store_suggested_reason(
 ):
     monkeypatch.setenv("SDB_ACTOR", "reviewer")
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    _wise_measurements(session_factory, target)
+    measurements = _wise_measurements(session_factory, target)
+    by_band = {row.band: row for row in measurements}
     changes = [{
-        "target": target.sdbid,
-        "provider": "allwise",
-        "band": "WISE3P4",
+        "measurement_id": by_band["WISE3P4"].id,
         "excluded": True,
     }]
     preview = review_photometry_eligibility_decision(
@@ -124,9 +126,9 @@ def test_fit_eligibility_review_can_store_suggested_reason(
         expected_token=preview["state_token"],
     )
     with session_factory() as session:
-        override = session.scalar(select(PhotometryOverride))
-    assert override.actor == "reviewer"
-    assert override.reason == preview["suggested_reason"]
+        action = session.scalar(select(MeasurementEligibilityAction))
+    assert action.actor == "reviewer"
+    assert action.reason == preview["suggested_reason"]
 
 
 def test_detection_decision_previews_and_atomically_assigns_all_selected_bands(

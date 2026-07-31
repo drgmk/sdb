@@ -36,6 +36,7 @@ from .target_import import (
     TargetImportService,
     search_nearby_simbad,
 )
+from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 def create_review_app(
@@ -546,7 +547,7 @@ def _provider_result_from_payload(
             if run.status != "ambiguous" or not run.is_current:
                 raise ValueError("reviewed no-match requires a current ambiguous run")
         else:
-            if run.status not in {"transient_failure", "permanent_failure"}:
+            if run.status not in PROVIDER_FAILURE_STATUSES:
                 raise ValueError("retry requires a failed catalog run")
             latest_id = session.scalar(
                 select(CatalogRun.id)
@@ -837,8 +838,8 @@ def _eligibility_summary(value: dict[str, object]) -> dict[str, object]:
     ]
     applied = value.get("applied") or {}
     title = (
-        f"Applied {int(applied.get('overrides_added', 0))} fit include/exclude change"
-        f"{'s' if int(applied.get('overrides_added', 0)) != 1 else ''}"
+        f"Applied {int(applied.get('actions_added', 0))} fit include/exclude change"
+        f"{'s' if int(applied.get('actions_added', 0)) != 1 else ''}"
         if value.get("mode") == "applied"
         else (
             "Fit include/exclude changes ready"
@@ -852,7 +853,7 @@ def _eligibility_summary(value: dict[str, object]) -> dict[str, object]:
             "These controls affect fitting/export eligibility, not ownership.",
             f"Reviewed bands: {len(value['changes'])}",
         ],
-        "changes": changes or ["The latest manual overrides already match."],
+        "changes": changes or ["The effective measurement settings already match."],
         "warnings": ([
             f"{len(unchanged)} selected setting"
             f"{'s are' if len(unchanged) != 1 else ' is'} already current."
@@ -1818,8 +1819,11 @@ def _target_page(
             status = "Excluded from fit" if excluded else "Included in fit"
             basis_label = {
                 "provider_excluded": "provider default",
-                "manual_exclude_override": "manual override",
-                "manual_include_override": "manual override",
+                "manual_exclude_action": "manual decision",
+                "manual_include_action": "manual decision",
+                "shared_detection": "shared-source safety",
+                "iras_alternate": "IRAS duplicate safety",
+                "tdsc_preferred": "TDSC preferred",
             }.get(basis, "")
             if basis_label:
                 status += f" · {basis_label}"
@@ -1833,9 +1837,8 @@ def _target_page(
                 f"<button type='button' class='eligibility-toggle' "
                 f"data-current-excluded='{str(excluded).lower()}' "
                 f"data-desired-excluded='{str(excluded).lower()}' "
-                f"data-target='{_e(row['origin_sdbid'])}' "
-                f"data-provider='{_e(row['provider'])}' "
-                f"data-band='{_e(row['band'])}' aria-pressed='false'>"
+                f"data-measurement='{row['measurement_id']}' "
+                f"aria-pressed='false'>"
                 f"{'Include in fit' if excluded else 'Exclude from fit'}</button></div>"
             )
         bands = "".join(band_rows)
@@ -2279,9 +2282,7 @@ function eligibilityPayloadFor(section){
   const changes=[...section.querySelectorAll('.eligibility-toggle')]
     .filter(button=>button.dataset.desiredExcluded!==button.dataset.currentExcluded)
     .map(button=>({
-      target:button.dataset.target,
-      provider:button.dataset.provider,
-      band:button.dataset.band,
+      measurement_id:Number(button.dataset.measurement),
       excluded:button.dataset.desiredExcluded==='true',
     }));
   return {changes};

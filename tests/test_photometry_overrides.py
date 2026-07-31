@@ -5,11 +5,13 @@ from astropy.table import Table
 from sdb_identity.catalogs import CatalogService
 from sdb_identity.export import export_ipac
 from sdb_identity.photometry import (
-    list_photometry_overrides,
+    list_measurement_eligibility_actions,
     photometry_review_queue,
     review_photometry_associations,
-    set_photometry_override,
+    set_measurement_eligibility,
 )
+from sdb_identity.models import NormalizedMeasurement
+from sqlalchemy import select
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 
@@ -27,12 +29,12 @@ def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_fact
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     service = CatalogService(session_factory, {"allwise": allwise_catalog()})
     service.refresh(target.sdbid, "allwise")
+    with session_factory() as session:
+        measurement_id = session.scalar(select(NormalizedMeasurement.id))
 
-    first = set_photometry_override(
+    first = set_measurement_eligibility(
         session_factory,
-        target.sdbid,
-        provider="allwise",
-        band="WISE3P4",
+        measurement_id,
         excluded=True,
         actor="grant",
         reason="blended source",
@@ -45,11 +47,9 @@ def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_fact
     assert list(table["exclude"]) == [1]
     assert "blended source" in table["Note2"][0]
 
-    second = set_photometry_override(
+    second = set_measurement_eligibility(
         session_factory,
-        target.sdbid,
-        provider="allwise",
-        band="WISE3P4",
+        measurement_id,
         excluded=False,
         actor="grant",
         reason="resolved after review",
@@ -57,7 +57,12 @@ def test_manual_exclusion_survives_refresh_and_latest_override_wins(session_fact
     output = export_ipac(session_factory, target.sdbid, tmp_path / "included.txt")
     table = Table.read(output, format="ascii.ipac")
     assert list(table["exclude"]) == [0]
-    assert [value.id for value in list_photometry_overrides(session_factory, target.sdbid)] == [
+    assert [
+        value.id
+        for value in list_measurement_eligibility_actions(
+            session_factory, target.sdbid,
+        )
+    ] == [
         first.id, second.id,
     ]
 

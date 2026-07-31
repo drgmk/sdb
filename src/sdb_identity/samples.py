@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .decisions import DecisionContext
-from .dirty import find_target
 from .models import Sample, SampleMembershipAction, Target
+from .targets import resolve_target
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ class SampleService:
             sample = self._sample(session, name)
             targets = []
             for reference in references:
-                target = find_target(session, reference)
+                target = resolve_target(session, reference)
                 if target is None:
                     raise KeyError(f"target not found: {reference}")
                 targets.append(target)
@@ -161,7 +161,7 @@ class SampleService:
     def _action(self, name, target_reference, action, *, actor, reason):
         with self.sessions.begin() as session:
             sample = self._sample(session, name)
-            target = find_target(session, target_reference)
+            target = resolve_target(session, target_reference)
             if target is None:
                 raise KeyError(f"target not found: {target_reference}")
             current = self._current_action(session, sample.id, target.id)
