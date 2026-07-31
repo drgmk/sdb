@@ -315,9 +315,11 @@ def review_photometry_associations(
             expand_context=False,
             require_match=False,
         )
+        encounter_raw_ids: set[int] = set()
         for encounter in state.encounters:
             measurement = encounter.measurement
             raw_row_id = encounter.raw_row.id
+            encounter_raw_ids.add(raw_row_id)
             rows.append(PhotometryReviewRow(
                 target_id=target.id,
                 provider=measurement.provider,
@@ -338,6 +340,7 @@ def review_photometry_associations(
             .where(CatalogRun.target_id == target.id)
             .where(CatalogRun.is_current.is_(True))
             .where(RawCatalogRow.accepted.is_(False))
+            .where(RawCatalogRow.id.not_in(encounter_raw_ids))
             .order_by(CatalogRun.provider, RawCatalogRow.source_id, RawCatalogRow.id)
         )
         for raw in raw_rows:
@@ -377,10 +380,14 @@ def _review_photometry_associations_many(
             expand_context=False,
             require_match=False,
         )
+        encounter_raw_ids_by_target: dict[int, set[int]] = {
+            target_id: set() for target_id in target_ids
+        }
         for encounter in state.encounters:
             measurement = encounter.measurement
             target_id = encounter.target_id
             raw_row_id = encounter.raw_row.id
+            encounter_raw_ids_by_target[target_id].add(raw_row_id)
             rows_by_target[target_id].append(PhotometryReviewRow(
                 target_id=target_id,
                 provider=measurement.provider,
@@ -411,6 +418,8 @@ def _review_photometry_associations_many(
                 )
             )
             for raw, run_provider, target_id in raw_rows:
+                if raw.id in encounter_raw_ids_by_target[target_id]:
+                    continue
                 rows_by_target[target_id].append(PhotometryReviewRow(
                     target_id=target_id,
                     provider=run_provider,

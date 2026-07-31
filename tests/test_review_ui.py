@@ -13,7 +13,7 @@ from sdb_identity.catalogs import (
 )
 from sdb_identity.models import (
     CatalogDetection,
-    CatalogMatchOverride,
+    CatalogResultDecision,
     CatalogTargetAssociationAction,
     ExternalIdentifier,
     MeasurementEligibilityAction,
@@ -623,12 +623,32 @@ def test_review_ui_previews_catalog_accept_no_match_and_retry(session_factory):
     })
     assert applied.status_code == 200
     assert applied.json()["applied"]["status"] == "no_match"
+
+    stale = client.post("/api/provider-result/apply", json={
+        "action": "accept_candidate",
+        "run_id": ambiguous.run_id,
+        "raw_row_id": candidate.id,
+        "actor": "browser reviewer",
+        "reason": "stale choice",
+        "state_token": accepted.json()["state_token"],
+    })
+    assert stale.status_code == 409
+    assert "changed after preview" in stale.json()["detail"]
+
+    repeated_preview = client.post("/api/provider-result/preview", json={
+        "action": "reviewed_no_match",
+        "run_id": ambiguous.run_id,
+        "raw_row_id": candidate.id,
+    })
+    assert repeated_preview.status_code == 200
+    assert repeated_preview.json()["has_changes"] is False
     with session_factory() as session:
         action = session.scalar(
-            select(CatalogMatchOverride)
-            .where(CatalogMatchOverride.action == "reviewed_no_match")
+            select(CatalogResultDecision)
+            .where(CatalogResultDecision.action == "reviewed_no_match")
         )
         assert action.reason == "neither candidate is the target"
+        assert session.query(CatalogResultDecision).count() == 1
 
     def fail(_context):
         raise ProviderError("temporary provider failure", transient=True)

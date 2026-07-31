@@ -83,14 +83,14 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0050_measurement_eligibility"
+    assert version == "0052_identity_candidate_decisions"
     assert {
         "measurement_eligibility_actions",
         "dataset_revisions", "curated_records",
         "curated_association_actions",
         "reference_application_runs", "reference_application_items",
         "reference_application_records",
-        "catalog_match_overrides",
+        "catalog_result_decisions", "catalog_retry_actions",
         "catalog_attributes",
         "export_dirty_targets",
         "samples", "sample_membership_actions", "sample_export_runs",
@@ -121,7 +121,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "unresolved_curated_records",
         "curated_association_history",
         "reference_application_status", "unmatched_reference_records",
-        "catalog_match_override_history",
+        "catalog_result_decision_history",
         "current_catalog_attributes", "catalog_attribute_conflicts",
         "pending_export_targets",
         "current_sample_memberships", "sample_summary", "sample_export_summary",
@@ -132,6 +132,141 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "current_target_lifecycle", "measurement_assignment_history",
         "current_measurement_assignments",
     } <= views
+
+
+def test_catalog_result_migration_restores_reviewed_acquisition_run(tmp_path):
+    path = tmp_path / "catalog-result-upgrade.sqlite"
+    init_database(path, "0050_measurement_eligibility")
+    sessions = make_session_factory(path)
+    target = IdentityService(sessions).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    service = CatalogService(sessions, {
+        "2mass": FakeCatalog([
+            candidate("one", ra=10.00010, measurements=[measurement()]),
+            candidate("two", ra=10.00011, measurements=[measurement()]),
+        ]),
+    })
+    acquired = service.refresh(target.sdbid, "2mass")
+
+    with sqlite3.connect(path) as connection:
+        chosen = connection.execute(
+            "SELECT id,detection_id,source_id FROM raw_catalog_rows "
+            "WHERE run_id=? ORDER BY id DESC LIMIT 1",
+            (acquired.run_id,),
+        ).fetchone()
+        connection.execute(
+            "UPDATE catalog_runs SET is_current=0 WHERE id=?",
+            (acquired.run_id,),
+        )
+        replacement_id = connection.execute(
+            "INSERT INTO catalog_runs "
+            "(target_id,batch_request_id,provider,release,status,is_current,"
+            "query_ra_deg,query_dec_deg,query_epoch,candidate_count,"
+            "selected_source_id,error,created_at,completed_at) "
+            "SELECT target_id,batch_request_id,provider,release,'match',1,"
+            "query_ra_deg,query_dec_deg,query_epoch,candidate_count,?,error,"
+            "created_at,completed_at FROM catalog_runs WHERE id=? RETURNING id",
+            (chosen[2], acquired.run_id),
+        ).fetchone()[0]
+        connection.execute(
+            "INSERT INTO raw_catalog_rows "
+            "(run_id,detection_id,source_id,ra_deg,dec_deg,epoch,"
+            "separation_arcsec,score,accepted,payload_json) "
+            "SELECT ?,detection_id,source_id,ra_deg,dec_deg,epoch,"
+            "separation_arcsec,score,1,payload_json FROM raw_catalog_rows "
+            "WHERE id=?",
+            (replacement_id, chosen[0]),
+        )
+        connection.execute(
+            "INSERT INTO catalog_match_overrides "
+            "(target_id,provider,previous_run_id,replacement_run_id,action,"
+            "selected_source_id,actor,reason,created_at) "
+            "VALUES (?, '2mass', ?, ?, 'accept_candidate', ?, "
+            "'legacy reviewer', 'legacy selection', CURRENT_TIMESTAMP)",
+            (target.target_id, acquired.run_id, replacement_id, chosen[2]),
+        )
+        connection.commit()
+
+    init_database(path)
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        views = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='view'"
+            )
+        }
+        current = connection.execute(
+            "SELECT id FROM catalog_runs WHERE is_current=1"
+        ).fetchall()
+        decision = connection.execute(
+            "SELECT reviewed_run_id,action,reviewed_raw_row_id,reason "
+            "FROM catalog_result_decisions"
+        ).fetchone()
+
+    assert "catalog_match_overrides" not in tables
+    assert "catalog_match_override_history" not in views
+    assert current == [(acquired.run_id,)]
+    assert decision == (
+        acquired.run_id,
+        "accept_detection",
+        chosen[0],
+        "legacy selection",
+    )
+
+
+def test_identity_decision_migration_preserves_legacy_accepted_flag(tmp_path):
+    path = tmp_path / "identity-decision-upgrade.sqlite"
+    init_database(path, "0051_catalog_result_decisions")
+    sessions = make_session_factory(path)
+    target = IdentityService(sessions).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO submissions "
+            "(id,target_id,input_name,input_epoch,status,created_at) "
+            "VALUES (100,?,'legacy identity',2000,'completed',CURRENT_TIMESTAMP)",
+            (target.target_id,),
+        )
+        connection.execute(
+            "INSERT INTO match_candidates "
+            "(id,submission_id,provider,source_id,ra_deg,dec_deg,epoch,"
+            "proper_motion_available,separation_arcsec,score,score_details) "
+            "VALUES (100,100,'gaia_dr3','123',10,-20,2016,0,0.1,0.9,'{}')"
+        )
+        connection.execute(
+            "ALTER TABLE match_candidates ADD COLUMN accepted BOOLEAN "
+            "NOT NULL DEFAULT 0"
+        )
+        connection.execute(
+            "UPDATE match_candidates SET accepted=1 WHERE id=100"
+        )
+        connection.commit()
+
+    init_database(path)
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1] for row in connection.execute(
+                "PRAGMA table_info(match_candidates)"
+            )
+        }
+        decision = connection.execute(
+            "SELECT candidate_id,decision,method,reason "
+            "FROM match_decisions WHERE candidate_id=100"
+        ).fetchone()
+
+    assert "accepted" not in columns
+    assert decision == (
+        100,
+        "accepted",
+        "migration",
+        "migrated accepted candidate flag",
+    )
 
 
 def test_provider_scope_migration_repairs_import_order_overwrite(tmp_path):
@@ -243,5 +378,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0050_measurement_eligibility"
+    assert version == "0052_identity_candidate_decisions"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy import Integer, cast, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_results import effective_catalog_results
 from .astrometry import propagate_to_epoch
 from .catalogs import CatalogQueryContext, CatalogService
 from .dirty import mark_export_dirty
@@ -55,6 +56,11 @@ class ReferenceApplicationService:
                 CatalogRun.provider == adapter.name,
                 CatalogRun.is_current.is_(True),
             )))
+            current_results_before = effective_catalog_results(
+                session,
+                (run.target_id for run in current_runs),
+                providers=(adapter.name,),
+            )
         already_applied = {run.target_id for run in current_runs}
         new_targets = target_ids - already_applied
 
@@ -96,8 +102,8 @@ class ReferenceApplicationService:
             }
             affected = set(new_targets)
             affected.update(
-                run.target_id for run in current_runs
-                if run.selected_source_id in changed_sources
+                result.target_id for result in current_results_before.values()
+                if result.selected_source_id in changed_sources
             )
             for target_id, values in candidates.items():
                 if any(value.source_id in changed_sources for value in values):
@@ -161,13 +167,19 @@ class ReferenceApplicationService:
                 )
 
             current_selected: dict[str, list[int]] = defaultdict(list)
-            for run in session.scalars(select(CatalogRun).where(
-                CatalogRun.provider == adapter.name,
-                CatalogRun.is_current.is_(True),
-                CatalogRun.status == ProviderRunStatus.MATCH,
-                CatalogRun.selected_source_id.is_not(None),
-            )):
-                current_selected[run.selected_source_id].append(run.target_id)
+            current_results = effective_catalog_results(
+                session,
+                target_ids,
+                providers=(adapter.name,),
+            )
+            for result in current_results.values():
+                if (
+                    result.status == ProviderRunStatus.MATCH
+                    and result.selected_source_id is not None
+                ):
+                    current_selected[result.selected_source_id].append(
+                        result.target_id
+                    )
             candidate_targets: dict[str, set[int]] = defaultdict(set)
             for target_id, values in candidates.items():
                 for value in values:

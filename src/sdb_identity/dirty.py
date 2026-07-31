@@ -28,16 +28,46 @@ def mark_export_dirty(
     return value
 
 
-def clear_export_dirty(session: Session, target_id: int) -> int:
+def export_dirty_watermark(
+    session: Session,
+    target_id: int,
+) -> int | None:
+    """Return the newest pending event visible in the current read snapshot."""
+
+    return session.scalar(
+        select(func.max(ExportDirtyTarget.id)).where(
+            ExportDirtyTarget.target_id == target_id,
+            ExportDirtyTarget.exported_at.is_(None),
+        )
+    )
+
+
+def mark_exported_through(
+    session: Session,
+    target_id: int,
+    event_id: int,
+) -> int:
+    """Acknowledge pending events no newer than an exported read snapshot."""
+
     result = session.execute(
         update(ExportDirtyTarget)
         .where(
             ExportDirtyTarget.target_id == target_id,
             ExportDirtyTarget.exported_at.is_(None),
+            ExportDirtyTarget.id <= event_id,
         )
         .values(exported_at=datetime.now(timezone.utc))
     )
     return result.rowcount
+
+
+def clear_export_dirty(session: Session, target_id: int) -> int:
+    """Explicitly acknowledge every event currently visible to this session."""
+
+    watermark = export_dirty_watermark(session, target_id)
+    if watermark is None:
+        return 0
+    return mark_exported_through(session, target_id, watermark)
 
 
 def pending_export_targets(

@@ -249,7 +249,6 @@ def test_hierarchy_system_context_links_sibling_identity_candidate_and_photometr
             separation_arcsec=7.0,
             score=0.01,
             score_details="{}",
-            accepted=False,
         ))
         for target_id, source_id in (
             (primary.target_id, "WISEA"),

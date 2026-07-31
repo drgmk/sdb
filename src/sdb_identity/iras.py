@@ -8,8 +8,8 @@ from astropy.coordinates import SkyCoord
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from .catalog_results import effective_catalog_results
 from .models import (
-    CatalogRun,
     IrasBandSelection,
     IrasDetectionFamily,
     NormalizedMeasurement,
@@ -68,24 +68,24 @@ def _preference(value: NormalizedMeasurement):
 
 
 def reconcile_iras_target(session: Session, target_id: int) -> IrasDetectionFamily | None:
-    runs = {
-        run.provider: run
-        for run in session.scalars(select(CatalogRun).where(
-            CatalogRun.target_id == target_id,
-            CatalogRun.provider.in_(IRAS_PROVIDERS),
-            CatalogRun.is_current.is_(True),
-            CatalogRun.status == ProviderRunStatus.MATCH,
-        ))
+    results = {
+        result.provider: result
+        for result in effective_catalog_results(
+            session, [target_id], providers=IRAS_PROVIDERS,
+        ).values()
+        if result.status == ProviderRunStatus.MATCH
     }
-    if set(runs) != set(IRAS_PROVIDERS):
+    if set(results) != set(IRAS_PROVIDERS):
         session.execute(update(IrasDetectionFamily).where(
             IrasDetectionFamily.target_id == target_id,
             IrasDetectionFamily.is_current.is_(True),
         ).values(is_current=False))
         return None
 
-    psc_run = runs["iras_psc"]
-    fsc_run = runs["iras_fsc"]
+    psc_result = results["iras_psc"]
+    fsc_result = results["iras_fsc"]
+    psc_run = psc_result.run
+    fsc_run = fsc_result.run
     existing = session.scalar(select(IrasDetectionFamily).where(
         IrasDetectionFamily.psc_run_id == psc_run.id,
         IrasDetectionFamily.fsc_run_id == fsc_run.id,
@@ -103,14 +103,8 @@ def reconcile_iras_target(session: Session, target_id: int) -> IrasDetectionFami
         IrasDetectionFamily.target_id == target_id,
         IrasDetectionFamily.is_current.is_(True),
     ).values(is_current=False))
-    psc_raw = session.scalar(select(RawCatalogRow).where(
-        RawCatalogRow.run_id == psc_run.id,
-        RawCatalogRow.accepted.is_(True),
-    ))
-    fsc_raw = session.scalar(select(RawCatalogRow).where(
-        RawCatalogRow.run_id == fsc_run.id,
-        RawCatalogRow.accepted.is_(True),
-    ))
+    psc_raw = psc_result.selected_raw_row
+    fsc_raw = fsc_result.selected_raw_row
     normalized = _normalized_separation(psc_raw, fsc_raw)
     associated = normalized is not None and normalized <= 3.0
     family = IrasDetectionFamily(
@@ -133,13 +127,11 @@ def reconcile_iras_target(session: Session, target_id: int) -> IrasDetectionFami
 
     measurements = list(session.scalars(
         select(NormalizedMeasurement)
-        .join(
-            RawCatalogRow,
-            RawCatalogRow.detection_id == NormalizedMeasurement.detection_id,
-        )
         .where(
-            RawCatalogRow.run_id.in_((psc_run.id, fsc_run.id)),
-            RawCatalogRow.accepted.is_(True),
+            NormalizedMeasurement.detection_id.in_((
+                psc_result.selected_detection.id,
+                fsc_result.selected_detection.id,
+            )),
         )
     ))
     by_band: dict[str, list[NormalizedMeasurement]] = {}

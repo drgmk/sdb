@@ -12,6 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from .catalog_results import effective_catalog_results
 from .database import init_database, make_session_factory
 from .decisions import configured_actor
 from .models import AstrometricSolution, CatalogRun, MatchCandidate, RawCatalogRow, Target
@@ -154,7 +155,7 @@ def parser() -> argparse.ArgumentParser:
     review_view.add_argument("--output", required=True)
     review_view.add_argument("--radius", type=float)
     review_view.add_argument("--open", action="store_true", help="open the generated HTML in the default browser")
-    override = _add_parser(commands, "override-match", "Manually accept an identity match candidate.", "This records an append-only audit decision and marks sibling identity candidates as not accepted. Use it only after inspecting `sdb review matches` output.")
+    override = _add_parser(commands, "override-match", "Manually accept an identity match candidate.", "This records an append-only audit decision and applies the selected candidate's astrometry and provider identifier to the target. The latest accepted decision is the submission's sole selection. Use it only after inspecting `sdb review matches` output.")
     override.add_argument("candidate_id", type=int)
     _add_actor_argument(override)
     _add_reason_argument(override)
@@ -2439,15 +2440,18 @@ def main(argv: list[str] | None = None) -> int:
             if target is None:
                 print("target not found", file=sys.stderr)
                 return 2
-            query = (
-                select(CatalogAttribute)
-                .join(CatalogRun, CatalogRun.id == CatalogAttribute.run_id)
-                .where(
-                    CatalogAttribute.target_id == target.id,
-                    CatalogRun.is_current.is_(True),
-                    CatalogRun.status == ProviderRunStatus.MATCH,
-                )
-                .order_by(CatalogAttribute.key, CatalogAttribute.provider)
+            matched_run_ids = {
+                value.run.id
+                for value in effective_catalog_results(
+                    session, [target.id],
+                ).values()
+                if value.status == ProviderRunStatus.MATCH
+            }
+            query = select(CatalogAttribute).where(
+                CatalogAttribute.target_id == target.id,
+                CatalogAttribute.run_id.in_(matched_run_ids),
+            ).order_by(
+                CatalogAttribute.key, CatalogAttribute.provider,
             )
             if args.key:
                 query = query.where(CatalogAttribute.key == args.key)
@@ -2743,10 +2747,18 @@ def main(argv: list[str] | None = None) -> int:
             want_metadata = args.provider in (None, "simbad")
             for target in targets:
                 if want_catalog:
+                    effective = effective_catalog_results(
+                        session,
+                        [target.id],
+                        providers=(args.provider,) if args.provider else None,
+                    )
                     query = select(CatalogRun).where(CatalogRun.target_id == target.id)
                     if args.provider:
                         query = query.where(CatalogRun.provider == args.provider)
                     for run in session.scalars(query.order_by(CatalogRun.id.desc())):
+                        current_result = effective.get(
+                            (target.id, run.provider)
+                        )
                         print(_format_json(args, {
                             "kind": "catalog",
                             "sdbid": target.sdbid,
@@ -2757,6 +2769,18 @@ def main(argv: list[str] | None = None) -> int:
                             "is_current": run.is_current,
                             "candidate_count": run.candidate_count,
                             "selected_source_id": run.selected_source_id,
+                            "effective_status": (
+                                current_result.status
+                                if current_result is not None
+                                and current_result.run.id == run.id
+                                else None
+                            ),
+                            "effective_selected_source_id": (
+                                current_result.selected_source_id
+                                if current_result is not None
+                                and current_result.run.id == run.id
+                                else None
+                            ),
                             "error": run.error,
                         }, sort_keys=True))
                 if want_metadata:
@@ -2791,8 +2815,11 @@ def main(argv: list[str] | None = None) -> int:
                 selections = list(session.scalars(select(IrasBandSelection).where(
                     IrasBandSelection.family_id == family.id
                 ).order_by(IrasBandSelection.band)))
-                psc = session.get(CatalogRun, family.psc_run_id)
-                fsc = session.get(CatalogRun, family.fsc_run_id)
+                effective = effective_catalog_results(
+                    session, [family.target_id], providers=("iras_psc", "iras_fsc"),
+                )
+                psc = effective.get((family.target_id, "iras_psc"))
+                fsc = effective.get((family.target_id, "iras_fsc"))
                 print(_format_json(args, {
                     "family_id": family.id,
                     "target_id": family.target_id,
@@ -2801,9 +2828,13 @@ def main(argv: list[str] | None = None) -> int:
                     "normalized_separation": family.normalized_separation,
                     "reason": family.reason,
                     "psc_run_id": family.psc_run_id,
-                    "psc_source_id": psc.selected_source_id,
+                    "psc_source_id": (
+                        None if psc is None else psc.selected_source_id
+                    ),
                     "fsc_run_id": family.fsc_run_id,
-                    "fsc_source_id": fsc.selected_source_id,
+                    "fsc_source_id": (
+                        None if fsc is None else fsc.selected_source_id
+                    ),
                     "band_selections": [{
                         "band": value.band,
                         "selected_measurement_id": value.selected_measurement_id,
@@ -2812,13 +2843,23 @@ def main(argv: list[str] | None = None) -> int:
                     } for value in selections],
                 }, sort_keys=True))
         elif args.kind == "catalog-matches":
+            current_runs = list(session.scalars(
+                select(CatalogRun).where(CatalogRun.is_current.is_(True))
+            ))
+            effective = effective_catalog_results(
+                session, (run.target_id for run in current_runs),
+            )
+            ambiguous_run_ids = {
+                value.run.id
+                for value in effective.values()
+                if value.status == ProviderRunStatus.AMBIGUOUS
+            }
             candidates = session.execute(
                 select(RawCatalogRow, CatalogRun, Target)
                 .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
                 .join(Target, Target.id == CatalogRun.target_id)
                 .where(
-                    CatalogRun.is_current.is_(True),
-                    CatalogRun.status == ProviderRunStatus.AMBIGUOUS,
+                    CatalogRun.id.in_(ambiguous_run_ids),
                 )
                 .order_by(CatalogRun.id, RawCatalogRow.score.desc())
             )
@@ -2834,17 +2875,27 @@ def main(argv: list[str] | None = None) -> int:
                     "score": candidate.score,
                 }, sort_keys=True))
         else:
-            from sqlalchemy import case, func
+            from .identity_results import effective_identity_candidate_ids
             from .models import Submission
 
-            ambiguous = session.scalars(
+            submissions = list(session.scalars(
                 select(Submission)
                 .join(MatchCandidate, MatchCandidate.submission_id == Submission.id)
                 .group_by(Submission.id)
-                .having(func.sum(case((MatchCandidate.accepted, 1), else_=0)) == 0)
                 .order_by(Submission.id)
+            ))
+            accepted_ids = effective_identity_candidate_ids(
+                session,
+                submission_ids=(value.id for value in submissions),
             )
-            for submission in ambiguous:
+            accepted_submission_ids = set(session.scalars(
+                select(MatchCandidate.submission_id).where(
+                    MatchCandidate.id.in_(accepted_ids)
+                )
+            ))
+            for submission in submissions:
+                if submission.id in accepted_submission_ids:
+                    continue
                 candidates = session.scalars(
                     select(MatchCandidate)
                     .where(MatchCandidate.submission_id == submission.id)

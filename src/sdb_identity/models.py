@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -244,14 +244,11 @@ class MatchCandidate(Base):
     separation_arcsec: Mapped[float] = mapped_column(Float, nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     score_details: Mapped[str] = mapped_column(Text, nullable=False)
-    accepted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-
 class MatchDecision(Base):
     __tablename__ = "match_decisions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(ForeignKey("match_candidates.id"), nullable=False)
-    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("match_candidates.id"), nullable=False, index=True)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     actor: Mapped[str | None] = mapped_column(String(100))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
@@ -835,17 +832,46 @@ class ReferenceApplicationRecord(Base):
     selected_target_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class CatalogMatchOverride(AuditedActionMixin, Base):
-    __tablename__ = "catalog_match_overrides"
+class CatalogResultDecision(AuditedActionMixin, Base):
+    """Append-only interpretation of one immutable acquisition run."""
+
+    __tablename__ = "catalog_result_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('accept_detection', 'reviewed_no_match')",
+            name="ck_catalog_result_decision_action",
+        ),
+        CheckConstraint(
+            "(action = 'accept_detection' AND accepted_detection_id IS NOT NULL "
+            "AND reviewed_raw_row_id IS NOT NULL) OR "
+            "(action = 'reviewed_no_match' AND accepted_detection_id IS NULL "
+            "AND reviewed_raw_row_id IS NULL)",
+            name="ck_catalog_result_decision_evidence",
+        ),
+        Index(
+            "ix_catalog_result_decisions_run_order",
+            "reviewed_run_id",
+            "id",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    previous_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
-    replacement_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
-    action: Mapped[str] = mapped_column(
-        String(30), default="accept_candidate", nullable=False, index=True,
-    )
-    selected_source_id: Mapped[str | None] = mapped_column(String(200))
+    reviewed_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    accepted_detection_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_detections.id"), index=True)
+    reviewed_raw_row_id: Mapped[int | None] = mapped_column(ForeignKey("raw_catalog_rows.id"), index=True)
+
+
+class CatalogRetryAction(AuditedActionMixin, Base):
+    """Operator request linking a failed run to its new acquisition attempt."""
+
+    __tablename__ = "catalog_retry_actions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    failed_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
+    retry_run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
 
 
 class CatalogTargetAssociationAction(AuditedActionMixin, Base):

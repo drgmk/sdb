@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_measurements import current_measurement_target_ids
 from .models import (
-    CatalogMatchOverride,
+    CatalogResultDecision,
+    CatalogRetryAction,
     CatalogTargetAssociationAction,
     CatalogDetection,
     CuratedAssociationAction,
@@ -137,17 +138,27 @@ def system_decision_history(
             ))
 
         for action in session.scalars(
-            select(CatalogMatchOverride)
-            .where(CatalogMatchOverride.target_id.in_(target_ids))
+            select(CatalogResultDecision)
+            .where(CatalogResultDecision.target_id.in_(target_ids))
         ):
             rows.append(_row(
                 action, "catalog_result",
                 f"{targets[action.target_id]}:{action.provider}",
                 (
-                    f"selected source {action.selected_source_id}"
-                    if action.action == "accept_candidate"
+                    f"accepted detection {action.accepted_detection_id}"
+                    if action.action == "accept_detection"
                     else action.action.replace("_", " ")
                 ),
+            ))
+
+        for action in session.scalars(
+            select(CatalogRetryAction)
+            .where(CatalogRetryAction.target_id.in_(target_ids))
+        ):
+            rows.append(_row(
+                action, "catalog_retry",
+                f"{targets[action.target_id]}:{action.provider}",
+                f"retried run {action.failed_run_id} as {action.retry_run_id}",
             ))
 
         for action, detection in session.execute(

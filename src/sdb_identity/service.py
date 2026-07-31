@@ -23,7 +23,9 @@ from .models import (
     Target,
 )
 from .decisions import DecisionContext
+from .dirty import mark_export_dirty
 from .identifiers import normalize_identifier
+from .identity_results import effective_identity_candidate_ids
 from .providers import Astrometry, Candidate, GaiaProvider, NullGaia, NullSimbad, ProviderError, SimbadProvider
 from .vocabulary import ProviderRunStatus
 
@@ -289,7 +291,6 @@ class IdentityService:
                 target = Target(sdbid=sdbid, ra2000_deg=derived.ra_deg, dec2000_deg=derived.dec_deg)
                 session.add(target)
                 session.flush()
-                from .dirty import mark_export_dirty
                 mark_export_dirty(
                     session,
                     target.id,
@@ -353,7 +354,6 @@ class IdentityService:
                         "simbad_gaia_dr3_ids": sorted(gaia_dr3_identifiers_from_pairs(identifiers)),
                         "gaia_identifier_agreement": candidate.source_id in gaia_dr3_identifiers_from_pairs(identifiers),
                     }),
-                    accepted=accepted,
                 )
                 session.add(row)
                 session.flush()
@@ -391,15 +391,92 @@ class IdentityService:
                     f"{candidate.provider} source {candidate.source_id}"
                 ),
             )
-            candidate.accepted = True
-            siblings = session.scalars(
-                select(MatchCandidate).where(
-                    MatchCandidate.submission_id == candidate.submission_id,
-                    MatchCandidate.id != candidate.id,
+            submission = session.get(Submission, candidate.submission_id)
+            if submission is None or submission.target_id is None:
+                raise ValueError(
+                    "identity candidate is not attached to a target"
                 )
+            target = session.get(Target, submission.target_id)
+            if target is None:
+                raise ValueError(
+                    "identity candidate target no longer exists"
+                )
+            selected_ids = effective_identity_candidate_ids(
+                session, submission_ids=[submission.id],
             )
-            for sibling in siblings:
-                sibling.accepted = False
+            astrometry = Astrometry(
+                candidate.ra_deg,
+                candidate.dec_deg,
+                candidate.epoch,
+                pm_ra_cosdec_masyr=candidate.pm_ra_cosdec_masyr,
+                pm_dec_masyr=candidate.pm_dec_masyr,
+                parallax_mas=candidate.parallax_mas,
+                radial_velocity_kms=candidate.radial_velocity_kms,
+                source=candidate.provider,
+                source_id=candidate.source_id,
+                position_bibcode=candidate.position_bibcode,
+                proper_motion_bibcode=candidate.proper_motion_bibcode,
+                parallax_bibcode=candidate.parallax_bibcode,
+                radial_velocity_bibcode=candidate.radial_velocity_bibcode,
+            )
+            derived = propagate_to_epoch(astrometry, 2000.0)
+            existing_solution = session.scalar(
+                select(AstrometricSolution)
+                .where(
+                    AstrometricSolution.target_id == target.id,
+                    AstrometricSolution.source == candidate.provider,
+                    AstrometricSolution.source_id == candidate.source_id,
+                    AstrometricSolution.ra_deg == candidate.ra_deg,
+                    AstrometricSolution.dec_deg == candidate.dec_deg,
+                    AstrometricSolution.epoch == candidate.epoch,
+                )
+                .order_by(AstrometricSolution.id.desc())
+                .limit(1)
+            )
+            if existing_solution is None:
+                existing_solution = _astrometric_solution(
+                    target.id,
+                    astrometry,
+                    derived_ra2000_deg=derived.ra_deg,
+                    derived_dec2000_deg=derived.dec_deg,
+                )
+                session.add(existing_solution)
+                session.flush()
+            canonical_changed = (
+                target.canonical_astrometry_id != existing_solution.id
+            )
+            position_changed = (
+                target.ra2000_deg != derived.ra_deg
+                or target.dec2000_deg != derived.dec_deg
+            )
+            target.canonical_astrometry_id = existing_solution.id
+            target.ra2000_deg = derived.ra_deg
+            target.dec2000_deg = derived.dec_deg
+            identifier = (
+                f"Gaia DR3 {candidate.source_id}"
+                if candidate.provider == "gaia_dr3"
+                else f"{candidate.provider} {candidate.source_id}"
+            )
+            normalized_identifier = normalize_identifier(identifier)
+            identifier_present = session.scalar(
+                select(ExternalIdentifier.id)
+                .where(
+                    ExternalIdentifier.target_id == target.id,
+                    ExternalIdentifier.normalized_value
+                    == normalized_identifier,
+                )
+                .limit(1)
+            ) is not None
+            self._store_identifiers(
+                session, target.id, [(identifier, candidate.provider)],
+            )
+            if (
+                candidate.id in selected_ids
+                and not canonical_changed
+                and not position_changed
+                and identifier_present
+            ):
+                return
             session.add(MatchDecision(
                 candidate_id=candidate_id,
                 decision="accepted",
@@ -407,6 +484,14 @@ class IdentityService:
                 actor=decision.actor,
                 reason=decision.reason,
             ))
+            session.flush()
+            mark_export_dirty(
+                session,
+                target.id,
+                source_type="identity_match_decision",
+                source_id=candidate.id,
+                reason="manual identity candidate acceptance",
+            )
 
     def match_history(self, candidate_id: int) -> list[MatchDecision]:
         with self.sessions() as session:

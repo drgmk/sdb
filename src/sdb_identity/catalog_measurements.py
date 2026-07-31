@@ -7,6 +7,10 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .catalog_results import (
+    effective_catalog_results,
+    effective_catalog_selected_rows,
+)
 from .models import (
     CatalogDetection,
     CatalogRun,
@@ -91,29 +95,28 @@ def _effective_detection_target_ids(
     )
     if ids == ():
         return set()
-    query = (
-        select(RawCatalogRow, CatalogRun, CatalogDetection.provider)
-        .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
-        .join(
-            CatalogDetection,
-            CatalogDetection.id == RawCatalogRow.detection_id,
-        )
-        .where(
-            CatalogRun.is_current.is_(True),
-            RawCatalogRow.accepted.is_(True),
-        )
-    )
+    target_query = select(CatalogRun.target_id).join(
+        RawCatalogRow, RawCatalogRow.run_id == CatalogRun.id,
+    ).where(CatalogRun.is_current.is_(True))
     if ids is not None:
-        query = query.where(RawCatalogRow.detection_id.in_(ids))
-    if require_match:
-        query = query.where(CatalogRun.status == ProviderRunStatus.MATCH)
+        target_query = target_query.where(RawCatalogRow.detection_id.in_(ids))
+    target_ids = set(session.scalars(target_query))
     implicit: dict[int, dict[int, int]] = {}
-    for raw_row, run, provider in session.execute(query):
-        target_rows = implicit.setdefault(raw_row.detection_id, {})
-        target_rows[run.target_id] = max(
-            target_rows.get(run.target_id, 0),
-            _identifier_agreement_rank(raw_row, str(provider)),
-        )
+    for result_row in effective_catalog_results(session, target_ids).values():
+        if require_match and result_row.status != ProviderRunStatus.MATCH:
+            continue
+        for raw_row, detection in effective_catalog_selected_rows(
+            session, result_row,
+        ):
+            if ids is not None and detection.id not in ids:
+                continue
+            target_rows = implicit.setdefault(detection.id, {})
+            target_rows[result_row.target_id] = max(
+                target_rows.get(result_row.target_id, 0),
+                _identifier_agreement_rank(
+                    raw_row, result_row.provider,
+                ),
+            )
     result: set[tuple[int, int]] = set()
     for detection_id, target_rows in implicit.items():
         strongest = max(target_rows.values(), default=0)
@@ -159,29 +162,6 @@ def current_measurement_encounters(
     ids = tuple(dict.fromkeys(int(value) for value in target_ids))
     if not ids:
         return []
-    query = (
-        select(NormalizedMeasurement, RawCatalogRow, CatalogRun)
-        .join(
-            RawCatalogRow,
-            RawCatalogRow.detection_id == NormalizedMeasurement.detection_id,
-        )
-        .join(CatalogRun, CatalogRun.id == RawCatalogRow.run_id)
-        .where(
-            CatalogRun.target_id.in_(ids),
-            CatalogRun.is_current.is_(True),
-            RawCatalogRow.accepted.is_(True),
-        )
-        .order_by(
-            CatalogRun.target_id,
-            NormalizedMeasurement.provider,
-            NormalizedMeasurement.source_id,
-            NormalizedMeasurement.band,
-            NormalizedMeasurement.id,
-            RawCatalogRow.id.desc(),
-        )
-    )
-    if require_match:
-        query = query.where(CatalogRun.status == ProviderRunStatus.MATCH)
     latest_actions: dict[
         tuple[int, int], CatalogTargetAssociationAction
     ] = {}
@@ -192,7 +172,26 @@ def current_measurement_encounters(
     ):
         latest_actions[(action.target_id, action.detection_id)] = action
 
-    queried_rows = list(session.execute(query))
+    queried_rows = []
+    for result_row in effective_catalog_results(session, ids).values():
+        if result_row.status != ProviderRunStatus.MATCH:
+            continue
+        for raw_row, detection in effective_catalog_selected_rows(
+            session, result_row,
+        ):
+            for measurement in session.scalars(
+                select(NormalizedMeasurement)
+                .where(
+                    NormalizedMeasurement.detection_id == detection.id
+                )
+                .order_by(
+                    NormalizedMeasurement.provider,
+                    NormalizedMeasurement.source_id,
+                    NormalizedMeasurement.band,
+                    NormalizedMeasurement.id,
+                )
+            ):
+                queried_rows.append((measurement, raw_row, result_row.run))
     effective_targets = _effective_detection_target_ids(
         session,
         {measurement.detection_id for measurement, _raw, _run in queried_rows},

@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import CatalogRun, ExternalIdentifier, RawCatalogRow, Target
+from .catalog_results import effective_catalog_results
+from .models import ExternalIdentifier, Target
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .identifiers import normalize_identifier
 from .vocabulary import ProviderRunStatus
@@ -44,17 +45,16 @@ def audit_catalog_identifiers(
             ExternalIdentifier.value,
         ).where(ExternalIdentifier.source == "simbad")):
             aliases.setdefault(target_id, []).append(value)
-        runs = {
-            run.target_id: run
-            for run in session.scalars(select(CatalogRun).where(
-                CatalogRun.provider == provider,
-                CatalogRun.is_current.is_(True),
-                CatalogRun.status == ProviderRunStatus.MATCH,
-            ))
-        }
+        runs = effective_catalog_results(
+            session,
+            (target.id for target in targets),
+            providers=(provider,),
+        )
         results = []
         for target in targets:
-            run = runs.get(target.id)
+            run = runs.get((target.id, provider))
+            if run is not None and run.status != ProviderRunStatus.MATCH:
+                run = None
             simbad_values = tuple(sorted({
                 value for value in aliases.get(target.id, [])
                 if policy.relevant(value)
@@ -72,10 +72,7 @@ def audit_catalog_identifiers(
                         "SIMBAD has a relevant identifier but there is no current positional match",
                     ))
                 continue
-            raw = session.scalar(select(RawCatalogRow).where(
-                RawCatalogRow.run_id == run.id,
-                RawCatalogRow.accepted.is_(True),
-            ))
+            raw = run.selected_raw_row
             payload = {} if raw is None else json.loads(raw.payload_json)
             catalog_values = tuple(sorted({
                 value for value in definition.identifiers(payload)

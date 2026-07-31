@@ -16,7 +16,7 @@ from sdb_identity.catalog_provenance import (
     CatalogProvenance,
     vizier_entry_url,
 )
-from sdb_identity.models import CatalogBatchRequest, CatalogDetection, CatalogDetectionProvenance, CatalogMatchOverride, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
+from sdb_identity.models import CatalogBatchRequest, CatalogDetection, CatalogDetectionProvenance, CatalogResultDecision, CatalogRetryAction, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import AddRequest, IdentityService
@@ -497,28 +497,42 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
     )
     assert (replacement.status, replacement.measurement_count) == ("match", 1)
     with session_factory() as session:
+        from sdb_identity.catalog_measurements import (
+            current_measurements_for_target,
+        )
+
         runs = list(session.scalars(select(CatalogRun).order_by(CatalogRun.id)))
-        assert [run.is_current for run in runs] == [False, True]
-        assert session.query(RawCatalogRow).count() == 4
-        replacement_raw = session.scalar(select(RawCatalogRow).where(
-            RawCatalogRow.run_id == replacement.run_id,
-            RawCatalogRow.accepted.is_(True),
-        ))
+        assert [run.is_current for run in runs] == [True]
+        assert session.query(RawCatalogRow).count() == 2
+        replacement_raw = chosen
         measurement = session.scalar(select(NormalizedMeasurement).where(
             NormalizedMeasurement.detection_id == replacement_raw.detection_id
         ))
         assert measurement.value == 8.2
         assert measurement.first_seen_run_id == ambiguous.run_id
-        audit = session.scalar(select(CatalogMatchOverride))
-        assert audit.previous_run_id == ambiguous.run_id
-        assert audit.replacement_run_id == replacement.run_id
+        assert [
+            value.id
+            for value in current_measurements_for_target(
+                session, target.target_id,
+            )
+        ] == [measurement.id]
+        audit = session.scalar(select(CatalogResultDecision))
+        assert audit.reviewed_run_id == ambiguous.run_id
+        assert audit.accepted_detection_id == chosen.detection_id
         assert audit.reason == "image inspection"
         assert session.query(ExportDirtyTarget).where(
-            ExportDirtyTarget.source_type == "catalog_override"
+            ExportDirtyTarget.source_type == "catalog_result_decision"
         ).count() == 1
         assert session.scalar(select(ExternalIdentifier).where(
             ExternalIdentifier.source == "allwise"
         )) is None
+
+    repeated = service.override_candidate(
+        chosen.id, actor="tester", reason="repeat submission",
+    )
+    assert repeated.run_id == ambiguous.run_id
+    with session_factory() as session:
+        assert session.query(CatalogResultDecision).count() == 1
 
 
 def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
@@ -543,16 +557,13 @@ def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
     assert reviewed.status == "no_match"
     with session_factory() as session:
         action = session.scalar(
-            select(CatalogMatchOverride)
-            .where(CatalogMatchOverride.action == "reviewed_no_match")
+            select(CatalogResultDecision)
+            .where(CatalogResultDecision.action == "reviewed_no_match")
         )
-        assert action.selected_source_id is None
-        assert action.replacement_run_id == reviewed.run_id
-        copied = list(session.scalars(
-            select(RawCatalogRow).where(RawCatalogRow.run_id == reviewed.run_id)
-        ))
-        assert len(copied) == 2
-        assert not any(row.accepted for row in copied)
+        assert action.accepted_detection_id is None
+        assert action.reviewed_run_id == reviewed.run_id
+        assert session.query(CatalogRun).count() == 1
+        assert session.query(RawCatalogRow).count() == 2
 
     failing_adapter = FakeCatalog(
         [], error=ProviderError("temporary outage", transient=True),
@@ -575,8 +586,7 @@ def test_catalog_reviewed_no_match_and_retry_are_audited(session_factory):
     assert retried.status == "match"
     with session_factory() as session:
         action = session.scalar(
-            select(CatalogMatchOverride)
-            .where(CatalogMatchOverride.action == "retry")
+            select(CatalogRetryAction)
         )
-        assert action.previous_run_id == failed.run_id
-        assert action.replacement_run_id == retried.run_id
+        assert action.failed_run_id == failed.run_id
+        assert action.retry_run_id == retried.run_id

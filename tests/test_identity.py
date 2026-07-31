@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from sdb_identity.astrometry import propagate_to_epoch
+from sdb_identity.identity_results import effective_identity_candidate_ids
 from sdb_identity.models import AstrometricSolution, ExternalIdentifier, MatchCandidate, ProviderOutcome, Submission, Target
 from sdb_identity.service import AddRequest, IdentityService, UnresolvedTarget
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, gaia_candidate, simbad_result
@@ -125,10 +126,9 @@ def test_unaccepted_gaia_candidates_keep_richer_simbad_pm_solution(session_facto
         assert solution.pm_ra_cosdec_masyr == 5000
         assert solution.pm_dec_masyr == -2000
         assert solution.proper_motion_bibcode == "2007A&A...474..653V"
-        assert all(
-            not candidate.accepted
-            for candidate in session.scalars(select(MatchCandidate))
-        )
+        assert effective_identity_candidate_ids(
+            session, target_ids=[result.target_id],
+        ) == set()
         assert all(
             not candidate.proper_motion_available
             and candidate.pm_ra_cosdec_masyr is None
@@ -244,7 +244,9 @@ def test_ambiguous_candidates_are_retained_but_not_selected(session_factory):
     with session_factory() as session:
         candidates = session.scalars(select(MatchCandidate)).all()
         assert len(candidates) == 2
-        assert not any(candidate.accepted for candidate in candidates)
+        assert effective_identity_candidate_ids(
+            session, target_ids=[result.target_id],
+        ) == set()
         assert all(candidate.id for candidate in candidates)
 
 
@@ -271,8 +273,9 @@ def test_simbad_gaia_dr3_identifier_beats_nearer_unlisted_gaia_candidate(session
             candidate.source_id: candidate
             for candidate in session.scalars(select(MatchCandidate))
         }
-        assert candidates["111"].accepted is True
-        assert candidates["222"].accepted is False
+        assert effective_identity_candidate_ids(
+            session, target_ids=[result.target_id],
+        ) == {candidates["111"].id}
         assert candidates["111"].score > candidates["222"].score
 
 
@@ -317,7 +320,9 @@ def test_gaia_identifier_match_without_pm_keeps_richer_simbad_solution(session_f
             ("gaia_dr3", "2363291052952046208"),
         }
         candidate = session.scalar(select(MatchCandidate))
-        assert candidate.accepted is True
+        assert effective_identity_candidate_ids(
+            session, target_ids=[result.target_id],
+        ) == {candidate.id}
         assert candidate.source_id == "2363291052952046208"
         assert candidate.proper_motion_available is False
 
@@ -368,9 +373,10 @@ def test_gaia_candidate_scoring_compares_at_gaia_epoch_for_high_pm_simbad_source
             for candidate in session.scalars(select(MatchCandidate))
         }
         assert candidates["propagated-position"].separation_arcsec < 0.001
-        assert candidates["propagated-position"].accepted is True
+        assert effective_identity_candidate_ids(
+            session, target_ids=[result.target_id],
+        ) == {candidates["propagated-position"].id}
         assert candidates["propagated-position"].proper_motion_available is False
-        assert candidates["stale-position"].accepted is False
 
 
 def test_timeout_is_distinct_from_no_match(session_factory):
@@ -382,13 +388,43 @@ def test_timeout_is_distinct_from_no_match(session_factory):
 
 
 def test_manual_override_appends_audit_history(session_factory):
-    gaia = FakeGaia([gaia_candidate("1", astrometry(10.00001, 20, epoch=2016, source="gaia_dr3"))])
+    gaia = FakeGaia([
+        gaia_candidate(
+            "1", astrometry(10.00010, 20, epoch=2016, source="gaia_dr3"),
+        ),
+        gaia_candidate(
+            "2", astrometry(10.00011, 20, epoch=2016, source="gaia_dr3"),
+        ),
+    ])
     svc = service(session_factory, gaia=gaia)
-    svc.add(AddRequest(ra_deg=10, dec_deg=20))
+    added = svc.add(AddRequest(ra_deg=10, dec_deg=20))
     with session_factory() as session:
-        candidate = session.scalars(select(MatchCandidate)).one()
+        candidate = session.scalar(
+            select(MatchCandidate).where(MatchCandidate.source_id == "2")
+        )
         candidate_id = candidate.id
     svc.override_match(candidate_id, actor="tester", reason="manual check")
     history = svc.match_history(candidate_id)
-    assert [entry.decision for entry in history] == ["accepted", "accepted"]
+    assert [entry.decision for entry in history] == ["deferred", "accepted"]
     assert history[-1].method == "manual"
+    with session_factory() as session:
+        target = session.get(Target, added.target_id)
+        canonical = session.get(
+            AstrometricSolution, target.canonical_astrometry_id,
+        )
+        identifiers = set(session.scalars(
+            select(ExternalIdentifier.value).where(
+                ExternalIdentifier.target_id == target.id
+            )
+        ))
+        assert canonical.source == "gaia_dr3"
+        assert canonical.source_id == "2"
+        assert "Gaia DR3 2" in identifiers
+        assert effective_identity_candidate_ids(
+            session, target_ids=[target.id],
+        ) == {candidate_id}
+
+    svc.override_match(
+        candidate_id, actor="tester", reason="repeat submission",
+    )
+    assert len(svc.match_history(candidate_id)) == 2

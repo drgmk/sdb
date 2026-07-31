@@ -13,6 +13,10 @@ from .adapters import catalog_source_display_name
 from .adapters.review_metadata import normalize_review_payload
 from .assignment_review import build_measurement_assignment_review
 from .catalog_provenance import vizier_entry_url
+from .catalog_results import (
+    effective_catalog_results,
+    effective_catalog_selected_rows,
+)
 
 from .astrometry import propagate_to_epoch
 from .hierarchy import (
@@ -23,6 +27,7 @@ from .hierarchy import (
     _latest_graph_overrides,
     hierarchy_record_positions,
 )
+from .identity_results import effective_identity_candidate_ids
 from .models import (
     AstrometricSolution,
     CatalogAttribute,
@@ -1723,9 +1728,13 @@ def _identity_points(
         .where(Submission.target_id == target.id)
         .order_by(MatchCandidate.provider, MatchCandidate.score.desc(), MatchCandidate.id)
     )
+    selected_ids = effective_identity_candidate_ids(
+        session, target_ids=[target.id],
+    )
     points = []
     for candidate, submission in rows:
-        status = "accepted" if candidate.accepted else "rejected"
+        accepted = candidate.id in selected_ids
+        status = "accepted" if accepted else "candidate"
         native_pm = None
         if (
             candidate.proper_motion_available
@@ -1763,7 +1772,7 @@ def _identity_points(
                 dec_deg=dec2000,
                 separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
                 score=candidate.score,
-                accepted=candidate.accepted,
+                accepted=accepted,
                 candidate_id=candidate.id,
                 target_id=target.id,
                 native_epoch=candidate.epoch,
@@ -1796,28 +1805,53 @@ def _catalog_points(
     runs_by_provider: dict[str, list[CatalogRun]] = {}
     for run in all_runs:
         runs_by_provider.setdefault(run.provider, []).append(run)
-    runs = []
+    effective = effective_catalog_results(session, [target.id])
+    runs: list[tuple[CatalogRun, str, frozenset[int]]] = []
     for provider_runs in runs_by_provider.values():
         current = next((run for run in provider_runs if run.is_current), None)
         latest = provider_runs[-1]
+        current_result = (
+            None
+            if current is None
+            else effective.get((target.id, current.provider))
+        )
+        current_status = (
+            current.status
+            if current_result is None
+            else current_result.status.value
+        ) if current is not None else None
         if current is not None and (
-            run_statuses is None or current.status in run_statuses
+            run_statuses is None or current_status in run_statuses
         ):
-            runs.append(current)
+            runs.append((
+                current,
+                current_status,
+                frozenset(
+                    raw.id
+                    for raw, _detection in (
+                        ()
+                        if current_result is None
+                        else effective_catalog_selected_rows(
+                            session, current_result,
+                        )
+                    )
+                ),
+            ))
         if (
             latest.status in PROVIDER_FAILURE_STATUSES
             and (current is None or latest.id != current.id)
             and (run_statuses is None or latest.status in run_statuses)
         ):
-            runs.append(latest)
-    runs.sort(key=lambda run: (run.provider, run.id))
+            runs.append((latest, latest.status, frozenset()))
+    runs.sort(key=lambda value: (value[0].provider, value[0].id))
     points = []
-    for run in runs:
+    for run, effective_status, selected_raw_row_ids in runs:
         rows = list(session.scalars(
             select(RawCatalogRow)
             .where(RawCatalogRow.run_id == run.id)
-            .order_by(RawCatalogRow.accepted.desc(), RawCatalogRow.score.desc(), RawCatalogRow.id)
+            .order_by(RawCatalogRow.score.desc(), RawCatalogRow.id)
         ))
+        rows.sort(key=lambda row: row.id not in selected_raw_row_ids)
         if not rows:
             if run.status not in PROVIDER_FAILURE_STATUSES:
                 continue
@@ -1857,9 +1891,12 @@ def _catalog_points(
             payload = _catalog_payload(row.payload_json)
             association = _catalog_association(row.payload_json)
             review_only = bool(association.get("review_only"))
-            status = "accepted" if row.accepted else (
+            accepted = row.id in selected_raw_row_ids
+            status = "accepted" if accepted else (
                 "review_neighbour" if review_only else (
-                    "ambiguous" if run.status == "ambiguous" else run.status
+                    "ambiguous"
+                    if effective_status == "ambiguous"
+                    else effective_status
                 )
             )
             measurements = _measurement_summaries(session, row.id)
@@ -1875,7 +1912,9 @@ def _catalog_points(
                 row.epoch,
                 motion_solution,
                 native_pm=native_pm,
-                base_note=f"catalog run {run.id}; provider status {run.status}",
+                base_note=(
+                    f"catalog run {run.id}; provider status {effective_status}"
+                ),
             )
             uncertainty_major, uncertainty_minor = _position_uncertainty_arcsec(
                 run.provider, row.payload_json
@@ -1909,7 +1948,7 @@ def _catalog_points(
                     dec_deg=dec2000,
                     separation_arcsec=_separation_arcsec(center, ra2000, dec2000),
                     score=row.score,
-                    accepted=row.accepted,
+                    accepted=accepted,
                     run_id=run.id,
                     raw_row_id=row.id,
                     detection_id=row.detection_id,

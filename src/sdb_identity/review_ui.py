@@ -18,7 +18,7 @@ from .assignment_readiness import assignment_readiness_report
 from .decisions import DecisionContext
 from .fitting_groups import fitting_group_report
 from .hierarchy import HierarchyService
-from .models import CatalogRun, RawCatalogRow, Target
+from .models import CatalogResultDecision, CatalogRun, RawCatalogRow, Target
 from .review_actions import (
     review_catalog_target_association_decision,
     review_detection_decision,
@@ -538,6 +538,12 @@ def _provider_result_from_payload(
         raw = None if raw_row_id is None else session.get(
             RawCatalogRow, raw_row_id,
         )
+        latest_decision = session.scalar(
+            select(CatalogResultDecision)
+            .where(CatalogResultDecision.reviewed_run_id == run.id)
+            .order_by(CatalogResultDecision.id.desc())
+            .limit(1)
+        )
         if action == "accept_candidate":
             if raw is None or raw.run_id != run.id:
                 raise ValueError("selected catalog candidate is not from this run")
@@ -567,14 +573,39 @@ def _provider_result_from_payload(
             "run_is_current": run.is_current,
             "raw_row_id": None if raw is None else raw.id,
             "source_id": None if raw is None else raw.source_id,
+            "decision_id": (
+                None if latest_decision is None else latest_decision.id
+            ),
+            "decision_action": (
+                None if latest_decision is None else latest_decision.action
+            ),
+            "decision_raw_row_id": (
+                None
+                if latest_decision is None
+                else latest_decision.reviewed_raw_row_id
+            ),
         }
         state_token = hashlib.sha256(
             json.dumps(token_state, sort_keys=True).encode("utf-8")
         ).hexdigest()
         source_id = None if raw is None else raw.source_id
+        has_changes = not (
+            latest_decision is not None
+            and (
+                (
+                    action == "accept_candidate"
+                    and latest_decision.action == "accept_detection"
+                    and latest_decision.reviewed_raw_row_id == raw_row_id
+                )
+                or (
+                    action == "reviewed_no_match"
+                    and latest_decision.action == "reviewed_no_match"
+                )
+            )
+        )
         base = {
             "action": action,
-            "has_changes": True,
+            "has_changes": has_changes,
             "state_token": state_token,
             "suggested_reason": {
                 "accept_candidate": (

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
 from .catalog_resolution import default_resolution
 from .catalog_provenance import CatalogProvenance, provenance_from_payload
+from .catalog_results import effective_catalog_results
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .models import (
@@ -23,7 +24,8 @@ from .models import (
     CatalogDetectionProvenance,
     CatalogRun,
     CatalogAttribute,
-    CatalogMatchOverride,
+    CatalogResultDecision,
+    CatalogRetryAction,
     ExternalIdentifier,
     NormalizedMeasurement,
     RawCatalogRow,
@@ -211,7 +213,29 @@ class CatalogService:
                 CatalogRun.provider == adapter.name,
                 CatalogRun.is_current.is_(True),
             ))
-            previous_signature = self._run_signature(session, previous)
+            previous_result = effective_catalog_results(
+                session, [target.id], providers=(adapter.name,),
+            ).get((target.id, adapter.name))
+            previous_signature = self._run_signature(
+                session,
+                previous,
+                effective_status=(
+                    None
+                    if previous_result is None
+                    else previous_result.status
+                ),
+                selected_source_id=(
+                    None
+                    if previous_result is None
+                    else previous_result.selected_source_id
+                ),
+                selected_raw_row_id=(
+                    None
+                    if previous_result is None
+                    or previous_result.selected_raw_row is None
+                    else previous_result.selected_raw_row.id
+                ),
+            )
             session.execute(
                 update(CatalogRun)
                 .where(
@@ -943,6 +967,32 @@ class CatalogService:
             previous = session.get(CatalogRun, selected_raw.run_id)
             if previous is None or not previous.is_current:
                 raise ValueError("catalog candidate is not from the current run")
+            latest_decision = session.scalar(
+                select(CatalogResultDecision)
+                .where(CatalogResultDecision.reviewed_run_id == previous.id)
+                .order_by(CatalogResultDecision.id.desc())
+                .limit(1)
+            )
+            if (
+                latest_decision is not None
+                and latest_decision.action == "accept_detection"
+                and latest_decision.reviewed_raw_row_id == selected_raw.id
+            ):
+                measurement_count = session.query(
+                    NormalizedMeasurement
+                ).where(
+                    NormalizedMeasurement.detection_id
+                    == selected_raw.detection_id
+                ).count()
+                return CatalogRefreshResult(
+                    previous.id,
+                    previous.target_id,
+                    previous.provider,
+                    ProviderRunStatus.MATCH,
+                    previous.candidate_count,
+                    measurement_count,
+                    selected_raw.source_id,
+                )
             adapter = self.adapters.get(previous.provider)
             if adapter is None:
                 raise KeyError(f"catalog adapter is unavailable: {previous.provider}")
@@ -962,97 +1012,46 @@ class CatalogService:
                 ),
             )
 
-            replacement = CatalogRun(
-                target_id=previous.target_id,
-                provider=previous.provider,
-                release=previous.release,
-                status=ProviderRunStatus.MATCH,
-                is_current=True,
-                query_ra_deg=previous.query_ra_deg,
-                query_dec_deg=previous.query_dec_deg,
-                query_epoch=previous.query_epoch,
-                candidate_count=previous.candidate_count,
-                selected_source_id=candidate.source_id,
-                completed_at=datetime.now(timezone.utc),
-            )
-            session.add(replacement)
-            session.flush()
-            new_selected = None
-            for raw in session.scalars(select(RawCatalogRow).where(
-                RawCatalogRow.run_id == previous.id
-            ).order_by(RawCatalogRow.id)):
-                copied = RawCatalogRow(
-                    run_id=replacement.id,
-                    detection_id=raw.detection_id,
-                    source_id=raw.source_id,
-                    ra_deg=raw.ra_deg,
-                    dec_deg=raw.dec_deg,
-                    epoch=raw.epoch,
-                    separation_arcsec=raw.separation_arcsec,
-                    score=raw.score,
-                    accepted=raw.id == selected_raw.id,
-                    payload_json=raw.payload_json,
-                )
-                session.add(copied)
-                session.flush()
-                if raw.id == selected_raw.id:
-                    new_selected = copied
-            measurement_count = 0
-            detection = session.get(CatalogDetection, new_selected.detection_id)
-            for index, value in enumerate(adapter.normalize(candidate)):
-                self._canonical_measurement(
-                    session,
-                    adapter=adapter,
-                    candidate=candidate,
-                    detection=detection,
-                    value=value,
-                    value_index=index,
-                    run_id=replacement.id,
-                    target_id=previous.target_id,
-                    raw_row_id=new_selected.id,
-                )
-                measurement_count += 1
-            self._mark_shared_detection(
-                session, replacement.id, previous.target_id, detection.id,
-            )
+            detection = session.get(CatalogDetection, selected_raw.detection_id)
+            measurement_count = session.query(NormalizedMeasurement).where(
+                NormalizedMeasurement.detection_id == detection.id
+            ).count()
             self._store_attributes(
                 session,
                 candidate,
-                replacement.id,
+                previous.id,
                 previous.target_id,
-                new_selected.id,
+                selected_raw.id,
                 previous.provider,
             )
-            previous.is_current = False
-            if previous.provider in {"iras_psc", "iras_fsc"}:
-                from .iras import reconcile_iras_target
-                reconcile_iras_target(session, previous.target_id)
-            override = CatalogMatchOverride(
+            override = CatalogResultDecision(
                 target_id=previous.target_id,
                 provider=previous.provider,
-                previous_run_id=previous.id,
-                replacement_run_id=replacement.id,
-                action="accept_candidate",
-                selected_source_id=candidate.source_id,
+                reviewed_run_id=previous.id,
+                action="accept_detection",
+                accepted_detection_id=detection.id,
+                reviewed_raw_row_id=selected_raw.id,
                 actor=decision.actor,
                 reason=decision.reason,
             )
             session.add(override)
             session.flush()
+            if previous.provider in {"iras_psc", "iras_fsc"}:
+                from .iras import reconcile_iras_target
+                reconcile_iras_target(session, previous.target_id)
             mark_export_dirty(
                 session,
                 previous.target_id,
-                source_type="catalog_override",
+                source_type="catalog_result_decision",
                 source_id=override.id,
                 reason="manual catalog candidate selection",
             )
-            session.flush()
             return CatalogRefreshResult(
-                replacement.id,
+                previous.id,
                 previous.target_id,
                 previous.provider,
                 ProviderRunStatus.MATCH,
-                replacement.candidate_count,
+                previous.candidate_count,
                 measurement_count,
                 candidate.source_id,
             )
@@ -1064,7 +1063,7 @@ class CatalogService:
         actor: str | None,
         reason: str | None = None,
     ) -> CatalogRefreshResult:
-        """Replace one current ambiguous result with an audited reviewed no-match."""
+        """Record an audited no-match interpretation of an ambiguous run."""
         with self.sessions() as session, session.begin():
             previous = session.get(CatalogRun, run_id)
             if previous is None:
@@ -1073,6 +1072,25 @@ class CatalogService:
                 raise ValueError("catalog run is no longer current")
             if previous.status != ProviderRunStatus.AMBIGUOUS:
                 raise ValueError("reviewed no-match requires a current ambiguous result")
+            latest_decision = session.scalar(
+                select(CatalogResultDecision)
+                .where(CatalogResultDecision.reviewed_run_id == previous.id)
+                .order_by(CatalogResultDecision.id.desc())
+                .limit(1)
+            )
+            if (
+                latest_decision is not None
+                and latest_decision.action == "reviewed_no_match"
+            ):
+                return CatalogRefreshResult(
+                    previous.id,
+                    previous.target_id,
+                    previous.provider,
+                    ProviderRunStatus.NO_MATCH,
+                    previous.candidate_count,
+                    0,
+                    None,
+                )
             decision = DecisionContext.resolve(
                 actor=actor,
                 reason=reason,
@@ -1081,63 +1099,28 @@ class CatalogService:
                     f"{previous.target_id}; none is the target"
                 ),
             )
-            replacement = CatalogRun(
+            action = CatalogResultDecision(
                 target_id=previous.target_id,
                 provider=previous.provider,
-                release=previous.release,
-                status=ProviderRunStatus.NO_MATCH,
-                is_current=True,
-                query_ra_deg=previous.query_ra_deg,
-                query_dec_deg=previous.query_dec_deg,
-                query_epoch=previous.query_epoch,
-                candidate_count=previous.candidate_count,
-                completed_at=datetime.now(timezone.utc),
-            )
-            session.add(replacement)
-            session.flush()
-            for raw in session.scalars(
-                select(RawCatalogRow)
-                .where(RawCatalogRow.run_id == previous.id)
-                .order_by(RawCatalogRow.id)
-            ):
-                session.add(RawCatalogRow(
-                    run_id=replacement.id,
-                    detection_id=raw.detection_id,
-                    source_id=raw.source_id,
-                    ra_deg=raw.ra_deg,
-                    dec_deg=raw.dec_deg,
-                    epoch=raw.epoch,
-                    separation_arcsec=raw.separation_arcsec,
-                    score=raw.score,
-                    accepted=False,
-                    payload_json=raw.payload_json,
-                ))
-            previous.is_current = False
-            if previous.provider in {"iras_psc", "iras_fsc"}:
-                from .iras import reconcile_iras_target
-
-                reconcile_iras_target(session, previous.target_id)
-            action = CatalogMatchOverride(
-                target_id=previous.target_id,
-                provider=previous.provider,
-                previous_run_id=previous.id,
-                replacement_run_id=replacement.id,
+                reviewed_run_id=previous.id,
                 action="reviewed_no_match",
-                selected_source_id=None,
                 actor=decision.actor,
                 reason=decision.reason,
             )
             session.add(action)
             session.flush()
+            if previous.provider in {"iras_psc", "iras_fsc"}:
+                from .iras import reconcile_iras_target
+                reconcile_iras_target(session, previous.target_id)
             mark_export_dirty(
                 session,
                 previous.target_id,
-                source_type="catalog_override",
+                source_type="catalog_result_decision",
                 source_id=action.id,
                 reason="reviewed catalog no-match",
             )
             return CatalogRefreshResult(
-                replacement.id,
+                previous.id,
                 previous.target_id,
                 previous.provider,
                 ProviderRunStatus.NO_MATCH,
@@ -1182,13 +1165,11 @@ class CatalogService:
 
         result = self.refresh(target_id, provider)
         with self.sessions() as session, session.begin():
-            action = CatalogMatchOverride(
+            action = CatalogRetryAction(
                 target_id=target_id,
                 provider=provider,
-                previous_run_id=run_id,
-                replacement_run_id=result.run_id,
-                action="retry",
-                selected_source_id=result.selected_source_id,
+                failed_run_id=run_id,
+                retry_run_id=result.run_id,
                 actor=decision.actor,
                 reason=decision.reason,
             )
@@ -1202,21 +1183,29 @@ class CatalogService:
         target_id: int,
         detection_id: int,
     ) -> set[int]:
-        target_ids = set(session.scalars(
-            select(CatalogRun.target_id)
-            .join(RawCatalogRow, RawCatalogRow.run_id == CatalogRun.id)
-            .where(
-                RawCatalogRow.detection_id == detection_id,
-                RawCatalogRow.accepted.is_(True),
-                CatalogRun.status == ProviderRunStatus.MATCH,
-                (CatalogRun.is_current.is_(True)) | (CatalogRun.id == run_id),
-            )
-        ))
+        from .catalog_measurements import (
+            current_catalog_detection_target_pairs,
+        )
+
+        target_ids = {
+            current_target_id
+            for current_detection_id, current_target_id
+            in current_catalog_detection_target_pairs(session, [detection_id])
+            if current_detection_id == detection_id
+        }
+        target_ids.add(target_id)
         affected = target_ids - {target_id}
         return affected
 
     @staticmethod
-    def _run_signature(session: Session, run: CatalogRun | None):
+    def _run_signature(
+        session: Session,
+        run: CatalogRun | None,
+        *,
+        effective_status: str | ProviderRunStatus | None = None,
+        selected_source_id: str | None = None,
+        selected_raw_row_id: int | None = None,
+    ):
         if run is None:
             return None
         rows = tuple(session.execute(select(
@@ -1240,7 +1229,11 @@ class CatalogService:
         )
         .where(
             RawCatalogRow.run_id == run.id,
-            RawCatalogRow.accepted.is_(True),
+            (
+                RawCatalogRow.id == selected_raw_row_id
+                if selected_raw_row_id is not None
+                else RawCatalogRow.accepted.is_(True)
+            ),
         )
         .order_by(NormalizedMeasurement.id)).all())
         attributes = tuple(session.execute(select(
@@ -1251,7 +1244,17 @@ class CatalogService:
             CatalogAttribute.unit,
             CatalogAttribute.quality,
         ).where(CatalogAttribute.run_id == run.id).order_by(CatalogAttribute.id)).all())
-        return run.status, run.selected_source_id, rows, measurements, attributes
+        return (
+            run.status if effective_status is None else str(effective_status),
+            (
+                run.selected_source_id
+                if selected_source_id is None
+                else selected_source_id
+            ),
+            rows,
+            measurements,
+            attributes,
+        )
 
     @staticmethod
     def _store_attributes(

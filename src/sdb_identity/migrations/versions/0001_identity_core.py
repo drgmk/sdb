@@ -36,7 +36,19 @@ def upgrade():
     )
     op.execute("CREATE VIEW target_summary AS SELECT t.id, t.sdbid, t.ra2000_deg, t.dec2000_deg, a.source AS astrometry_source, a.proper_motion_available FROM targets t LEFT JOIN astrometric_solutions a ON a.id=t.canonical_astrometry_id")
     op.execute("CREATE VIEW unresolved_submissions AS SELECT * FROM submissions WHERE status='failed' OR target_id IS NULL")
-    op.execute("CREATE VIEW ambiguous_matches AS SELECT submission_id, COUNT(*) AS candidate_count, MAX(score) AS best_score FROM match_candidates GROUP BY submission_id HAVING SUM(CASE WHEN accepted THEN 1 ELSE 0 END)=0")
+    op.execute(
+        "CREATE VIEW ambiguous_matches AS "
+        "SELECT candidate.submission_id,COUNT(*) AS candidate_count,"
+        "MAX(candidate.score) AS best_score "
+        "FROM match_candidates AS candidate "
+        "GROUP BY candidate.submission_id "
+        "HAVING NOT EXISTS ("
+        "SELECT 1 FROM match_decisions AS decision "
+        "JOIN match_candidates AS selected "
+        "ON selected.id=decision.candidate_id "
+        "WHERE selected.submission_id=candidate.submission_id "
+        "AND decision.decision='accepted')"
+    )
     op.execute("CREATE VIEW failed_provider_requests AS SELECT * FROM provider_outcomes WHERE status IN ('transient_failure','permanent_failure')")
 
 

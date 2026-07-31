@@ -2661,6 +2661,19 @@ def _system_catalog_neighbourhood(
         for target in session.scalars(select(Target).where(Target.id.in_(target_ids)))
     }
     result: dict[str, list[dict[str, object]]] = {sdbid: [] for sdbid in targets.values()}
+    from .catalog_results import (
+        effective_catalog_results,
+        effective_catalog_selected_rows,
+    )
+
+    effective = effective_catalog_results(session, target_ids)
+    selected_raw_ids = {
+        raw.id
+        for current in effective.values()
+        for raw, _detection in effective_catalog_selected_rows(
+            session, current,
+        )
+    }
     rows = session.execute(
         select(CatalogRun, RawCatalogRow)
         .join(RawCatalogRow, RawCatalogRow.run_id == CatalogRun.id)
@@ -2678,14 +2691,19 @@ def _system_catalog_neighbourhood(
         )
     )
     for run, row in rows:
+        current = effective.get((run.target_id, run.provider))
         payload = _json_payload(row.payload_json)
         result[targets[run.target_id]].append({
             "provider": run.provider,
             "run_id": run.id,
             "raw_row_id": row.id,
             "source_id": row.source_id,
-            "accepted": row.accepted,
-            "run_status": run.status,
+            "accepted": (
+                current is not None and row.id in selected_raw_ids
+            ),
+            "run_status": (
+                run.status if current is None else current.status.value
+            ),
             "separation_arcsec": row.separation_arcsec,
             "score": row.score,
             "ra_deg": row.ra_deg,
@@ -2725,6 +2743,11 @@ def _identity_cross_candidates(
     if not nearby_target_ids:
         return []
     source_index = _target_source_index(session, nearby_target_ids)
+    from .identity_results import effective_identity_candidate_ids
+
+    selected_ids = effective_identity_candidate_ids(
+        session, target_ids=[target.id],
+    )
     rows = []
     for candidate in session.scalars(
         select(MatchCandidate)
@@ -2752,7 +2775,7 @@ def _identity_cross_candidates(
             "candidate_id": candidate.id,
             "provider": candidate.provider,
             "source_id": candidate.source_id,
-            "accepted": candidate.accepted,
+            "accepted": candidate.id in selected_ids,
             "separation_arcsec": candidate.separation_arcsec,
             "score": candidate.score,
             "matched_nearby_targets": matched_targets,

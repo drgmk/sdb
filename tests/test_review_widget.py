@@ -87,8 +87,8 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
 
     values = {(point.kind, point.provider, point.status, point.source_id) for point in view.points}
     assert ("target", "sdb", "target", target.sdbid) in values
-    assert ("identity", "gaia_dr3", "rejected", "gaia-a") in values
-    assert ("identity", "gaia_dr3", "rejected", "gaia-b") in values
+    assert ("identity", "gaia_dr3", "candidate", "gaia-a") in values
+    assert ("identity", "gaia_dr3", "candidate", "gaia-b") in values
     assert (
         "catalog_association", "2mass", "ambiguous", "2mass-a"
     ) in values
@@ -161,7 +161,6 @@ def test_review_sky_view_marks_identity_candidate_linked_to_sibling_target(sessi
             separation_arcsec=7.0,
             score=0.01,
             score_details="{}",
-            accepted=False,
         ))
 
     view = build_review_sky_view(session_factory, primary.sdbid)

@@ -608,7 +608,7 @@ def test_cli_review_matches_lists_only_ambiguous_submissions(tmp_path, capsys):
     main(["--database", str(database), "init"])
     capsys.readouterr()
     sessions = make_session_factory(database)
-    from sdb_identity.models import MatchCandidate, Submission
+    from sdb_identity.models import MatchCandidate, MatchDecision, Submission
 
     with sessions() as session:
         ambiguous = Submission(input_name="AMBIG NAME", status="ambiguous")
@@ -619,12 +619,20 @@ def test_cli_review_matches_lists_only_ambiguous_submissions(tmp_path, capsys):
             session.add(MatchCandidate(
                 submission_id=ambiguous.id, provider="gaia_dr3", source_id=source_id,
                 ra_deg=10.0, dec_deg=-20.0, epoch=2000.0, separation_arcsec=1.0,
-                score=0.5, score_details="{}", accepted=False,
+                score=0.5, score_details="{}",
             ))
-        session.add(MatchCandidate(
+        selected = MatchCandidate(
             submission_id=resolved.id, provider="gaia_dr3", source_id="gaia-c",
             ra_deg=10.0, dec_deg=-20.0, epoch=2000.0, separation_arcsec=0.1,
-            score=0.9, score_details="{}", accepted=True,
+            score=0.9, score_details="{}",
+        )
+        session.add(selected)
+        session.flush()
+        session.add(MatchDecision(
+            candidate_id=selected.id,
+            decision="accepted",
+            method="automatic",
+            reason="test selection",
         ))
         session.commit()
 

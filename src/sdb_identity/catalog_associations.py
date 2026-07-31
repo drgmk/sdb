@@ -13,6 +13,8 @@ from .adapters import (
     catalog_source_id_matches_identifiers,
 )
 from .astrometry import angular_separation_arcsec
+from .catalog_measurements import current_catalog_detection_target_pairs
+from .catalog_results import effective_catalog_results
 from .models import (
     AstrometricSolution,
     CatalogDetection,
@@ -69,11 +71,9 @@ def catalog_coverage_by_target(
         for run in runs
         if run.provider in expected
     }
-    current_by_pair = {
-        (run.target_id, run.provider): run
-        for run in runs
-        if run.provider in expected and run.is_current
-    }
+    current_by_pair = effective_catalog_results(
+        session, ids, providers=expected,
+    )
     normalization_by_target: dict[int, dict[int, CatalogDetection]] = {}
     for detection, run in session.execute(
         select(CatalogDetection, CatalogRun)
@@ -143,7 +143,7 @@ def catalog_coverage_by_target(
                 provider for provider in missing if provider not in failed
             ],
             "current_status_by_provider": {
-                provider: current_by_pair[(target.id, provider)].status
+                provider: current_by_pair[(target.id, provider)].status.value
                 for provider in current
             },
             "latest_failure_by_provider": {
@@ -195,6 +195,15 @@ def catalog_target_candidates(
     encounters = _current_detection_encounters(
         session, ids, association_actions=association_actions,
     )
+    effective_results = effective_catalog_results(session, ids)
+    selected_raw_ids = {
+        value.selected_raw_row.id
+        for value in effective_results.values()
+        if value.selected_raw_row is not None
+    }
+    effective_pairs = current_catalog_detection_target_pairs(
+        session, encounters,
+    )
     measurement_bands = _detection_measurement_bands(
         session, tuple(encounters)
     )
@@ -207,14 +216,17 @@ def catalog_target_candidates(
         raw_row_ids = sorted(raw.id for _detection, raw, _run in values)
         run_ids = sorted({run.id for _detection, _raw, run in values})
         accepted_target_ids = {
-            run.target_id
-            for _detection, raw, run in values
-            if run.status == "match" and raw.accepted
+            target_id
+            for current_detection_id, target_id in effective_pairs
+            if current_detection_id == detection_id
         }
         representative = min(
             values,
             key=lambda value: (
-                not value[1].accepted,
+                not (
+                    value[1].accepted
+                    or value[1].id in selected_raw_ids
+                ),
                 -value[1].score,
                 value[1].id,
             ),
@@ -284,14 +296,26 @@ def catalog_target_candidates(
             )
             score = 1.0 if identifier_match else positional_score
             if current_match:
-                score = max(
-                    score,
-                    max(
-                        raw.score
-                        for _detection, raw, run in values
-                        if run.target_id == target_id and raw.accepted
-                    ),
-                )
+                current_scores = [
+                    raw.score
+                    for _detection, raw, run in values
+                    if (
+                        (
+                            run.target_id == target_id
+                            and (
+                                raw.accepted
+                                or raw.id in selected_raw_ids
+                            )
+                        )
+                        or (
+                            association_action is not None
+                            and raw.id
+                            == association_action.reviewed_raw_row_id
+                        )
+                    )
+                ]
+                if current_scores:
+                    score = max(score, max(current_scores))
             result.append({
                 "detection_id": detection_id,
                 "provider": detection.provider,

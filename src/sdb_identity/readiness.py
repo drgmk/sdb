@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_results import effective_catalog_results
 from .dirty import pending_export_targets
 from .models import (
-    CatalogRun,
     CuratedRecord,
     DatasetRevision,
     ExternalIdentifier,
@@ -66,6 +66,12 @@ class ReadinessService:
             photometry_state = load_system_photometry_state(
                 session, members_by_id, expand_context=False,
             )
+            catalog_providers = tuple(
+                provider for provider in providers if provider != "simbad"
+            )
+            effective_results = effective_catalog_results(
+                session, members_by_id, providers=catalog_providers,
+            )
             measurements_by_target: dict[int, dict[int, object]] = defaultdict(dict)
             for encounter in photometry_state.encounters:
                 measurements_by_target[encounter.target_id][
@@ -73,7 +79,11 @@ class ReadinessService:
                 ] = encounter.measurement
             for target in members:
                 for provider in providers:
-                    run = self._current_run(session, target.id, provider)
+                    run = (
+                        self._current_metadata_run(session, target.id, provider)
+                        if provider == "simbad"
+                        else effective_results.get((target.id, provider))
+                    )
                     if run is None:
                         issues.append(self._issue(
                             "blocker", "missing_provider", target, provider,
@@ -235,13 +245,12 @@ class ReadinessService:
         return len(sample_rows), len(unresolved)
 
     @staticmethod
-    def _current_run(session, target_id, provider):
-        model = MetadataRun if provider == "simbad" else CatalogRun
-        return session.scalar(select(model).where(
-            model.target_id == target_id,
-            model.provider == provider,
-            model.is_current.is_(True),
-        ).order_by(model.id.desc()).limit(1))
+    def _current_metadata_run(session, target_id, provider):
+        return session.scalar(select(MetadataRun).where(
+            MetadataRun.target_id == target_id,
+            MetadataRun.provider == provider,
+            MetadataRun.is_current.is_(True),
+        ).order_by(MetadataRun.id.desc()).limit(1))
 
     @staticmethod
     def _issue(severity, kind, target, provider, detail, **extra):
