@@ -120,10 +120,17 @@ def apply_measurement_assignment_proposals(
             counts["already_current_assignments"] += len(proposed)
             continue
 
+        # Any explicit row replaces the complete derived default.  When an
+        # exception extends a derived assignment, materialize the complete
+        # proposed set so the default target/role is not accidentally lost.
+        replaces_derived_default = any(
+            bool(value.get("derived")) for value in current
+        )
+        assignments_to_store = proposed if replaces_derived_default else missing
         status = "planned"
         if apply:
             audit_reason = f"{resolved_reason}; {proposal['proposal_reason']}"
-            for value in missing:
+            for value in assignments_to_store:
                 assign_measurement_target(
                     session_factory,
                     measurement_id,
@@ -137,11 +144,16 @@ def apply_measurement_assignment_proposals(
         items.append({
             **base,
             "status": status,
-            "assignments": missing,
-            "already_current_assignments": len(proposed) - len(missing),
+            "assignments": assignments_to_store,
+            "replaces_derived_default": replaces_derived_default,
+            "already_current_assignments": (
+                0
+                if replaces_derived_default
+                else len(proposed) - len(missing)
+            ),
         })
         counts[f"{status}_measurements"] += 1
-        counts[f"{status}_assignments"] += len(missing)
+        counts[f"{status}_assignments"] += len(assignments_to_store)
 
     skipped = sum(
         value for key, value in counts.items() if key.startswith("skipped_")

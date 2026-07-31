@@ -11,17 +11,18 @@ from .adapters import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
-from .catalog_measurements import current_measurement_encounters
-from .effective_assignments import effective_measurement_assignments
 from .models import (
     AstrometricSolution,
-    CatalogDetectionProvenance,
     ExternalIdentifier,
     NormalizedMeasurement,
     RawCatalogRow,
     Target,
 )
 from .providers import Astrometry
+from .system_photometry import (
+    SystemPhotometryState,
+    load_system_photometry_state,
+)
 from .ubv_components import decode_ubv_component
 from .tdsc_components import decode_tdsc_component
 from .targets import resolve_target
@@ -61,16 +62,16 @@ def measurement_assignment_proposals(
         if not targets:
             targets = {requested.id: requested}
         target_ids = sorted(targets)
-        encounters = current_measurement_encounters(session, target_ids)
-        measurements_by_id = {
-            row.measurement.id: row.measurement for row in encounters
-        }
+        photometry_state = load_system_photometry_state(
+            session, target_ids, expand_context=False,
+        )
+        measurements_by_id = dict(photometry_state.measurements)
         measurements = sorted(measurements_by_id.values(), key=lambda value: (
             value.provider, value.source_id, value.band, value.id,
         ))
         encounter_targets: dict[int, set[int]] = {}
         raw_rows = {}
-        for encounter in encounters:
+        for encounter in photometry_state.encounters:
             encounter_targets.setdefault(encounter.measurement.id, set()).add(
                 encounter.target_id
             )
@@ -78,36 +79,24 @@ def measurement_assignment_proposals(
         identifiers = _target_identifiers(session, target_ids)
         target_astrometry = _target_astrometry(session, targets)
         current = _current_assignments(
-            session,
-            [value.id for value in measurements],
+            photometry_state,
         )
-        provenance_by_detection: dict[int, list[dict[str, object]]] = {}
-        detection_ids = sorted({
-            int(value.detection_id) for value in measurements
-        })
-        if detection_ids:
-            for row in session.scalars(
-                select(CatalogDetectionProvenance)
-                .where(
-                    CatalogDetectionProvenance.detection_id.in_(detection_ids)
-                )
-                .order_by(
-                    CatalogDetectionProvenance.detection_id,
-                    CatalogDetectionProvenance.id,
-                )
-            ):
-                provenance_by_detection.setdefault(row.detection_id, []).append({
-                    "role": row.role,
-                    "service": row.service,
-                    "catalog_id": row.catalog_id,
-                    "table_id": row.table_id,
-                    "row_key": row.row_key,
-                    "identifier_column": row.identifier_column,
-                    "identifier_value": row.identifier_value,
-                    "source_url": row.source_url,
-                    "access_url": row.access_url,
-                    "readme_url": row.readme_url,
-                })
+        provenance_by_detection = {
+            detection_id: [{
+                "role": row.role,
+                "service": row.service,
+                "catalog_id": row.catalog_id,
+                "table_id": row.table_id,
+                "row_key": row.row_key,
+                "identifier_column": row.identifier_column,
+                "identifier_value": row.identifier_value,
+                "source_url": row.source_url,
+                "access_url": row.access_url,
+                "readme_url": row.readme_url,
+            } for row in rows]
+            for detection_id, rows
+            in photometry_state.catalog_provenance.items()
+        }
 
     semantic = system_context.get("simbad_semantic_by_target") or {}
     lifecycle = system_context.get("target_lifecycle_by_target") or {}
@@ -407,26 +396,18 @@ def _target_astrometry(
 
 
 def _current_assignments(
-    session: Session,
-    measurement_ids: list[int],
+    state: SystemPhotometryState,
 ) -> dict[int, list[dict[str, object]]]:
     result: dict[int, list[dict[str, object]]] = {}
-    if not measurement_ids:
-        return result
-    rows = effective_measurement_assignments(
-        session,
-        measurement_ids,
-    )
-    target_ids = {row.target_id for row in rows}
-    targets = {
-        target.id: target.sdbid
-        for target in session.scalars(select(Target).where(Target.id.in_(target_ids)))
-    }
-    for row in rows:
+    for row in state.assignments:
         result.setdefault(row.measurement_id, []).append({
             "association_id": row.association_id,
             "target_id": row.target_id,
-            "sdbid": targets.get(row.target_id),
+            "sdbid": (
+                state.referenced_targets[row.target_id].sdbid
+                if row.target_id in state.referenced_targets
+                else None
+            ),
             "role": row.role,
             "method": row.method,
             "weight": row.weight,

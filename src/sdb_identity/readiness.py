@@ -7,8 +7,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import pending_export_targets
-from .catalog_measurements import current_measurements_for_target
-from .measurement_eligibility import effective_measurement_eligibility
 from .models import (
     CatalogRun,
     CuratedRecord,
@@ -21,6 +19,7 @@ from .models import (
 )
 from .samples import SampleService
 from .identifiers import normalize_identifier
+from .system_photometry import load_system_photometry_state
 from .update import DEFAULT_PROVIDERS
 from .vocabulary import PROVIDER_REVIEW_STATUSES
 
@@ -64,6 +63,14 @@ class ReadinessService:
             sample = session.scalar(select(Sample).where(Sample.name == sample_name))
             if sample is None:
                 raise KeyError(f"sample not found: {sample_name}")
+            photometry_state = load_system_photometry_state(
+                session, members_by_id, expand_context=False,
+            )
+            measurements_by_target: dict[int, dict[int, object]] = defaultdict(dict)
+            for encounter in photometry_state.encounters:
+                measurements_by_target[encounter.target_id][
+                    encounter.measurement.id
+                ] = encounter.measurement
             for target in members:
                 for provider in providers:
                     run = self._current_run(session, target.id, provider)
@@ -77,10 +84,10 @@ class ReadinessService:
                             "blocker", "provider_result", target, provider,
                             run.status, error=run.error,
                         ))
-                measurements = current_measurements_for_target(session, target.id)
-                eligibility = effective_measurement_eligibility(
-                    session, [value.id for value in measurements],
+                measurements = list(
+                    measurements_by_target.get(target.id, {}).values()
                 )
+                eligibility = photometry_state.eligibility
                 excluded = sum(
                     eligibility[value.id].excluded
                     for value in measurements

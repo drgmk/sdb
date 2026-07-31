@@ -27,10 +27,13 @@ class CurrentMeasurementEncounter:
 
 def current_catalog_detection_target_pairs(
     session: Session,
+    detection_ids: Iterable[int] | None = None,
+    *,
+    require_match: bool = True,
 ) -> set[tuple[int, int]]:
     """Return effective canonical-detection/target links."""
     effective = _effective_detection_target_ids(
-        session, None, require_match=True,
+        session, detection_ids, require_match=require_match,
     )
     return set(effective)
 

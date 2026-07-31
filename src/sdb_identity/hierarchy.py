@@ -18,12 +18,10 @@ from .adapters.vizier import row_payload
 from .adapters.review_metadata import normalize_review_payload
 from .cache_store import CachedSnapshotData, SnapshotCache
 from .catalog_measurements import (
-    current_measurement_encounters,
     current_measurements_for_target,
 )
 from .dirty import mark_export_dirty
 from .decisions import DecisionContext
-from .effective_assignments import effective_measurement_assignments
 from .models import (
     AstrometricSolution,
     ExternalIdentifier,
@@ -43,10 +41,13 @@ from .models import (
     StructuralEdgeAction,
     Submission,
     Target,
-    TargetLifecycleAction,
     TargetSystem,
     TargetSystemMember,
     utcnow,
+)
+from .system_photometry import (
+    SystemPhotometryState,
+    load_system_photometry_state,
 )
 from .providers import Astrometry, ProviderError
 from .identifiers import normalize_identifier
@@ -726,10 +727,15 @@ class HierarchyService:
                 hierarchy_candidates_by_target=hierarchy_candidates,
                 requested_sdbid=target.sdbid,
             )
-            photometry = _system_photometry(session, target_ids)
-            measurement_assignments = _system_measurement_assignments(session, target_ids)
-            target_lifecycle = _system_target_lifecycle(session, target_ids)
-            system_memberships = _system_memberships(session, target_ids)
+            photometry_state = load_system_photometry_state(
+                session, target_ids, expand_context=False,
+            )
+            photometry = _system_photometry(photometry_state)
+            measurement_assignments = _system_measurement_assignments(
+                photometry_state
+            )
+            target_lifecycle = _system_target_lifecycle(photometry_state)
+            system_memberships = _system_memberships(photometry_state)
             simbad_metadata = _system_simbad_metadata(session, target_ids)
             simbad_main_ids = _system_simbad_main_ids(
                 session, target_ids, metadata_by_target=simbad_metadata,
@@ -2534,17 +2540,15 @@ def _nearest_component_sky_target(
 
 
 def _system_photometry(
-    session: Session,
-    target_ids: list[int],
+    state: SystemPhotometryState,
 ) -> dict[str, list[dict[str, object]]]:
-    if not target_ids:
+    if not state.selected_target_ids:
         return {}
     targets = {
-        target.id: target.sdbid
-        for target in session.scalars(select(Target).where(Target.id.in_(target_ids)))
+        target.id: target.sdbid for target in state.targets.values()
     }
     result: dict[str, list[dict[str, object]]] = {sdbid: [] for sdbid in targets.values()}
-    for encounter in current_measurement_encounters(session, target_ids):
+    for encounter in state.encounters:
         measurement = encounter.measurement
         result[targets[encounter.target_id]].append({
             "measurement_id": measurement.id,
@@ -2564,96 +2568,65 @@ def _system_photometry(
 
 
 def _system_target_lifecycle(
-    session: Session,
-    target_ids: list[int],
+    state: SystemPhotometryState,
 ) -> dict[str, dict[str, object]]:
-    targets = {
-        target.id: target
-        for target in session.scalars(select(Target).where(Target.id.in_(target_ids)))
-    }
-    actions: dict[int, TargetLifecycleAction] = {}
-    for action in session.scalars(
-        select(TargetLifecycleAction)
-        .where(TargetLifecycleAction.target_id.in_(target_ids))
-        .order_by(TargetLifecycleAction.id)
-    ):
-        actions[action.target_id] = action
     result = {}
-    for target_id, target in targets.items():
-        action = actions.get(target_id)
+    for target_id, target in state.targets.items():
+        lifecycle = state.lifecycle[target_id]
         replacement = (
-            None if action is None or action.superseded_by_target_id is None
-            else session.get(Target, action.superseded_by_target_id)
+            None
+            if lifecycle.superseded_by_target_id is None
+            else state.referenced_targets.get(
+                lifecycle.superseded_by_target_id
+            )
         )
         result[target.sdbid] = {
             "target_id": target.id,
-            "role": "unspecified" if action is None else action.role,
-            "state": "active" if action is None else action.state,
+            "role": lifecycle.role.value,
+            "state": lifecycle.state.value,
             "superseded_by_sdbid": None if replacement is None else replacement.sdbid,
-            "action_id": None if action is None else action.id,
+            "action_id": lifecycle.action_id,
         }
     return dict(sorted(result.items()))
 
 
 def _system_memberships(
-    session: Session,
-    target_ids: list[int],
+    state: SystemPhotometryState,
 ) -> dict[str, list[dict[str, object]]]:
-    if not target_ids:
+    if not state.selected_target_ids:
         return {}
-    targets = {
-        target.id: target.sdbid
-        for target in session.scalars(select(Target).where(Target.id.in_(target_ids)))
-    }
     result: dict[str, list[dict[str, object]]] = {}
-    rows = session.execute(
-        select(TargetSystemMember, TargetSystem)
-        .join(TargetSystem, TargetSystem.id == TargetSystemMember.system_id)
-        .where(TargetSystemMember.target_id.in_(target_ids))
-        .order_by(TargetSystem.name, TargetSystemMember.component_label, TargetSystemMember.id)
-    )
-    for member, system in rows:
-        sdbid = targets.get(member.target_id)
-        if sdbid is None:
+    for target_id, memberships in state.system_memberships.items():
+        target = state.targets.get(target_id)
+        if target is None:
             continue
-        result.setdefault(sdbid, []).append({
-            "system_id": system.id,
-            "system_name": system.name,
-            "component_label": member.component_label,
-            "source": member.source,
-            "is_primary": system.primary_target_id == member.target_id,
-        })
+        result[target.sdbid] = [{
+            "system_id": membership.system_id,
+            "system_name": membership.name,
+            "component_label": membership.component_label,
+            "source": membership.source,
+            "is_primary": membership.primary,
+        } for membership in memberships]
     return dict(sorted(result.items()))
 
 
 def _system_measurement_assignments(
-    session: Session,
-    target_ids: list[int],
+    state: SystemPhotometryState,
 ) -> list[dict[str, object]]:
-    if not target_ids:
+    if not state.selected_target_ids:
         return []
-    encounters = current_measurement_encounters(session, target_ids)
-    measurements = list({
-        encounter.measurement.id: encounter.measurement for encounter in encounters
-    }.values())
+    measurements = list(state.measurements.values())
     measurements.sort(key=lambda value: (
         value.provider, value.source_id, value.band, value.id,
     ))
     if not measurements:
         return []
-    measurement_ids = [value.id for value in measurements]
     associations_by_measurement = {}
-    for association in effective_measurement_assignments(
-        session,
-        measurement_ids,
-    ):
+    for association in state.assignments:
         associations_by_measurement.setdefault(association.measurement_id, []).append(association)
-    referenced_target_ids = {
-        value.target_id for values in associations_by_measurement.values() for value in values
-    } | {value.target_id for value in measurements}
     targets = {
         target.id: target.sdbid
-        for target in session.scalars(select(Target).where(Target.id.in_(referenced_target_ids)))
+        for target in state.referenced_targets.values()
     }
     return [{
         "measurement_id": measurement.id,

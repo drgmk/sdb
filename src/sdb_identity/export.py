@@ -13,9 +13,8 @@ from .models import (
     SimbadMetadata,
     Target,
 )
-from .catalog_measurements import current_measurement_encounters
 from .dirty import clear_export_dirty
-from .measurement_eligibility import effective_measurement_eligibility
+from .system_photometry import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import ProviderRunStatus
 
@@ -30,7 +29,10 @@ def export_ipac(
         target = resolve_target(session, target_reference)
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
-        encounters = current_measurement_encounters(session, [target.id])
+        state = load_system_photometry_state(
+            session, [target.id], expand_context=False,
+        )
+        encounters = state.encounters
         measurements = [row.measurement for row in encounters]
         identifiers = list(
             session.scalars(
@@ -48,9 +50,7 @@ def export_ipac(
                 MetadataRun.status == ProviderRunStatus.MATCH,
             )
         )
-        eligibility = effective_measurement_eligibility(
-            session, [value.id for value in measurements],
-        )
+        eligibility = state.eligibility
 
     band_order = {"J": 0, "H": 1, "KS": 2}
     measurements.sort(key=lambda value: band_order.get(value.band.replace("2MR1", "").replace("2MR2", "").replace("2M", ""), 99))

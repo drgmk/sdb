@@ -57,7 +57,10 @@ def effective_measurement_eligibility(
         )
 
     detection_targets: dict[int, set[int]] = {}
-    for detection_id, target_id in current_catalog_detection_target_pairs(session):
+    for detection_id, target_id in current_catalog_detection_target_pairs(
+        session,
+        {measurement.detection_id for measurement in measurements.values()},
+    ):
         detection_targets.setdefault(detection_id, set()).add(target_id)
 
     relevant_target_ids = {

@@ -69,6 +69,35 @@ def effective_measurement_assignments(
         for row in explicit
     ]
 
+    result.extend(derived_measurement_assignments(
+        session,
+        (
+            measurement_id
+            for measurement_id in ids
+            if measurement_id not in explicit_measurement_ids
+        ),
+    ))
+    return sorted(
+        result,
+        key=lambda row: (
+            row.measurement_id,
+            row.role,
+            row.target_id,
+            row.association_id or 0,
+        ),
+    )
+
+
+def derived_measurement_assignments(
+    session: Session,
+    measurement_ids: Iterable[int],
+) -> list[EffectiveMeasurementAssignment]:
+    """Derive safe defaults while deliberately ignoring explicit overrides."""
+
+    ids = tuple(dict.fromkeys(int(value) for value in measurement_ids))
+    if not ids:
+        return []
+    result: list[EffectiveMeasurementAssignment] = []
     encounter_target_ids = current_measurement_target_ids(session, ids)
     candidates = {
         measurement_id: tuple(sorted(set(
@@ -76,7 +105,6 @@ def effective_measurement_assignments(
             for target_id in encounter_target_ids.get(measurement_id, ())
         )))
         for measurement_id in ids
-        if measurement_id not in explicit_measurement_ids
     }
     default_target_ids = {
         target_ids[0]

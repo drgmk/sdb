@@ -17,6 +17,7 @@ from .models import (
     MeasurementTargetAssociation, NormalizedMeasurement,
     RawCatalogRow, Target,
 )
+from .system_photometry import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import (
     MeasurementAssociationActionKind,
@@ -308,10 +309,13 @@ def review_photometry_associations(
         if target is None:
             raise KeyError(f"target not found: {target_reference}")
         rows: list[PhotometryReviewRow] = []
-        encounters = current_measurement_encounters(
-            session, [target.id], require_match=False,
+        state = load_system_photometry_state(
+            session,
+            [target.id],
+            expand_context=False,
+            require_match=False,
         )
-        for encounter in encounters:
+        for encounter in state.encounters:
             measurement = encounter.measurement
             raw_row_id = encounter.raw_row.id
             rows.append(PhotometryReviewRow(
@@ -367,28 +371,30 @@ def _review_photometry_associations_many(
         target_id: [] for target_id in target_ids
     }
     with session_factory() as session:
-        for target_id_chunk in _chunks(target_ids):
-            encounters = current_measurement_encounters(
-                session, target_id_chunk, require_match=False,
-            )
-            for encounter in encounters:
-                measurement = encounter.measurement
-                target_id = encounter.target_id
-                raw_row_id = encounter.raw_row.id
-                rows_by_target[target_id].append(PhotometryReviewRow(
-                    target_id=target_id,
-                    provider=measurement.provider,
-                    source_id=measurement.source_id,
-                    band=measurement.band,
-                    measurement_id=measurement.id,
-                    raw_row_id=raw_row_id,
-                    value=measurement.value,
-                    unit=measurement.unit,
-                    excluded=measurement.excluded,
-                    ownership_scope=measurement.ownership_scope,
-                    blend_state=measurement.blend_state,
-                    blend_reason=measurement.blend_reason,
-                ))
+        state = load_system_photometry_state(
+            session,
+            target_ids,
+            expand_context=False,
+            require_match=False,
+        )
+        for encounter in state.encounters:
+            measurement = encounter.measurement
+            target_id = encounter.target_id
+            raw_row_id = encounter.raw_row.id
+            rows_by_target[target_id].append(PhotometryReviewRow(
+                target_id=target_id,
+                provider=measurement.provider,
+                source_id=measurement.source_id,
+                band=measurement.band,
+                measurement_id=measurement.id,
+                raw_row_id=raw_row_id,
+                value=measurement.value,
+                unit=measurement.unit,
+                excluded=measurement.excluded,
+                ownership_scope=measurement.ownership_scope,
+                blend_state=measurement.blend_state,
+                blend_reason=measurement.blend_reason,
+            ))
 
         for target_id_chunk in _chunks(target_ids):
             raw_rows = session.execute(

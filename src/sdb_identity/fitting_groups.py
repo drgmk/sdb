@@ -1,33 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections import defaultdict
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .adapters import catalog_source_display_name
-from .catalog_measurements import current_measurement_encounters
-from .effective_assignments import effective_measurement_assignments
-from .measurement_eligibility import effective_measurement_eligibility
-from .models import (
-    CatalogDetectionProvenance,
-    MeasurementTargetAssociation,
-    NormalizedMeasurement,
-    RawCatalogRow,
-    Target,
-    TargetLifecycleAction,
-    TargetSystem,
-    TargetSystemMember,
-)
 from .samples import SampleService
+from .system_photometry import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import (
     INACTIVE_TARGET_STATES,
     MeasurementTargetRole,
     TargetRole,
-    TargetState,
 )
 
 
@@ -45,94 +30,39 @@ def fitting_group_report(
             session, session_factory,
             target_reference=target_reference, sample=sample,
         )
-        context_target_ids, assigned_measurement_ids = _context_closure(
-            session, set(selected)
-        )
-        encounter_target_ids = _current_measurement_encounters(
-            session, context_target_ids
-        )
-        current_measurement_ids = set(encounter_target_ids)
-        measurement_ids = assigned_measurement_ids | current_measurement_ids
-        targets = {
-            row.id: row for row in _scalars_in(
-                session, Target, Target.id, context_target_ids
-            )
-        }
-        measurements = {
-            row.id: row for row in _scalars_in(
-                session, NormalizedMeasurement, NormalizedMeasurement.id,
-                measurement_ids,
-            )
-        }
-        provenance_by_detection: dict[int, list[dict[str, object]]] = defaultdict(list)
-        detection_ids = {
-            row.detection_id for row in measurements.values()
-        }
-        for provenance in _scalars_in(
-            session,
-            CatalogDetectionProvenance,
-            CatalogDetectionProvenance.detection_id,
-            detection_ids,
-        ):
-            provenance_by_detection[provenance.detection_id].append({
-                "role": provenance.role,
-                "service": provenance.service,
-                "catalog_id": provenance.catalog_id,
-                "table_id": provenance.table_id,
-                "row_key": provenance.row_key,
-                "identifier_column": provenance.identifier_column,
-                "identifier_value": provenance.identifier_value,
-                "source_url": provenance.source_url,
-                "access_url": provenance.access_url,
-                "readme_url": provenance.readme_url,
-            })
-        raw_payloads = {}
-        raw_row_ids = {
-            row.raw_row_id for row in measurements.values()
-            if row.raw_row_id is not None
-        }
-        for raw in _scalars_in(
-            session, RawCatalogRow, RawCatalogRow.id, raw_row_ids
-        ):
-            try:
-                payload = json.loads(raw.payload_json)
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if isinstance(payload, dict):
-                raw_payloads[raw.id] = payload
-        associations = effective_measurement_assignments(
-            session,
-            measurement_ids,
-        )
-        lifecycle = _lifecycle(session, context_target_ids)
-        systems = _system_context(session, context_target_ids)
-        eligibility = effective_measurement_eligibility(
-            session, measurement_ids,
-        )
+        state = load_system_photometry_state(session, selected)
+
+    targets = state.targets
+    measurements = state.measurements
+    encounter_target_ids = state.encounter_target_ids
+    current_measurement_ids = set(encounter_target_ids)
+    associations = state.assignments
+    eligibility = state.eligibility
 
     target_rows = {}
     model_target_ids = set()
     for target_id, target in targets.items():
-        status = lifecycle.get(target_id, {
-            "role": TargetRole.UNSPECIFIED.value,
-            "state": TargetState.ACTIVE.value,
-            "action_id": None,
-        })
+        status = state.lifecycle[target_id]
         model_target = (
-            status["role"] != TargetRole.COMPOSITE
-            and status["state"] not in INACTIVE_TARGET_STATES
+            status.role != TargetRole.COMPOSITE
+            and status.state not in INACTIVE_TARGET_STATES
         )
         if model_target:
             model_target_ids.add(target_id)
         target_rows[target_id] = {
             "target_id": target_id,
             "sdbid": target.sdbid,
-            "role": status["role"],
-            "state": status["state"],
+            "role": status.role.value,
+            "state": status.state.value,
             "model_target": model_target,
-            "role_review_required": status["role"] == TargetRole.UNSPECIFIED,
+            "role_review_required": status.role == TargetRole.UNSPECIFIED,
             "selected": target_id in selected,
-            "systems": systems.get(target_id, []),
+            "systems": [{
+                "system_id": membership.system_id,
+                "name": membership.name,
+                "component_label": membership.component_label,
+                "primary": membership.primary,
+            } for membership in state.system_memberships.get(target_id, ())],
         }
 
     associations_by_measurement = defaultdict(list)
@@ -199,11 +129,22 @@ def fitting_group_report(
             "source_display_name": catalog_source_display_name(
                 measurement.provider,
                 measurement.source_id,
-                raw_payloads.get(measurement.raw_row_id),
+                state.raw_payloads.get(measurement.raw_row_id),
             ),
-            "provenance": provenance_by_detection.get(
-                measurement.detection_id, []
-            ),
+            "provenance": [{
+                "role": provenance.role,
+                "service": provenance.service,
+                "catalog_id": provenance.catalog_id,
+                "table_id": provenance.table_id,
+                "row_key": provenance.row_key,
+                "identifier_column": provenance.identifier_column,
+                "identifier_value": provenance.identifier_value,
+                "source_url": provenance.source_url,
+                "access_url": provenance.access_url,
+                "readme_url": provenance.readme_url,
+            } for provenance in state.catalog_provenance.get(
+                measurement.detection_id, ()
+            )],
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
@@ -441,119 +382,6 @@ def _selected_targets(
     return {target.id}
 
 
-def _context_closure(
-    session: Session, selected_target_ids: set[int]
-) -> tuple[set[int], set[int]]:
-    target_ids = set(selected_target_ids)
-    measurement_ids: set[int] = set()
-    changed = True
-    while changed:
-        changed = False
-        system_ids = set()
-        for chunk in _chunks(target_ids):
-            system_ids.update(session.scalars(
-                select(TargetSystemMember.system_id).where(
-                    TargetSystemMember.target_id.in_(chunk)
-                )
-            ))
-        new_targets = set()
-        for chunk in _chunks(system_ids):
-            new_targets.update(session.scalars(
-                select(TargetSystemMember.target_id).where(
-                    TargetSystemMember.system_id.in_(chunk)
-                )
-            ))
-        frontier_targets = target_ids | new_targets
-        new_measurements = set()
-        for chunk in _chunks(frontier_targets):
-            new_measurements.update(session.scalars(
-                select(MeasurementTargetAssociation.measurement_id).where(
-                    MeasurementTargetAssociation.target_id.in_(chunk)
-                )
-            ))
-        all_measurements = measurement_ids | new_measurements
-        associated_targets = set()
-        for chunk in _chunks(all_measurements):
-            associated_targets.update(session.scalars(
-                select(MeasurementTargetAssociation.target_id).where(
-                    MeasurementTargetAssociation.measurement_id.in_(chunk)
-                )
-            ))
-        expanded_targets = frontier_targets | associated_targets
-        if expanded_targets != target_ids or all_measurements != measurement_ids:
-            changed = True
-            target_ids = expanded_targets
-            measurement_ids = all_measurements
-    return target_ids, measurement_ids
-
-
-def _current_measurement_encounters(
-    session: Session, target_ids: set[int]
-) -> dict[int, set[int]]:
-    result: dict[int, set[int]] = defaultdict(set)
-    for chunk in _chunks(target_ids):
-        for row in current_measurement_encounters(session, chunk):
-            result[row.measurement.id].add(row.target_id)
-    return dict(result)
-
-
-def _lifecycle(session: Session, target_ids: set[int]) -> dict[int, dict[str, object]]:
-    result = {}
-    for chunk in _chunks(target_ids):
-        latest = (
-            select(
-                TargetLifecycleAction.target_id,
-                func.max(TargetLifecycleAction.id).label("action_id"),
-            )
-            .where(TargetLifecycleAction.target_id.in_(chunk))
-            .group_by(TargetLifecycleAction.target_id)
-            .subquery()
-        )
-        for row in session.scalars(
-            select(TargetLifecycleAction).join(
-                latest, TargetLifecycleAction.id == latest.c.action_id
-            )
-        ):
-            result[row.target_id] = {
-                "role": row.role, "state": row.state, "action_id": row.id,
-            }
-    return result
-
-
-def _system_context(
-    session: Session, target_ids: set[int]
-) -> dict[int, list[dict[str, object]]]:
-    result = defaultdict(list)
-    for chunk in _chunks(target_ids):
-        rows = session.execute(
-            select(TargetSystemMember, TargetSystem)
-            .join(TargetSystem, TargetSystem.id == TargetSystemMember.system_id)
-            .where(TargetSystemMember.target_id.in_(chunk))
-            .order_by(TargetSystem.name, TargetSystemMember.id)
-        )
-        for member, system in rows:
-            result[member.target_id].append({
-                "system_id": system.id,
-                "name": system.name,
-                "component_label": member.component_label,
-                "primary": system.primary_target_id == member.target_id,
-            })
-    return dict(result)
-
-
 def _group_id(sdbids: list[str]) -> str:
     digest = hashlib.sha256("\n".join(sdbids).encode("utf-8")).hexdigest()[:12]
     return f"fit-group-{digest}"
-
-
-def _scalars_in(session: Session, model, column, values: set[int]):
-    rows = []
-    for chunk in _chunks(values):
-        rows.extend(session.scalars(select(model).where(column.in_(chunk))))
-    return rows
-
-
-def _chunks(values: set[int], size: int = 500):
-    ordered = sorted(values)
-    for start in range(0, len(ordered), size):
-        yield ordered[start:start + size]
