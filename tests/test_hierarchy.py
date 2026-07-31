@@ -457,7 +457,7 @@ def test_hierarchy_photometry_context_prefers_accepted_candidate(session_factory
 
 
 def test_system_target_scope_respects_catalog_resolution():
-    from sdb_identity.hierarchy import _photometry_scope_prediction
+    from sdb_identity.hierarchy_photometry import photometry_scope_prediction
 
     common = {
         "target_level": "system",
@@ -466,11 +466,11 @@ def test_system_target_scope_respects_catalog_resolution():
         "stored_ownership_scope": "component",
         "stored_blend_state": "clear",
     }
-    resolved = _photometry_scope_prediction(
+    resolved = photometry_scope_prediction(
         **common,
         blend_prediction="likely_resolved_at_catalog_resolution",
     )
-    blended = _photometry_scope_prediction(
+    blended = photometry_scope_prediction(
         **common,
         blend_prediction="likely_blended_at_catalog_resolution",
     )
