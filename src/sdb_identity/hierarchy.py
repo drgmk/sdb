@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import gzip
-import hashlib
 import json
 import math
-import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -14,7 +11,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
 from .adapters.review_metadata import normalize_review_payload
-from .cache_store import SnapshotCache
 from .catalog_measurements import (
     current_measurements_for_target,
 )
@@ -23,7 +19,6 @@ from .decisions import DecisionContext
 from .models import (
     AstrometricSolution,
     ExternalIdentifier,
-    HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
     HierarchySource,
@@ -41,29 +36,17 @@ from .models import (
     Target,
     TargetSystem,
     TargetSystemMember,
-    utcnow,
 )
 from .system_photometry import (
     SystemPhotometryState,
     load_system_photometry_state,
 )
-from .providers import Astrometry, ProviderError
+from .providers import Astrometry
 from .identifiers import normalize_identifier
 from .hierarchy_semantics import (
     component_label_from_identifier,
     normalize_component_label,
     simbad_component_relevance,
-)
-from .hierarchy_geometry import (
-    best_separation as _best_separation,
-    hierarchy_record_positions,
-    hierarchy_separation_usable as _hierarchy_separation_usable,
-    offset_position as _offset_position,
-    position_usable_for_matching as _position_usable_for_matching,
-    record_positions as _record_positions,
-    record_raw_payload as _record_raw_payload,
-    separation_arcsec as _separation_arcsec,
-    wds_record_has_unusable_separation as _wds_record_has_unusable_separation,
 )
 from .hierarchy_graph import (
     GRAPH_EDGE_STATUSES as _GRAPH_EDGE_STATUSES,
@@ -81,10 +64,20 @@ from .hierarchy_graph import (
     edges_for_system as _graph_edges_for_system,
     latest_overrides as _latest_graph_overrides,
 )
-from .hierarchy_parsing import parse_cached_snapshot, parse_snapshot, parse_tables
-from .hierarchy_registry import hierarchy_source
+from .hierarchy_matching import (
+    HierarchyMatchActionResult,
+    HierarchyMatchResult,
+    HierarchyMatchReviewRow,
+    HierarchyMatchingService,
+    HierarchyTargetMatchResult,
+)
+from .hierarchy_sources import (
+    HierarchyImportResult,
+    HierarchyPruneResult,
+    HierarchySourceService,
+)
 from .targets import resolve_target
-from .snapshots import SnapshotClient, VizierSnapshotClient
+from .snapshots import SnapshotClient
 from .vocabulary import ProviderRunStatus, ReviewPriority, review_priority_rank
 
 
@@ -139,78 +132,6 @@ class HierarchyStatus:
         value = asdict(self)
         value["relationships"] = [asdict(item) for item in self.relationships]
         return value
-
-
-@dataclass(frozen=True)
-class HierarchyImportResult:
-    source_id: int
-    provider: str
-    release: str
-    row_count: int
-    skipped_count: int
-    checksum: str
-
-
-@dataclass(frozen=True)
-class HierarchyPruneResult:
-    provider: str | None
-    groups: int
-    removed_sources: int
-    removed_records: int
-    removed_candidates: int
-    removed_match_actions: int
-    removed_graph_edges: int
-    removed_graph_overrides: int
-
-
-@dataclass(frozen=True)
-class HierarchyMatchResult:
-    provider: str
-    source_id: int | None
-    record_count: int
-    candidate_count: int
-    radius_arcsec: float
-
-
-@dataclass(frozen=True)
-class HierarchyTargetMatchResult:
-    provider: str
-    target_count: int
-    record_count: int
-    candidate_count: int
-    created_count: int
-    updated_count: int
-    radius_arcsec: float
-
-
-@dataclass(frozen=True)
-class HierarchyMatchReviewRow:
-    candidate_id: int
-    provider: str
-    status: str
-    record_id: int
-    native_id: str
-    component: str | None
-    discoverer_id: str | None
-    target_id: int
-    sdbid: str
-    match_method: str
-    score: float
-    separation_arcsec: float | None
-    identifier: str | None
-    reason: str
-
-
-@dataclass(frozen=True)
-class HierarchyMatchActionResult:
-    candidate_id: int
-    action: str
-    previous_status: str
-    new_status: str
-    target_id: int
-    sdbid: str
-    system_id: int | None
-    relationship_id: int | None
 
 
 class HierarchyService:
@@ -860,58 +781,9 @@ class HierarchyService:
         release: str,
         note: str | None = None,
     ) -> HierarchyImportResult:
-        provider = provider.lower().strip()
-        hierarchy_source(provider)
-        if not release.strip():
-            raise ValueError("release is required")
-        path = Path(path).expanduser().resolve()
-        data = path.read_bytes()
-        checksum = hashlib.sha256(data).hexdigest()
-        text_data = gzip.decompress(data) if path.suffix == ".gz" else data
-        text = text_data.decode("utf-8", errors="replace")
-        parsed, skipped = parse_snapshot(provider, text)
-        with self.session_factory.begin() as session:
-            existing = self._existing_source_result(
-                session, provider, checksum, skipped_count=skipped,
-            )
-            if existing is not None:
-                return existing
-            source = HierarchySource(
-                provider=provider,
-                release=release.strip(),
-                source_file=str(path),
-                checksum=checksum,
-                note=note,
-            )
-            session.add(source)
-            session.flush()
-            for record in parsed:
-                session.add(HierarchyRecord(
-                    source_id=source.id,
-                    provider=provider,
-                    native_id=record.native_id,
-                    component=record.component,
-                    discoverer_id=record.discoverer_id,
-                    ra_deg=record.ra_deg,
-                    dec_deg=record.dec_deg,
-                    first_epoch=record.first_epoch,
-                    last_epoch=record.last_epoch,
-                    measure_epoch=record.measure_epoch,
-                    separation_arcsec=record.separation_arcsec,
-                    pa_deg=record.pa_deg,
-                    magnitude_primary=record.magnitude_primary,
-                    magnitude_secondary=record.magnitude_secondary,
-                    delta_mag=record.delta_mag,
-                    raw_payload_json=json.dumps(record.raw_payload or {}, sort_keys=True),
-                ))
-            return HierarchyImportResult(
-                source_id=source.id,
-                provider=provider,
-                release=source.release,
-                row_count=len(parsed),
-                skipped_count=skipped,
-                checksum=checksum,
-            )
+        return HierarchySourceService(self.session_factory).import_snapshot(
+            provider, path, release=release, note=note,
+        )
 
     def fetch_snapshot(
         self,
@@ -923,232 +795,24 @@ class HierarchyService:
         release: str | None = None,
         note: str | None = None,
     ) -> HierarchyImportResult:
-        provider = provider.lower().strip()
-        catalog = hierarchy_source(provider).catalog
-        client = client or VizierSnapshotClient()
-        cache_status = "disabled"
-        if cache_path is not None:
-            cache = SnapshotCache(cache_path)
-            cached = None if refresh_cache else cache.current_snapshot("vizier", catalog)
-            if cached is None:
-                try:
-                    tables = client.fetch_tables(catalog)
-                    readme = client.fetch_readme(catalog)
-                except Exception as error:
-                    raise ProviderError(
-                        f"{provider} hierarchy snapshot fetch failed: {error}",
-                        transient=True,
-                    ) from error
-                cached = cache.store_snapshot(
-                    provider="vizier",
-                    catalog_id=catalog,
-                    release=release or _release_from_readme(provider, catalog, readme),
-                    source_url=client.source_url(catalog),
-                    readme=readme,
-                    tables=tables,
-                    note=note,
-                )
-                cache_status = "stored"
-            else:
-                cache_status = "reused"
-            parsed = parse_cached_snapshot(provider, cached)
-            readme = cached.readme
-            source_url = cached.source_url
-            checksum = cached.content_sha256
-            release_value = release or cached.release
-            cache_note = f"cache_source_id={cached.source_id};cache_status={cache_status}"
-        else:
-            try:
-                tables = client.fetch_tables(catalog)
-                readme = client.fetch_readme(catalog)
-            except Exception as error:
-                raise ProviderError(
-                    f"{provider} hierarchy snapshot fetch failed: {error}", transient=True
-                ) from error
-            parsed = parse_tables(provider, tables)
-            if not parsed:
-                raise ProviderError(f"{provider} hierarchy snapshot returned no parseable rows")
-            release_value = release or _release_from_readme(provider, catalog, readme)
-            canonical = json.dumps({
-                "catalog": catalog,
-                "provider": provider,
-                "readme": readme,
-                "records": [asdict(record) for record in parsed],
-            }, sort_keys=True, ensure_ascii=False)
-            checksum = hashlib.sha256(canonical.encode()).hexdigest()
-            source_url = client.source_url(catalog)
-            cache_note = None
-        if not parsed:
-            raise ProviderError(f"{provider} hierarchy snapshot returned no parseable rows")
-        with self.session_factory.begin() as session:
-            existing = self._existing_source_result(
-                session, provider, checksum, skipped_count=0,
-            )
-            if existing is not None:
-                return existing
-            source = HierarchySource(
-                provider=provider,
-                release=release_value,
-                source_file=source_url,
-                checksum=checksum,
-                fetched_at=utcnow(),
-                note=_join_notes(note, _readme_version_note(readme), cache_note),
-            )
-            session.add(source)
-            session.flush()
-            for record in parsed:
-                session.add(HierarchyRecord(
-                    source_id=source.id,
-                    provider=provider,
-                    native_id=record.native_id,
-                    component=record.component,
-                    discoverer_id=record.discoverer_id,
-                    ra_deg=record.ra_deg,
-                    dec_deg=record.dec_deg,
-                    first_epoch=record.first_epoch,
-                    last_epoch=record.last_epoch,
-                    measure_epoch=record.measure_epoch,
-                    separation_arcsec=record.separation_arcsec,
-                    pa_deg=record.pa_deg,
-                    magnitude_primary=record.magnitude_primary,
-                    magnitude_secondary=record.magnitude_secondary,
-                    delta_mag=record.delta_mag,
-                    raw_payload_json=json.dumps(record.raw_payload or {}, sort_keys=True),
-                ))
-            return HierarchyImportResult(
-                source_id=source.id,
-                provider=provider,
-                release=source.release,
-                row_count=len(parsed),
-                skipped_count=0,
-                checksum=checksum,
-            )
-
-    def _existing_source_result(
-        self,
-        session: Session,
-        provider: str,
-        checksum: str | None,
-        *,
-        skipped_count: int,
-    ) -> HierarchyImportResult | None:
-        if checksum is None:
-            return None
-        source = session.scalar(
-            select(HierarchySource)
-            .where(
-                HierarchySource.provider == provider,
-                HierarchySource.checksum == checksum,
-            )
-            .order_by(HierarchySource.id)
-            .limit(1)
-        )
-        if source is None:
-            return None
-        row_count = session.scalar(
-            select(func.count(HierarchyRecord.id))
-            .where(HierarchyRecord.source_id == source.id)
-        ) or 0
-        return HierarchyImportResult(
-            source_id=source.id,
-            provider=source.provider,
-            release=source.release,
-            row_count=int(row_count),
-            skipped_count=skipped_count,
-            checksum=checksum,
+        return HierarchySourceService(self.session_factory).fetch_snapshot(
+            provider,
+            client=client,
+            cache_path=cache_path,
+            refresh_cache=refresh_cache,
+            release=release,
+            note=note,
         )
 
     def sources(self, provider: str | None = None) -> tuple[HierarchySource, ...]:
-        with self.session_factory() as session:
-            query = select(HierarchySource).order_by(HierarchySource.id)
-            if provider is not None:
-                query = query.where(HierarchySource.provider == provider.lower().strip())
-            return tuple(session.scalars(query))
+        return HierarchySourceService(self.session_factory).sources(provider)
 
-    def prune_duplicate_sources(self, provider: str | None = None) -> HierarchyPruneResult:
-        provider_value = None if provider is None else provider.lower().strip()
-        if provider_value is not None and provider_value not in {"wds", "ccdm", "simbad", "manual"}:
-            raise ValueError(f"unsupported hierarchy provider: {provider}")
-        with self.session_factory.begin() as session:
-            group_query = (
-                select(HierarchySource.provider, HierarchySource.checksum)
-                .where(HierarchySource.checksum.is_not(None))
-                .group_by(HierarchySource.provider, HierarchySource.checksum)
-                .having(func.count(HierarchySource.id) > 1)
-                .order_by(HierarchySource.provider, HierarchySource.checksum)
-            )
-            if provider_value is not None:
-                group_query = group_query.where(HierarchySource.provider == provider_value)
-            groups = list(session.execute(group_query))
-            remove_source_ids: list[int] = []
-            for group_provider, checksum in groups:
-                sources = list(session.scalars(
-                    select(HierarchySource)
-                    .where(
-                        HierarchySource.provider == group_provider,
-                        HierarchySource.checksum == checksum,
-                    )
-                    .order_by(HierarchySource.id)
-                ))
-                remove_source_ids.extend(source.id for source in sources[1:])
-            if not remove_source_ids:
-                return HierarchyPruneResult(provider_value, 0, 0, 0, 0, 0, 0, 0)
-
-            record_ids = list(session.scalars(
-                select(HierarchyRecord.id).where(HierarchyRecord.source_id.in_(remove_source_ids))
-            ))
-            candidate_ids = self._select_ids_by_chunks(
-                session,
-                select(HierarchyMatchCandidate.id),
-                HierarchyMatchCandidate.record_id,
-                record_ids,
-            )
-            edge_ids = list(session.scalars(
-                select(StructuralEdge.id).where(StructuralEdge.source_id.in_(remove_source_ids))
-            ))
-            removed_match_actions = self._delete_by_chunks(
-                session, HierarchyMatchAction, HierarchyMatchAction.candidate_id, candidate_ids,
-            )
-            removed_candidates = self._delete_by_chunks(
-                session, HierarchyMatchCandidate, HierarchyMatchCandidate.id, candidate_ids,
-            )
-            removed_graph_overrides = self._delete_by_chunks(
-                session, StructuralEdgeAction, StructuralEdgeAction.edge_id, edge_ids,
-            )
-            removed_graph_edges = self._delete_by_chunks(
-                session, StructuralEdge, StructuralEdge.id, edge_ids,
-            )
-            removed_records = self._delete_by_chunks(
-                session, HierarchyRecord, HierarchyRecord.id, record_ids,
-            )
-            removed_sources = self._delete_by_chunks(
-                session, HierarchySource, HierarchySource.id, remove_source_ids,
-            )
-            return HierarchyPruneResult(
-                provider=provider_value,
-                groups=len(groups),
-                removed_sources=removed_sources,
-                removed_records=removed_records,
-                removed_candidates=removed_candidates,
-                removed_match_actions=removed_match_actions,
-                removed_graph_edges=removed_graph_edges,
-                removed_graph_overrides=removed_graph_overrides,
-            )
-
-    @staticmethod
-    def _delete_by_chunks(session: Session, model, column, ids: list[int]) -> int:
-        removed = 0
-        for chunk in _chunks(ids, 800):
-            result = session.execute(delete(model).where(column.in_(chunk)))
-            removed += int(result.rowcount or 0)
-        return removed
-
-    @staticmethod
-    def _select_ids_by_chunks(session: Session, query, column, ids: list[int]) -> list[int]:
-        values: list[int] = []
-        for chunk in _chunks(ids, 800):
-            values.extend(session.scalars(query.where(column.in_(chunk))))
-        return values
+    def prune_duplicate_sources(
+        self, provider: str | None = None,
+    ) -> HierarchyPruneResult:
+        return HierarchySourceService(
+            self.session_factory,
+        ).prune_duplicate_sources(provider)
 
     def summary(self, provider: str | None = None, *, source_id: int | None = None) -> dict[str, object]:
         provider_value = None if provider is None else provider.lower().strip()
@@ -1355,53 +1019,9 @@ class HierarchyService:
         source_id: int | None = None,
         radius_arcsec: float = 30.0,
     ) -> HierarchyMatchResult:
-        provider = provider.lower().strip()
-        if provider not in {"wds", "ccdm"}:
-            raise ValueError(f"unsupported hierarchy provider: {provider}")
-        if radius_arcsec <= 0:
-            raise ValueError("radius must be positive")
-        with self.session_factory.begin() as session:
-            query = select(HierarchyRecord).where(HierarchyRecord.provider == provider)
-            if source_id is not None:
-                query = query.where(HierarchyRecord.source_id == source_id)
-            records = tuple(session.scalars(query.order_by(HierarchyRecord.id)))
-            if records:
-                record_ids = [record.id for record in records]
-                session.execute(
-                    delete(HierarchyMatchCandidate)
-                    .where(HierarchyMatchCandidate.record_id.in_(record_ids))
-                )
-            alias_index = _build_alias_index(session)
-            target_index = _build_target_index(tuple(session.scalars(select(Target))))
-            components_by_system = _components_by_system(records)
-            candidate_count = 0
-            for record in records:
-                candidates = _hierarchy_candidates_for_record(
-                    record,
-                    radius_arcsec,
-                    alias_index,
-                    target_index,
-                    components_by_system=components_by_system,
-                )
-                for target_id, candidate in candidates.items():
-                    session.add(HierarchyMatchCandidate(
-                        record_id=record.id,
-                        target_id=target_id,
-                        provider=provider,
-                        match_method="+".join(candidate["methods"]),
-                        score=float(candidate["score"]),
-                        separation_arcsec=candidate["separation_arcsec"],
-                        identifier=candidate["identifier"],
-                        reason="; ".join(candidate["reasons"]),
-                    ))
-                    candidate_count += 1
-            return HierarchyMatchResult(
-                provider=provider,
-                source_id=source_id,
-                record_count=len(records),
-                candidate_count=candidate_count,
-                radius_arcsec=radius_arcsec,
-            )
+        return HierarchyMatchingService(self.session_factory).match_records(
+            provider, source_id=source_id, radius_arcsec=radius_arcsec,
+        )
 
     def match_targets(
         self,
@@ -1410,95 +1030,9 @@ class HierarchyService:
         *,
         radius_arcsec: float = 30.0,
     ) -> HierarchyTargetMatchResult:
-        """Incrementally add or refresh hierarchy candidates for target(s).
-
-        Unlike ``match_records``, this leaves candidates for unrelated targets
-        untouched. Existing candidate decisions retain their current status.
-        """
-        provider = provider.lower().strip()
-        if provider not in {"wds", "ccdm"}:
-            raise ValueError(f"unsupported hierarchy provider: {provider}")
-        if radius_arcsec <= 0:
-            raise ValueError("radius must be positive")
-        with self.session_factory.begin() as session:
-            targets = []
-            seen_target_ids = set()
-            for reference in target_references:
-                target = _find_required_target(session, reference)
-                if target.id not in seen_target_ids:
-                    targets.append(target)
-                    seen_target_ids.add(target.id)
-            records = tuple(session.scalars(
-                select(HierarchyRecord)
-                .where(HierarchyRecord.provider == provider)
-                .order_by(HierarchyRecord.id)
-            ))
-            if not targets or not records:
-                return HierarchyTargetMatchResult(
-                    provider=provider,
-                    target_count=len(targets),
-                    record_count=len(records),
-                    candidate_count=0,
-                    created_count=0,
-                    updated_count=0,
-                    radius_arcsec=radius_arcsec,
-                )
-            alias_index = _build_alias_index_for_targets(session, targets)
-            target_index = _build_target_index(tuple(targets))
-            components_by_system = _components_by_system(records)
-            existing = {
-                (candidate.record_id, candidate.target_id): candidate
-                for candidate in session.scalars(
-                    select(HierarchyMatchCandidate).where(
-                        HierarchyMatchCandidate.provider == provider,
-                        HierarchyMatchCandidate.target_id.in_(
-                            [target.id for target in targets]
-                        ),
-                    )
-                )
-            }
-            candidate_count = 0
-            created_count = 0
-            updated_count = 0
-            for record in records:
-                candidates = _hierarchy_candidates_for_record(
-                    record,
-                    radius_arcsec,
-                    alias_index,
-                    target_index,
-                    components_by_system=components_by_system,
-                )
-                for target_id, candidate in candidates.items():
-                    candidate_count += 1
-                    row = existing.get((record.id, target_id))
-                    if row is None:
-                        session.add(HierarchyMatchCandidate(
-                            record_id=record.id,
-                            target_id=target_id,
-                            provider=provider,
-                            match_method="+".join(candidate["methods"]),
-                            score=float(candidate["score"]),
-                            separation_arcsec=candidate["separation_arcsec"],
-                            identifier=candidate["identifier"],
-                            reason="; ".join(candidate["reasons"]),
-                        ))
-                        created_count += 1
-                    else:
-                        row.match_method = "+".join(candidate["methods"])
-                        row.score = float(candidate["score"])
-                        row.separation_arcsec = candidate["separation_arcsec"]
-                        row.identifier = candidate["identifier"]
-                        row.reason = "; ".join(candidate["reasons"])
-                        updated_count += 1
-            return HierarchyTargetMatchResult(
-                provider=provider,
-                target_count=len(targets),
-                record_count=len(records),
-                candidate_count=candidate_count,
-                created_count=created_count,
-                updated_count=updated_count,
-                radius_arcsec=radius_arcsec,
-            )
+        return HierarchyMatchingService(self.session_factory).match_targets(
+            provider, target_references, radius_arcsec=radius_arcsec,
+        )
 
     def derive_graph(
         self,
@@ -1773,42 +1307,10 @@ class HierarchyService:
                 reason=decision.reason,
             )
 
-    def review_matches(self, provider: str | None = None) -> tuple[HierarchyMatchReviewRow, ...]:
-        with self.session_factory() as session:
-            query = (
-                select(HierarchyMatchCandidate, HierarchyRecord, Target)
-                .join(HierarchyRecord, HierarchyRecord.id == HierarchyMatchCandidate.record_id)
-                .join(Target, Target.id == HierarchyMatchCandidate.target_id)
-                .order_by(
-                    HierarchyMatchCandidate.provider,
-                    HierarchyRecord.native_id,
-                    HierarchyRecord.component,
-                    HierarchyMatchCandidate.score.desc(),
-                    HierarchyMatchCandidate.separation_arcsec,
-                    Target.sdbid,
-                )
-            )
-            if provider is not None:
-                query = query.where(HierarchyMatchCandidate.provider == provider.lower().strip())
-            return tuple(
-                HierarchyMatchReviewRow(
-                    candidate_id=candidate.id,
-                    provider=candidate.provider,
-                    status=candidate.status,
-                    record_id=record.id,
-                    native_id=record.native_id,
-                    component=record.component,
-                    discoverer_id=record.discoverer_id,
-                    target_id=target.id,
-                    sdbid=target.sdbid,
-                    match_method=candidate.match_method,
-                    score=candidate.score,
-                    separation_arcsec=candidate.separation_arcsec,
-                    identifier=candidate.identifier,
-                    reason=candidate.reason,
-                )
-                for candidate, record, target in session.execute(query)
-            )
+    def review_matches(
+        self, provider: str | None = None,
+    ) -> tuple[HierarchyMatchReviewRow, ...]:
+        return HierarchyMatchingService(self.session_factory).review_matches(provider)
 
     def accept_match(
         self,
@@ -1820,82 +1322,14 @@ class HierarchyService:
         component_label: str | None = None,
         relationship_type: str = "hierarchy_record",
     ) -> HierarchyMatchActionResult:
-        if not relationship_type.strip():
-            raise ValueError("relationship type is required")
-        with self.session_factory.begin() as session:
-            candidate, record, target = _find_required_candidate_context(session, candidate_id)
-            decision = DecisionContext.resolve(
-                actor=actor,
-                reason=reason,
-                suggested_reason=(
-                    f"Accepted {record.provider} hierarchy candidate {candidate.id} "
-                    f"for {target.sdbid}: {candidate.reason}"
-                ),
-            )
-            previous_status = candidate.status
-            system_row = None
-            if system is not None:
-                system_row = _find_or_create_system(
-                    session,
-                    system,
-                    primary_target_id=target.id,
-                    source=record.provider,
-                    note=f"created from hierarchy candidate {candidate.id}",
-                )
-                _ensure_system_member(
-                    session,
-                    system_row.id,
-                    target.id,
-                    component_label if component_label is not None else record.component,
-                    record.provider,
-                )
-            relationship = StructuralEdge(
-                source=record.provider,
-                system_id=None if system_row is None else system_row.id,
-                record_id=record.id,
-                native_id=record.native_id,
-                endpoint_a_target_id=target.id,
-                direction="pair",
-                relation_type=relationship_type.strip(),
-                component_label=record.component,
-                separation_arcsec=record.separation_arcsec,
-                pa_deg=record.pa_deg,
-                relation_epoch=record.measure_epoch,
-                confidence="accepted_candidate",
-                status=_RELATIONSHIP_STATUS,
-                actor=decision.actor,
-                reason=decision.reason,
-            )
-            session.add(relationship)
-            session.flush()
-            candidate.status = "accepted"
-            session.add(HierarchyMatchAction(
-                candidate_id=candidate.id,
-                action="accept",
-                previous_status=previous_status,
-                new_status=candidate.status,
-                actor=decision.actor,
-                reason=decision.reason,
-                system_id=None if system_row is None else system_row.id,
-                relationship_id=relationship.id,
-            ))
-            mark_export_dirty(
-                session,
-                target.id,
-                source_type="hierarchy_match_accept",
-                source_id=candidate.id,
-                reason="hierarchy match accepted",
-            )
-            return HierarchyMatchActionResult(
-                candidate_id=candidate.id,
-                action="accept",
-                previous_status=previous_status,
-                new_status=candidate.status,
-                target_id=target.id,
-                sdbid=target.sdbid,
-                system_id=None if system_row is None else system_row.id,
-                relationship_id=relationship.id,
-            )
+        return HierarchyMatchingService(self.session_factory).accept_match(
+            candidate_id,
+            actor=actor,
+            reason=reason,
+            system=system,
+            component_label=component_label,
+            relationship_type=relationship_type,
+        )
 
     def reject_match(
         self,
@@ -1904,43 +1338,9 @@ class HierarchyService:
         actor: str | None,
         reason: str | None = None,
     ) -> HierarchyMatchActionResult:
-        with self.session_factory.begin() as session:
-            candidate, record, target = _find_required_candidate_context(session, candidate_id)
-            decision = DecisionContext.resolve(
-                actor=actor,
-                reason=reason,
-                suggested_reason=(
-                    f"Rejected {record.provider} hierarchy candidate {candidate.id} "
-                    f"for {target.sdbid}"
-                ),
-            )
-            previous_status = candidate.status
-            candidate.status = "rejected"
-            session.add(HierarchyMatchAction(
-                candidate_id=candidate.id,
-                action="reject",
-                previous_status=previous_status,
-                new_status=candidate.status,
-                actor=decision.actor,
-                reason=decision.reason,
-            ))
-            mark_export_dirty(
-                session,
-                target.id,
-                source_type="hierarchy_match_reject",
-                source_id=candidate.id,
-                reason="hierarchy match rejected",
-            )
-            return HierarchyMatchActionResult(
-                candidate_id=candidate.id,
-                action="reject",
-                previous_status=previous_status,
-                new_status=candidate.status,
-                target_id=target.id,
-                sdbid=target.sdbid,
-                system_id=None,
-                relationship_id=None,
-            )
+        return HierarchyMatchingService(self.session_factory).reject_match(
+            candidate_id, actor=actor, reason=reason,
+        )
 
 def _target_context_system_keys(
     context: dict[str, object],
@@ -3426,73 +2826,6 @@ def _find_required_system(session: Session, name: str | None) -> TargetSystem:
     return system
 
 
-def _find_or_create_system(
-    session: Session,
-    name: str,
-    *,
-    primary_target_id: int,
-    source: str,
-    note: str,
-) -> TargetSystem:
-    clean_name = name.strip()
-    if not clean_name:
-        raise ValueError("system name is required")
-    system = session.scalar(select(TargetSystem).where(TargetSystem.name == clean_name))
-    if system is not None:
-        return system
-    system = TargetSystem(
-        name=clean_name,
-        primary_target_id=primary_target_id,
-        source=source,
-        note=note,
-    )
-    session.add(system)
-    session.flush()
-    return system
-
-
-def _ensure_system_member(
-    session: Session,
-    system_id: int,
-    target_id: int,
-    component_label: str | None,
-    source: str,
-) -> TargetSystemMember:
-    member = session.scalar(
-        select(TargetSystemMember).where(
-            TargetSystemMember.system_id == system_id,
-            TargetSystemMember.target_id == target_id,
-            TargetSystemMember.component_label == component_label,
-        )
-    )
-    if member is not None:
-        return member
-    member = TargetSystemMember(
-        system_id=system_id,
-        target_id=target_id,
-        component_label=component_label,
-        source=source,
-    )
-    session.add(member)
-    return member
-
-
-def _find_required_candidate_context(
-    session: Session,
-    candidate_id: int,
-) -> tuple[HierarchyMatchCandidate, HierarchyRecord, Target]:
-    row = session.execute(
-        select(HierarchyMatchCandidate, HierarchyRecord, Target)
-        .join(HierarchyRecord, HierarchyRecord.id == HierarchyMatchCandidate.record_id)
-        .join(Target, Target.id == HierarchyMatchCandidate.target_id)
-        .where(HierarchyMatchCandidate.id == candidate_id)
-    ).one_or_none()
-    if row is None:
-        raise KeyError(f"hierarchy match candidate not found: {candidate_id}")
-    candidate, record, target = row
-    return candidate, record, target
-
-
 def _target_sdbid(session: Session, target_id: int | None) -> str | None:
     if target_id is None:
         return None
@@ -3527,342 +2860,6 @@ def _relationship_summary(session: Session, value: StructuralEdge) -> Relationsh
     )
 
 
-def _hierarchy_candidates_for_record(
-    record: HierarchyRecord,
-    radius_arcsec: float,
-    alias_index: dict[str, tuple[tuple[str, Target], ...]],
-    target_index: dict[int, tuple[Target, ...]],
-    *,
-    components_by_system: dict[tuple[str, int, str], frozenset[str]] | None = None,
-) -> dict[int, dict[str, object]]:
-    raw_payload = _record_raw_payload(record)
-    if _wds_record_has_unusable_separation(record, raw_payload=raw_payload):
-        return {}
-    candidates: dict[int, dict[str, object]] = {}
-    for identifier in _identifier_variants(
-        record,
-        components_by_system=components_by_system,
-    ):
-        normalized = normalize_identifier(identifier)
-        if not normalized:
-            continue
-        for alias_value, target in alias_index.get(normalized, ()):
-            candidate = _candidate_entry(candidates, target.id)
-            candidate["methods"].add("identifier")
-            candidate["score"] = max(float(candidate["score"]), 1.0)
-            if candidate["identifier"] is None:
-                candidate["identifier"] = alias_value
-            candidate["reasons"].add(f"identifier match: {alias_value}")
-            separation_values = _target_separations(
-                record, target, raw_payload=raw_payload,
-            )
-            if separation_values:
-                separation, position_kind = min(separation_values, key=lambda item: item[0])
-                candidate["separation_arcsec"] = _best_separation(candidate["separation_arcsec"], separation)
-                if separation <= radius_arcsec:
-                    candidate["methods"].add("position")
-                    candidate["reasons"].add(f"{position_kind} separation {separation:.3f} arcsec")
-                else:
-                    candidate["reasons"].add(f"{position_kind} offset {separation:.3f} arcsec")
-    if _record_positions(record, raw_payload=raw_payload):
-        for target, separation, position_kind in _targets_near_record(
-            record, radius_arcsec, target_index, raw_payload=raw_payload,
-        ):
-            candidate = _candidate_entry(candidates, target.id)
-            candidate["methods"].add("position")
-            candidate["score"] = max(
-                float(candidate["score"]),
-                max(0.0, 0.95 * (1.0 - separation / radius_arcsec)),
-            )
-            candidate["separation_arcsec"] = _best_separation(
-                candidate["separation_arcsec"], separation,
-            )
-            candidate["reasons"].add(f"{position_kind} separation {separation:.3f} arcsec")
-    return {
-        target_id: {
-            "methods": tuple(sorted(value["methods"])),
-            "score": value["score"],
-            "separation_arcsec": value["separation_arcsec"],
-            "identifier": value["identifier"],
-            "reasons": tuple(sorted(value["reasons"])),
-        }
-        for target_id, value in candidates.items()
-    }
-
-
-def _candidate_entry(candidates: dict[int, dict[str, object]], target_id: int) -> dict[str, object]:
-    if target_id not in candidates:
-        candidates[target_id] = {
-            "methods": set(),
-            "score": 0.0,
-            "separation_arcsec": None,
-            "identifier": None,
-            "reasons": set(),
-        }
-    return candidates[target_id]
-
-
-def _build_alias_index(session: Session) -> dict[str, tuple[tuple[str, Target], ...]]:
-    values: dict[str, list[tuple[str, Target]]] = {}
-    rows = session.execute(
-        select(ExternalIdentifier, Target)
-        .join(Target, Target.id == ExternalIdentifier.target_id)
-        .order_by(Target.sdbid, ExternalIdentifier.value)
-    )
-    for alias, target in rows:
-        values.setdefault(alias.normalized_value, []).append((alias.value, target))
-    return {key: tuple(value) for key, value in values.items()}
-
-
-def _build_alias_index_for_targets(
-    session: Session,
-    targets: Iterable[Target],
-) -> dict[str, tuple[tuple[str, Target], ...]]:
-    values: dict[str, list[tuple[str, Target]]] = {}
-    target_by_id = {target.id: target for target in targets}
-    if not target_by_id:
-        return {}
-    rows = session.scalars(
-        select(ExternalIdentifier)
-        .where(ExternalIdentifier.target_id.in_(target_by_id))
-        .order_by(ExternalIdentifier.target_id, ExternalIdentifier.value)
-    )
-    for alias in rows:
-        target = target_by_id[alias.target_id]
-        values.setdefault(alias.normalized_value, []).append(
-            (alias.value, target)
-        )
-    return {key: tuple(value) for key, value in values.items()}
-
-
-def _build_target_index(targets: tuple[Target, ...]) -> dict[int, tuple[Target, ...]]:
-    values: dict[int, list[Target]] = {}
-    for target in targets:
-        values.setdefault(math.floor(target.dec2000_deg), []).append(target)
-    return {key: tuple(sorted(value, key=lambda target: target.sdbid)) for key, value in values.items()}
-
-
-def _components_by_system(
-    records: tuple[HierarchyRecord, ...],
-) -> dict[tuple[str, int, str], frozenset[str]]:
-    values: dict[tuple[str, int, str], set[str]] = {}
-    for record in records:
-        if not record.native_id:
-            continue
-        component = (record.component or "").strip().replace(" ", "")
-        if not component:
-            continue
-        values.setdefault((record.provider, record.source_id, record.native_id), set()).add(component)
-    return {key: frozenset(value) for key, value in values.items()}
-
-
-def _identifier_variants(
-    record: HierarchyRecord,
-    *,
-    components_by_system: dict[tuple[str, int, str], frozenset[str]] | None = None,
-) -> tuple[str, ...]:
-    values: list[str] = []
-    native = (record.native_id or "").strip()
-    discoverer = (record.discoverer_id or "").strip()
-    component = (record.component or "").strip()
-    if native:
-        values.extend([native, f"{record.provider.upper()} {native}"])
-        sibling_components = (components_by_system or {}).get(
-            (record.provider, record.source_id, native),
-            frozenset(),
-        )
-        component_variants = _component_identifier_variants(
-            component,
-            sibling_components=sibling_components,
-        )
-        if (
-            record.provider == "wds"
-            and not component_variants
-            and _blank_wds_record_implies_ab_identifier(
-                record,
-                components_by_system=components_by_system,
-            )
-        ):
-            component_variants = ("AB",)
-        if record.provider == "wds":
-            values.append(f"WDS J{native}")
-            for component_variant in component_variants:
-                values.append(f"WDS J{native}{component_variant}")
-        elif record.provider == "ccdm":
-            coordinate_id = native[1:] if native.upper().startswith("J") else native
-            values.extend([
-                f"CCDM J{coordinate_id}",
-                f"CCDM {coordinate_id}",
-                f"WDS J{coordinate_id}",
-            ])
-            for component_variant in component_variants:
-                values.extend([
-                    f"CCDM J{coordinate_id}{component_variant}",
-                    f"CCDM {coordinate_id}{component_variant}",
-                    f"WDS J{coordinate_id}{component_variant}",
-                ])
-    if discoverer:
-        discoverer_values = [discoverer, _spaced_designation(discoverer)]
-        values.extend(discoverer_values)
-        if component:
-            compact_component = component.replace(" ", "")
-            for discoverer_value in discoverer_values:
-                values.append(f"{discoverer_value} {compact_component}")
-                values.append(f"{discoverer_value}{compact_component}")
-    return tuple(dict.fromkeys(value for value in values if value.strip()))
-
-
-def _blank_wds_record_implies_ab_identifier(
-    record: HierarchyRecord,
-    *,
-    components_by_system: dict[tuple[str, int, str], frozenset[str]] | None,
-) -> bool:
-    if record.provider != "wds":
-        return False
-    if (record.component or "").strip():
-        return False
-    if not record.native_id:
-        return False
-    if record.separation_arcsec is None or record.pa_deg is None:
-        return False
-    if record.separation_arcsec <= 0:
-        return False
-    explicit = (components_by_system or {}).get(
-        (record.provider, record.source_id, record.native_id),
-        frozenset(),
-    )
-    return "AB" not in explicit
-
-
-def _spaced_designation(value: str) -> str:
-    return re.sub(r"^([A-Za-z]+)(\d+)$", r"\1 \2", value.strip())
-
-
-def _component_identifier_variants(
-    component: str,
-    *,
-    sibling_components: frozenset[str] = frozenset(),
-) -> tuple[str, ...]:
-    compact = component.replace(" ", "")
-    if not compact:
-        return ()
-    values = [compact]
-    if "," not in compact and compact.isalpha() and compact.isupper() and len(compact) > 1:
-        values.extend(compact)
-    parent_component = _compound_component_parent(compact)
-    if parent_component is not None:
-        values.append(parent_component)
-    if compact == "A":
-        for sibling in sorted(sibling_components):
-            if len(sibling) == 1 and sibling != "A":
-                values.append(f"A{sibling}")
-    if len(compact) == 1 and compact != "A":
-        values.append(f"A{compact}")
-    return tuple(dict.fromkeys(values))
-
-
-def _compound_component_parent(component: str) -> str | None:
-    parts = [part.strip() for part in component.split(",") if part.strip()]
-    if len(parts) < 2:
-        return None
-    parents: set[str] = set()
-    for part in parts:
-        match = re.match(r"^([A-Z])[a-z0-9]+$", part)
-        if match is None:
-            return None
-        parents.add(match.group(1))
-    if len(parents) != 1:
-        return None
-    return next(iter(parents))
-
-
-def _targets_near_record(
-    record: HierarchyRecord,
-    radius_arcsec: float,
-    target_index: dict[int, tuple[Target, ...]],
-    *,
-    raw_payload: dict[str, object] | None = None,
-) -> tuple[tuple[Target, float, str], ...]:
-    positions = tuple(
-        position for position in _record_positions(record, raw_payload=raw_payload)
-        if _position_usable_for_matching(position[2])
-    )
-    if not positions:
-        return ()
-    radius_deg = radius_arcsec / 3600.0
-    rows: dict[int, tuple[Target, float, str]] = {}
-    for ra_deg, dec_deg, position_kind in positions:
-        cos_dec = max(0.01, abs(math.cos(math.radians(dec_deg))))
-        ra_half_width = min(180.0, radius_deg / cos_dec)
-        dec_min = dec_deg - radius_deg
-        dec_max = dec_deg + radius_deg
-        for dec_bin in range(math.floor(dec_min), math.floor(dec_max) + 1):
-            for target in target_index.get(dec_bin, ()):
-                if target.dec2000_deg < dec_min or target.dec2000_deg > dec_max:
-                    continue
-                if not _ra_within(ra_deg, target.ra2000_deg, ra_half_width):
-                    continue
-                separation = _separation_arcsec(ra_deg, dec_deg, target.ra2000_deg, target.dec2000_deg)
-                if separation <= radius_arcsec:
-                    existing = rows.get(target.id)
-                    if existing is None or separation < existing[1]:
-                        rows[target.id] = (target, separation, position_kind)
-    return tuple(sorted(rows.values(), key=lambda item: (item[1], item[0].sdbid)))
-
-
-def _ra_within(center_deg: float, value_deg: float, half_width_deg: float) -> bool:
-    if half_width_deg >= 180:
-        return True
-    delta = abs((value_deg - center_deg + 180.0) % 360.0 - 180.0)
-    return delta <= half_width_deg
-
-
-def _target_separations(
-    record: HierarchyRecord,
-    target: Target,
-    *,
-    raw_payload: dict[str, object] | None = None,
-) -> tuple[tuple[float, str], ...]:
-    return tuple(
-        (
-            _separation_arcsec(ra_deg, dec_deg, target.ra2000_deg, target.dec2000_deg),
-            position_kind,
-        )
-        for ra_deg, dec_deg, position_kind in _record_positions(
-            record, raw_payload=raw_payload,
-        )
-        if _position_usable_for_matching(position_kind)
-    )
-
-
-def _release_from_readme(provider: str, catalog: str, readme: str) -> str:
-    date_match = re.search(
-        r"(?:version|updated|last\s+update|date)\D{0,30}"
-        r"((?:19|20)\d{2}[-/][A-Za-z0-9]{1,3}[-/][A-Za-z0-9]{1,4}|"
-        r"[A-Za-z]{3,9}\s+\d{1,2},?\s+(?:19|20)\d{2}|"
-        r"(?:19|20)\d{2}\.\d+)",
-        readme,
-        flags=re.IGNORECASE,
-    )
-    if date_match:
-        return f"{provider}:{catalog}:{date_match.group(1).strip()}"
-    digest = hashlib.sha256(readme.encode()).hexdigest()[:12]
-    return f"{provider}:{catalog}:readme-{digest}"
-
-
-def _readme_version_note(readme: str) -> str | None:
-    for line in readme.splitlines():
-        lowered = line.lower()
-        if any(token in lowered for token in ("version", "updated", "last update", "date")):
-            return line.strip()
-    return None
-
-
 def _join_notes(*values: str | None) -> str | None:
     notes = [value.strip() for value in values if value and value.strip()]
     return "; ".join(notes) if notes else None
-
-
-def _chunks(values: list[int], size: int):
-    for start in range(0, len(values), size):
-        yield values[start:start + size]
