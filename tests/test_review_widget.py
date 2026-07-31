@@ -24,6 +24,7 @@ from sdb_identity.review_widget import (
     SkyArrow,
     SkyPoint,
     _deduplicate_points,
+    _catalog_component_summary,
     _midpoint_position,
     _offset_position,
     build_review_sky_view,
@@ -47,6 +48,19 @@ def test_catalog_source_display_names_are_adapter_owned():
         "7109|TYC2=2638|TYC3=1",
         {"TYC1": 7109, "TYC2": 2638, "TYC3": 1},
     ) == "TYC 7109-2638-1"
+    assert catalog_source_display_name(
+        "v70a",
+        "GJ 1294|Comp=B",
+        {"Name": "GJ 1294", "Comp": "B"},
+    ) == "GJ 1294 B"
+
+
+def test_v70a_component_is_surfaced_in_catalog_point_details():
+    assert _catalog_component_summary(
+        "v70a",
+        {"Name": "GJ 1294", "Comp": "B"},
+        "GJ 1294|Comp=B",
+    ) == "B — V/70A component B"
 
 
 def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_points(session_factory):
@@ -74,8 +88,12 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
     assert ("target", "sdb", "target", target.sdbid) in values
     assert ("identity", "gaia_dr3", "rejected", "gaia-a") in values
     assert ("identity", "gaia_dr3", "rejected", "gaia-b") in values
-    assert ("catalog", "2mass", "ambiguous", "2mass-a") in values
-    assert ("catalog", "2mass", "ambiguous", "2mass-b") in values
+    assert (
+        "catalog_association", "2mass", "ambiguous", "2mass-a"
+    ) in values
+    assert (
+        "catalog_association", "2mass", "ambiguous", "2mass-b"
+    ) in values
     assert not any(
         point.kind == "catalog" and point.provider == "empty"
         for point in view.points
@@ -106,6 +124,7 @@ def test_review_sky_view_projects_reconciled_catalog_candidate_from_nearby_targe
     )
     html = render_review_sky_html(view)
 
+    assert point.kind == "catalog_association"
     assert point.status == "candidate"
     assert point.target_id == component_target.target_id
     assert point.run_target_sdbid == catalog_target.sdbid
@@ -429,6 +448,8 @@ def test_review_sky_html_renders_pm_vectors_as_plotly_trace():
     assert html.index("<h2>Current target</h2>") < html.index(
         "<h2>System context</h2>"
     )
+    assert 'class="external-actions"' not in html
+    assert 'id="current-target-simbad"' not in html
     assert '!target.is_requested_target && !relativeTargetIds.has(target.sdbid)' in html
     assert "targetReviewLink" in html
     assert "targetMainId" in html
@@ -452,6 +473,12 @@ def test_review_sky_html_renders_pm_vectors_as_plotly_trace():
     assert "pointIsDefaultRelevant" in html
     assert "explicitSystemMembers" in html
     assert "Show all plotted items (" in html
+    assert 'point.provider === "sdb"' in html
+    assert 'class="point-primary"' in html
+    assert 'class="point-secondary"' in html
+    assert 'String(point.status).replaceAll("_", " ")' in html
+    assert 'point.status === "accepted"' in html
+    assert 'point.accepted && point.status !== "rejected"' in html
     assert "separation_arcsec - b.separation_arcsec" in html
     assert 'match: "#f59e0b"' in html
     assert 'accepted: "#16a34a"' in html
@@ -519,13 +546,32 @@ def test_review_sky_view_includes_nearby_targets_and_proper_motion_arrows(sessio
             epoch=2000,
         )
     )
+    outside_small_radius = IdentityService(session_factory).add(
+        AddRequest(
+            ra_deg=initial_view.center_ra_deg + 12.0 / (
+                3600.0 * math.cos(math.radians(initial_view.center_dec_deg))
+            ),
+            dec_deg=initial_view.center_dec_deg,
+            epoch=2000,
+        )
+    )
 
     view = build_review_sky_view(session_factory, target.sdbid, radius_arcsec=5)
 
+    assert view.radius_arcsec == 5
+    assert view.system_context["radius_arcsec"] == 5
     assert any(
         point.kind == "nearby_target" and point.source_id == nearby.sdbid
         for point in view.points
     )
+    assert not any(
+        point.kind == "nearby_target"
+        and point.source_id == outside_small_radius.sdbid
+        for point in view.points
+    )
+    assert outside_small_radius.sdbid not in {
+        row["sdbid"] for row in view.system_context["nearby_sdb_targets"]
+    }
     assert any(
         arrow.kind == "proper_motion"
         and arrow.source_id == "moving"
@@ -534,6 +580,21 @@ def test_review_sky_view_includes_nearby_targets_and_proper_motion_arrows(sessio
         and arrow.years == 10.0
         for arrow in view.arrows
     )
+
+    wider_view = build_review_sky_view(
+        session_factory,
+        target.sdbid,
+        radius_arcsec=20,
+    )
+    assert wider_view.system_context["radius_arcsec"] == 20
+    assert any(
+        point.kind == "nearby_target"
+        and point.source_id == outside_small_radius.sdbid
+        for point in wider_view.points
+    )
+    assert outside_small_radius.sdbid in {
+        row["sdbid"] for row in wider_view.system_context["nearby_sdb_targets"]
+    }
 
 
 def test_review_sky_view_auto_radius_includes_explicit_system_members_and_caps_at_ten_arcmin(
@@ -567,6 +628,7 @@ def test_review_sky_view_auto_radius_includes_explicit_system_members_and_caps_a
     }
 
     assert view.radius_arcsec == 600.0
+    assert view.system_context["radius_arcsec"] == 600.0
     assert ordinary_neighbour.sdbid in plotted_nearby
     assert system_member.sdbid in plotted_nearby
     assert capped_member.sdbid not in plotted_nearby
@@ -719,6 +781,7 @@ def test_review_sky_view_marks_catalog_review_neighbour_as_muted_context(session
     point = next(point for point in view.points if point.provider == "allwise")
     html = render_review_sky_html(view)
 
+    assert point.kind == "catalog_association"
     assert point.status == "review_neighbour"
     assert point.accepted is False
     assert "review-only catalogue neighbour" in point.attributes
@@ -814,12 +877,20 @@ def test_review_sky_view_includes_hierarchy_candidates_and_geometry(session_fact
     html = render_review_sky_html(view)
     assert "hierarchy group" in html
     assert "hierarchy-tree" in html
+    assert (
+        "https://vizier.cds.unistra.fr/viz-bin/VizieR-5?"
+        "-out.add=.&-source=B%2Fwds%2Fwds&WDS===00057%2B4549"
+    ) in html
     assert "Hierarchy" in html
     assert "System context" in html
     assert '"hierarchy_tree"' in html
     assert '"system_context"' in html
     assert "System photometry matrix" in html
     assert "assignment-matrix" in html
+    assert 'id="toggle-review-drawer"' in html
+    assert "Show review tools" in html
+    assert "Hide review tools" in html
+    assert "sdb-review-drawer-toggle" in html
     assert "ⓘ" in html
     assert "Measurement assignment proposals</h3>" not in html
     assert "STF3050" in html
@@ -907,6 +978,7 @@ def test_review_sky_view_draws_ccdm_component_links_between_siblings(session_fac
 
     view = build_review_sky_view(session_factory, target.sdbid)
     segment = next(segment for segment in view.segments if segment.provider == "ccdm")
+    html = render_review_sky_html(view)
 
     assert segment.label == "B"
     assert segment.start_ra_deg == 63.8179
@@ -915,6 +987,10 @@ def test_review_sky_view_draws_ccdm_component_links_between_siblings(session_fac
     assert segment.end_dec_deg == -7.6596
     assert "B: component link from A" in segment.note
     assert "epoch 2000.0" in segment.note
+    assert (
+        "https://vizier.cds.unistra.fr/viz-bin/VizieR-5?"
+        "-out.add=.&-source=I%2F274%2Fccdm&CCDM===04153-0739"
+    ) in html
 
 
 def test_review_sky_view_draws_wds_group_reference_from_midpoint(session_factory, tmp_path):
@@ -1050,6 +1126,49 @@ def test_review_sky_view_marks_wds_non_primary_pair_as_group(session_factory, tm
 
     assert segment.relation_type == "group"
     assert "C: component link from B" in segment.note
+
+
+def test_review_sky_view_keeps_unmatched_cross_links_from_same_wds_group(
+    session_factory, tmp_path,
+):
+    base_ra = 1.425
+    base_dec = 45.8166667
+    b_ra, b_dec = _offset_position(base_ra, base_dec, 30.0, 90.0)
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=base_ra, dec_deg=base_dec)
+    )
+    path = tmp_path / "wds.tsv"
+    path.write_text(
+        "WDS\tDiscov\tComp\tRAJ2000\tDEJ2000\tObs2\tPA2\tSep2\n"
+        f"00057+4549\tTEST 1\tAB\t{base_ra}\t{base_dec}\t2024\t90\t30.0\n"
+        f"00057+4549\tTEST 2\tBE\t{b_ra}\t{b_dec}\t2024\t45\t2.0\n"
+        f"00057+4549\tTEST 2\tBF\t{b_ra}\t{b_dec}\t2024\t135\t3.0\n",
+        encoding="utf-8",
+    )
+    hierarchy = HierarchyService(session_factory)
+    imported = hierarchy.import_snapshot("wds", path, release="test-release")
+    hierarchy.match_records("wds", source_id=imported.source_id, radius_arcsec=3)
+
+    view = build_review_sky_view(session_factory, target.sdbid)
+    segments = {
+        (segment.reference_label, segment.component_label): segment
+        for segment in view.segments
+        if segment.provider == "wds"
+    }
+    points = {
+        point.source_id: point
+        for point in view.points
+        if point.provider == "wds"
+    }
+
+    assert ("A", "B") in segments
+    assert ("B", "E") in segments
+    assert ("B", "F") in segments
+    assert points["00057+4549 E"].status == "context"
+    assert points["00057+4549 E"].candidate_id is None
+    assert points["00057+4549 F"].status == "context"
+    assert points["00057+4549 F"].candidate_id is None
+    assert "same hierarchy group; context only" in segments[("B", "E")].note
 
 
 def test_review_sky_view_does_not_draw_wds_999_separation_geometry(session_factory, tmp_path):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from astropy.table import Table
 
 from sdb_identity.catalogs import CatalogCandidate, CatalogService, MeasurementValue
+from sdb_identity.adapters import catalog_band_wavelength_micron
 from sdb_identity.assignment_proposals import measurement_assignment_proposals
 from sdb_identity.assignment_review import build_measurement_assignment_review
 from sdb_identity.astrometry import propagate_to_epoch
@@ -374,7 +375,10 @@ def test_system_matrix_collapses_detection_bands_and_marks_mixed_assignments(
     row = matrix["rows"][0]
     assert row["band_count"] == 2
     assert [band["band"] for band in row["bands"]] == [
-        "WISE22", "WISE3P4",
+        "WISE3P4", "WISE22",
+    ]
+    assert [band["wavelength_micron"] for band in row["bands"]] == [
+        3.3792, 22.2533,
     ]
     assert row["mixed_band_assignments"] is True
     assert row["comparison_to_current"] == "mixed_band_assignments"
@@ -394,6 +398,52 @@ def test_system_matrix_collapses_detection_bands_and_marks_mixed_assignments(
     )
     assert component_b_cell["status"] == "proposed"
     assert component_b_cell["mixed_band_assignments"] is False
+
+
+def test_catalog_band_wavelengths_cover_read_modes_and_submm_bands():
+    assert catalog_band_wavelength_micron("gaia_dr3", "GAIA.BP") == 0.5129
+    assert catalog_band_wavelength_micron("2mass", "2MR2KS") == 2.1621
+    assert catalog_band_wavelength_micron("iras_psc", "IRAS60") == 59.3524
+    assert catalog_band_wavelength_micron("submm_obs", "WAV850") == 850.0
+    assert catalog_band_wavelength_micron("unknown", "mystery") is None
+
+
+def test_system_matrix_orders_catalog_detections_by_wavelength(session_factory):
+    system, _component_a, _component_b = _configured_system(session_factory)
+    for provider, band in (
+        ("allwise", "WISE3P4"),
+        ("2mass", "2MJ"),
+        ("hip2", "HP"),
+        ("gaia_dr3", "GAIA.BP"),
+    ):
+        value = MeasurementValue(
+            band=band,
+            value=7.0,
+            error=0.02,
+            unit="mag",
+            resolution_major_arcsec=1.0,
+            resolution_minor_arcsec=1.0,
+            resolution_kind="test",
+            resolution_reference="test",
+        )
+        CatalogService(session_factory, {
+            provider: FakeCatalog(
+                [candidate(f"{provider}-source", measurements=[value])],
+                name=provider,
+                release=f"test-{provider}",
+            ),
+        }).refresh(system.sdbid, provider)
+
+    matrix = build_measurement_assignment_review(
+        session_factory, system.sdbid,
+    ).matrix
+
+    assert [row["provider"] for row in matrix["rows"]] == [
+        "gaia_dr3", "hip2", "2mass", "allwise",
+    ]
+    assert [row["wavelength_micron"] for row in matrix["rows"]] == [
+        0.5129, 0.5420, 1.2376, 3.3792,
+    ]
 
 
 def test_resolved_source_between_two_components_remains_review_required(

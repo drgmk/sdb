@@ -8,9 +8,15 @@ from astroquery.simbad import Simbad
 from astroquery.vizier import Vizier
 from requests.adapters import HTTPAdapter
 
-from .astrometry import propagate_to_epoch
+from .astrometry import angular_separation_arcsec, propagate_to_epoch
 from .astroquery_config import configure_vizier_class, configured_simbad_client
-from .providers import Astrometry, Candidate, NameResolution, ProviderError
+from .providers import (
+    Astrometry,
+    Candidate,
+    NameResolution,
+    ProviderError,
+    SimbadNeighbour,
+)
 
 
 class _TimeoutHTTPAdapter(HTTPAdapter):
@@ -108,6 +114,81 @@ class AstroquerySimbad:
             if value
         )
         return NameResolution(parsed.main_id, parsed.astrometry, values)
+
+    def search_region(
+        self,
+        astrometry: Astrometry,
+        *,
+        radius_arcsec: float,
+        limit: int = 100,
+    ) -> list[SimbadNeighbour]:
+        if radius_arcsec <= 0:
+            raise ValueError("SIMBAD search radius must be positive")
+        if limit < 1:
+            raise ValueError("SIMBAD search limit must be positive")
+        radius_deg = radius_arcsec / 3600.0
+        row_limit = min(int(limit), 500)
+        query = f"""
+            SELECT TOP {row_limit}
+                   b.oid, b.main_id, b.ra, b.dec, b.pmra, b.pmdec,
+                   b.plx_value, b.rvz_radvel, b.otype, a.otypes,
+                   b.sp_type, b.coo_bibcode, b.pm_bibcode,
+                   b.plx_bibcode, b.rvz_bibcode, ot.label AS otype_label,
+                   ot.description AS otype_description,
+                   DISTANCE(
+                       POINT('ICRS', b.ra, b.dec),
+                       POINT('ICRS', {astrometry.ra_deg}, {astrometry.dec_deg})
+                   ) AS separation_deg
+            FROM basic AS b
+            LEFT JOIN alltypes AS a ON a.oidref=b.oid
+            LEFT JOIN otypedef AS ot ON ot.otype=b.otype
+            WHERE 1=CONTAINS(
+                POINT('ICRS', b.ra, b.dec),
+                CIRCLE(
+                    'ICRS', {astrometry.ra_deg}, {astrometry.dec_deg},
+                    {radius_deg}
+                )
+            )
+            ORDER BY separation_deg
+        """
+        try:
+            table = self.client.query_tap(query)
+        except Exception as error:
+            raise ProviderError(
+                f"SIMBAD region query failed: {error}", transient=True
+            ) from error
+        result = []
+        for row in (() if table is None else table):
+            parsed = self.parse_row(row)
+            oid = _value(row, "oid")
+            if oid is None:
+                raise ProviderError("SIMBAD region response omitted oid")
+            raw_types = _text(_value(row, "otypes")) or ""
+            separation_deg = _float(_value(row, "separation_deg"))
+            separation = (
+                angular_separation_arcsec(astrometry, parsed.astrometry)
+                if separation_deg is None
+                else separation_deg * 3600.0
+            )
+            result.append(SimbadNeighbour(
+                oid=int(oid),
+                main_id=parsed.main_id,
+                astrometry=parsed.astrometry,
+                separation_arcsec=separation,
+                primary_object_type=_text(_value(row, "otype")),
+                object_type_label=_text(_value(row, "otype_label")),
+                object_type_description=_text(
+                    _value(row, "otype_description")
+                ),
+                object_types=tuple(
+                    value for value in raw_types.split("|") if value
+                ),
+                spectral_type=_text(_value(row, "sp_type")),
+            ))
+        return sorted(
+            result,
+            key=lambda value: (value.separation_arcsec, value.main_id),
+        )
 
     def resolve_many(self, names: tuple[str, ...]) -> dict[str, NameResolution | None]:
         unique_names = tuple(dict.fromkeys(name for name in names if name))

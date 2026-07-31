@@ -40,6 +40,7 @@ from sdb_identity.reference_definitions import V70A_DEFINITION
 from sdb_identity.reference_definitions import UBVMEANS_DEFINITION
 from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 from sdb_identity.ubv_components import decode_ubv_component
+from sdb_identity.v70a_components import decode_v70a_component
 
 
 class FakeSnapshotClient:
@@ -278,6 +279,39 @@ def test_v70a_normalizes_wo_and_nn_name_prefixes_to_gj():
     assert "GJ 12 A" in V70A_DEFINITION.identifiers({"Name": "NN 0012A"})
 
 
+def test_v70a_component_constructs_component_gliese_identity():
+    identifiers = V70A_DEFINITION.identifiers({
+        "Name": "GJ 1294",
+        "Comp": "B",
+        "HD": None,
+    })
+    assert identifiers == ("GJ 1294 B",)
+    assert decode_v70a_component({"Comp": "AB"}).as_dict() == {
+        "native_code": "AB",
+        "kind": "named_component",
+        "component_label": "AB",
+    }
+    assert decode_v70a_component({"Comp": "1"}).kind == "unknown"
+
+
+def test_v70a_component_normalizes_gl_name_and_keeps_other_aliases_for_lookup():
+    payload = {
+        "Name": "Gl 15",
+        "Comp": "A",
+        "HD": 1326,
+        "LHS": 3,
+    }
+    identifiers = V70A_DEFINITION.identifiers(payload)
+    assert identifiers[:2] == ("GJ 15 A", "Gl 15 A")
+    assert "HD 1326" not in identifiers
+    assert "LHS 3" not in identifiers
+    assert "Gl 15" not in identifiers
+    lookup = V70A_DEFINITION.lookup_identifiers(payload)
+    assert "HD 1326" in lookup
+    assert "LHS 3" in lookup
+    assert "Gl 15" in lookup
+
+
 def test_v70a_identifier_evidence_can_resolve_stale_coordinates(tmp_path):
     store = ReferenceStore(tmp_path / "reference.sqlite")
     store.fetch("v70a", FakeV70AClient())
@@ -290,6 +324,38 @@ def test_v70a_identifier_evidence_can_resolve_stale_coordinates(tmp_path):
     ))[0]
     assert adapter.score_candidate(None, candidate, 36.0) == 1.0
     assert adapter.score_candidate(None, candidate, 121.0) == 0.0
+
+
+def test_v70a_component_requires_component_identifier_for_automatic_match():
+    positional = CatalogCandidate(
+        "GJ 1294|Comp=A",
+        10,
+        -20,
+        2000,
+        {
+            "Name": "GJ 1294",
+            "Comp": "A",
+            "_sdb_association": {
+                "identifier_agreement": False,
+                "matched_identifiers": [],
+            },
+        },
+    )
+    identified = CatalogCandidate(
+        positional.source_id,
+        positional.ra_deg,
+        positional.dec_deg,
+        positional.epoch,
+        {
+            **positional.payload,
+            "_sdb_association": {
+                "identifier_agreement": True,
+                "matched_identifiers": ["GJ 1294 A"],
+            },
+        },
+    )
+    assert V70ASnapshotAdapter.score_candidate(None, positional, 0.0) == 0.45
+    assert V70ASnapshotAdapter.score_candidate(None, identified, 36.0) == 1.0
 
 
 def test_tdsc_component_specific_ids_outweigh_shared_hip():

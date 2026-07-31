@@ -42,6 +42,19 @@ class Candidate:
     identifiers: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class SimbadNeighbour:
+    oid: int
+    main_id: str
+    astrometry: Astrometry
+    separation_arcsec: float
+    primary_object_type: str | None = None
+    object_type_label: str | None = None
+    object_type_description: str | None = None
+    object_types: tuple[str, ...] = ()
+    spectral_type: str | None = None
+
+
 class ProviderError(RuntimeError):
     def __init__(self, message: str, *, transient: bool = False):
         super().__init__(message)
@@ -52,6 +65,18 @@ class SimbadProvider(Protocol):
     name: str
 
     def resolve_name(self, name: str) -> NameResolution | None: ...
+
+
+class SimbadDiscoveryProvider(Protocol):
+    name: str
+
+    def search_region(
+        self,
+        astrometry: Astrometry,
+        *,
+        radius_arcsec: float,
+        limit: int = 100,
+    ) -> list[SimbadNeighbour]: ...
 
 
 class GaiaProvider(Protocol):

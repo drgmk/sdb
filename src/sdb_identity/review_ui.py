@@ -32,6 +32,10 @@ from .system_expansion import (
     import_immediate_relatives,
     preview_immediate_relatives,
 )
+from .target_import import (
+    TargetImportService,
+    search_nearby_simbad,
+)
 
 
 def create_review_app(
@@ -142,14 +146,23 @@ def create_review_app(
                     system_context.get("catalog_coverage_by_target", [])
                 ),
                 catalog_update_available=catalog_update_factory is not None,
+                nearby_import_available=(
+                    identity_service_factory is not None
+                    and catalog_update_factory is not None
+                ),
+                target_position=dict(system_context["target"]),
             )
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.get("/target/{sdbid}/sky", response_class=HTMLResponse)
-    def target_sky(sdbid: str):
+    def target_sky(sdbid: str, radius: float | None = None):
         try:
-            view = build_review_sky_view(session_factory, sdbid)
+            view = build_review_sky_view(
+                session_factory,
+                sdbid,
+                radius_arcsec=radius,
+            )
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return render_review_sky_html(view, embedded=True)
@@ -336,6 +349,30 @@ def create_review_app(
                 catalog_service_factory,
                 payload,
                 apply=True,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/nearby-import/search")
+    async def nearby_import_search(payload: dict[str, object]):
+        try:
+            return _nearby_import_search_payload(
+                session_factory,
+                identity_service_factory,
+                payload,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/nearby-import/apply")
+    async def nearby_import_apply(payload: dict[str, object]):
+        try:
+            return _nearby_import_from_payload(
+                session_factory,
+                identity_service_factory,
+                catalog_update_factory,
+                catalog_coverage_providers,
+                payload,
             )
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -967,6 +1004,124 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _nearby_import_search_payload(
+    session_factory: sessionmaker[Session],
+    identity_service_factory: Callable[[], IdentityService] | None,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    if identity_service_factory is None:
+        raise RuntimeError(
+            "nearby SIMBAD search is unavailable in offline review mode"
+        )
+    raw_radius = payload.get("radius_arcsec", 60)
+    if isinstance(raw_radius, bool):
+        raise ValueError("search radius must be a number")
+    radius_arcsec = float(raw_radius)
+    identity = identity_service_factory()
+    provider = identity.simbad
+    if not hasattr(provider, "search_region"):
+        raise RuntimeError("the configured SIMBAD provider cannot search by position")
+    result = search_nearby_simbad(
+        session_factory,
+        str(payload["target"]),
+        provider=provider,
+        radius_arcsec=radius_arcsec,
+    )
+    value = result.as_dict()
+    value["new_count"] = sum(
+        bool(row["selectable"]) for row in value["candidates"]
+    )
+    value["existing_count"] = sum(
+        row["existing_sdbid"] is not None for row in value["candidates"]
+    )
+    value["blocked_count"] = sum(
+        row["blocked_reason"] is not None
+        and row["existing_sdbid"] is None
+        for row in value["candidates"]
+    )
+    return value
+
+
+def _nearby_import_from_payload(
+    session_factory: sessionmaker[Session],
+    identity_service_factory: Callable[[], IdentityService] | None,
+    update_factory: Callable[[], object] | None,
+    catalog_providers: tuple[str, ...] | None,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    if identity_service_factory is None or update_factory is None:
+        raise RuntimeError(
+            "nearby target import is unavailable in this review server"
+        )
+    raw_names = payload.get("main_ids")
+    if not isinstance(raw_names, list):
+        raise ValueError("main_ids must be a list")
+    names = tuple(dict.fromkeys(
+        str(value).strip() for value in raw_names if str(value).strip()
+    ))
+    if not names:
+        raise ValueError("select at least one SIMBAD object to import")
+    if len(names) > 50:
+        raise ValueError("at most 50 SIMBAD objects may be imported at once")
+    source_target = str(payload["target"])
+    providers = tuple(dict.fromkeys((
+        "simbad",
+        *(catalog_providers or ()),
+    )))
+    result = TargetImportService(
+        session_factory,
+        identity_service=identity_service_factory(),
+        update_service=update_factory(),
+    ).import_many(
+        names,
+        providers=providers,
+        command=f"review import near {source_target}",
+    )
+    value = {
+        **result.as_dict(),
+        "mode": "applied",
+        "source_target": source_target,
+    }
+    return _with_human_summary(value, _nearby_import_summary(value))
+
+
+def _nearby_import_summary(
+    value: dict[str, object],
+) -> dict[str, object]:
+    changes = []
+    warnings = []
+    for item in value["items"]:
+        if item["status"] == "failed":
+            warnings.append(
+                f"{item['requested_name']}: {item.get('error') or 'import failed'}"
+            )
+        else:
+            changes.append(
+                f"{item['requested_name']}: {item['status']} as {item['sdbid']}"
+            )
+    update = value.get("update_summary") or {}
+    for item in update.get("items", []):
+        if item["action"] in {"failed", "missing"}:
+            detail = f" — {item['detail']}" if item.get("detail") else ""
+            warnings.append(
+                f"{item.get('sdbid') or 'target'}: "
+                f"{item['provider']} {item['action']}{detail}"
+            )
+    return {
+        "title": (
+            f"Nearby import finished: {value['created_count']} created, "
+            f"{value['existing_count']} existing, "
+            f"{value['failed_count']} failed"
+        ),
+        "facts": [
+            f"Search target: {value['source_target']}",
+            "Provider coverage and stored WDS/CCDM matching were run for successful targets.",
+        ],
+        "changes": changes or ["No targets were imported."],
+        "warnings": warnings,
+    }
+
+
 def _catalog_coverage_from_payload(
     session_factory: sessionmaker[Session],
     providers: tuple[str, ...] | None,
@@ -1352,21 +1507,22 @@ def _queue_page(
     filtered_rows = _filtered_queue_rows(report, filters)
     rows = []
     for position, row in enumerate(filtered_rows):
-        provider_text = "; ".join(
-            f"{value['provider']}: {', '.join(value['bands'])}"
-            for value in row["providers"]
+        provider_text = ", ".join(
+            str(value["provider"]) for value in row["providers"]
         )
         target_query = _queue_query(filters, position)
+        target_url = (
+            f"/target/{quote(str(row['sdbid']))}{_e(target_query)}"
+        )
         display_name_html = (
-            f"<span>{_e(row['display_name'])}</span><br>"
-            if row.get("display_name") else ""
+            f"<a href='{target_url}'>{_e(row['display_name'])}</a>"
+            if row.get("display_name") else "<span class='muted'>—</span>"
         )
         rows.append(
             f"<tr class='priority-{_e(row['priority'])}' data-classification='{_e(row['classification'])}'>"
             f"<td>{_e(row['priority'])}</td>"
-            f"<td><a href='/target/{quote(str(row['sdbid']))}{_e(target_query)}'>"
-            f"{display_name_html}"
-            f"<code>{_e(row['sdbid'])}</code></a></td>"
+            f"<td>{display_name_html}</td>"
+            f"<td><a href='{target_url}'><code>{_e(row['sdbid'])}</code></a></td>"
             f"<td>{_e(str(row['classification']).replace('_', ' '))}</td>"
             f"<td>{_e(row['role'])}</td><td>{row['detection_count']} / {row['measurement_count']} bands</td>"
             f"<td>{row['unassigned_detection_count']} / {row['mixed_detection_count']}</td>"
@@ -1407,10 +1563,104 @@ def _queue_page(
     <div class="filter-actions"><button type="submit">Apply filters</button><a href="/">Clear</a></div>
   </form>
   <p class="muted queue-count">Showing <strong>{len(filtered_rows)}</strong> of {len(all_rows)} sample targets.</p>
-  <table><thead><tr><th>priority</th><th>target</th><th>classification</th><th>role</th><th>detections</th><th>unassigned / mixed</th><th>providers/bands</th><th>recommended action</th></tr></thead>
-  <tbody>{''.join(rows) or '<tr><td colspan="8" class="muted">No sample targets match these filters.</td></tr>'}</tbody></table>
+  <table><thead><tr><th>priority</th><th>SIMBAD name</th><th>SDB ID</th><th>classification</th><th>role</th><th>detections</th><th>unassigned / mixed</th><th>providers</th><th>recommended action</th></tr></thead>
+  <tbody>{''.join(rows) or '<tr><td colspan="9" class="muted">No sample targets match these filters.</td></tr>'}</tbody></table>
 </main>"""
     return _page(f"SDB review: {sample}", body)
+
+
+def _target_external_resources(
+    identifier: str,
+    *,
+    ra_deg: object,
+    dec_deg: object,
+) -> list[dict[str, str]]:
+    resources = [{
+        "label": "SIMBAD",
+        "title": "SIMBAD",
+        "url": (
+            "https://simbad.cds.unistra.fr/simbad/sim-id?"
+            + urlencode({
+                "submit": "submit id",
+                "Ident": identifier,
+            })
+        ),
+    }]
+    if ra_deg is None or dec_deg is None:
+        return resources
+    ra = str(float(ra_deg))
+    dec = str(float(dec_deg))
+    coordinate = f"{ra} {dec}"
+    comma_coordinate = f"{ra},{dec}"
+    resources.extend([
+        {
+            "label": "CDS",
+            "title": "CDS Portal",
+            "url": (
+                "https://cdsportal.u-strasbg.fr/?"
+                + urlencode({"target": coordinate})
+            ),
+        },
+        {
+            "label": "CASSIS",
+            "title": "Cornell Atlas of Spitzer IRS Sources",
+            "url": (
+                "https://cassis.sirtf.com/atlas/cgi/radec.py?"
+                + urlencode({"ra": ra, "dec": dec, "radius": 20})
+            ),
+        },
+        {
+            "label": "Finder",
+            "title": "IRSA Finder Chart",
+            "url": (
+                "https://irsa.ipac.caltech.edu/applications/finderchart/"
+                "servlet/api?"
+                + urlencode({
+                    "mode": "getResult",
+                    "locstr": comma_coordinate,
+                })
+            ),
+        },
+        {
+            "label": "Spitzer",
+            "title": "Spitzer Heritage Archive",
+            "url": (
+                "https://sha.ipac.caltech.edu/applications/Spitzer/SHA/?"
+                + urlencode({
+                    "api": "search",
+                    "searchoption": "POSITION",
+                    "sr": "180s",
+                    "WorldPt": f"{ra};{dec};EQ_J2000",
+                    "execute": "true",
+                })
+            ),
+        },
+        {
+            "label": "MAST",
+            "title": "MAST Portal",
+            "url": (
+                "https://mast.stsci.edu/portal/Mashup/Clients/Mast/"
+                "Portal.html?"
+                + urlencode({"searchQuery": comma_coordinate})
+            ),
+        },
+        {
+            "label": "ESASky",
+            "title": "ESASky",
+            "url": (
+                "https://sky.esa.int/?"
+                + urlencode({
+                    "action": "goto",
+                    "fov": "0.25",
+                    "cooframe": "J2000",
+                    "sci": "true",
+                    "hips": "AllWISE color",
+                    "target": coordinate,
+                })
+            ),
+        },
+    ])
+    return resources
 
 
 def _target_page(
@@ -1423,6 +1673,8 @@ def _target_page(
     simbad_main_ids: dict[str, str] | None = None,
     catalog_coverage: list[dict[str, object]] | None = None,
     catalog_update_available: bool = False,
+    nearby_import_available: bool = False,
+    target_position: dict[str, object] | None = None,
 ) -> str:
     default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
@@ -1452,6 +1704,17 @@ def _target_page(
         return _e(label)
 
     requested_target_label = simbad_main_ids.get(sdbid, display_name or sdbid)
+    target_position = target_position or {}
+    external_resources = _target_external_resources(
+        requested_target_label,
+        ra_deg=target_position.get("ra2000_deg"),
+        dec_deg=target_position.get("dec2000_deg"),
+    )
+    external_resource_html = "".join(
+        f"<a class='external-resource' href='{_e(row['url'])}' target='_blank' "
+        f"rel='noopener' title='{_e(row['title'])}'>{_e(row['label'])}</a>"
+        for row in external_resources
+    )
     catalog_coverage = catalog_coverage or []
     coverage_missing = sum(
         len(row["missing_providers"]) for row in catalog_coverage
@@ -1654,15 +1917,26 @@ def _target_page(
     <span class="muted">{_e(target['role'])}/{_e(target['state'])} · {readiness_text}</span>
     {navigation_html}
     <div class="header-actions">
+      {external_resource_html}
+      <button id="nearby-import" type="button"{'' if nearby_import_available else ' disabled'} title="{'Search SIMBAD around this target and import selected objects' if nearby_import_available else 'Nearby import is unavailable in offline review mode'}">Import nearby</button>
       <button id="catalog-coverage" class="{'needs-attention' if coverage_missing else ''}" type="button">{_e(coverage_label)}</button>
       <button id="classify-target" class="{'needs-decision' if target['role'] == 'unspecified' else ''}" type="button">{'Decide target role' if target['role'] == 'unspecified' else 'Change target role'}</button>
     </div>
   </header>
   <iframe id="sky-review" title="Sky and system review for {_e(sdbid)}" src="/target/{quote(sdbid)}/sky"></iframe>
   <aside id="assignment-drawer" class="assignment-drawer" hidden>
-    <div class="drawer-header"><div><h2 id="drawer-title">Photometry assignment</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close review drawer">×</button></div>
-    <p id="assignment-prompt" class="muted">Select a plotted catalog source with normalized photometry.</p>
+    <div class="drawer-header"><div><h2 id="drawer-title">Review tools</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close review drawer">×</button></div>
+    <p id="assignment-prompt" class="muted">Select a plotted catalog source to review it.</p>
     <section class="decision-meta"><label>Actor <input id="actor" value="{_e(default_actor)}"></label><label>Reason <input id="reason" placeholder="Preview suggests a reason"></label></section>
+    <section id="catalog-association-editor" class="detection" hidden>
+      <h3>Source association</h3>
+      <p id="catalog-association-context" class="muted"></p>
+      <div class="drawer-actions">
+        <button type="button" class="preview-catalog-association" data-action="accept">Accept for this target</button>
+        <button type="button" class="preview-catalog-association" data-action="reject">Reject for this target</button>
+      </div>
+    </section>
+    <section id="catalog-association-preview-panel" class="preview-panel" hidden><h2>Source association preview</h2><div id="catalog-association-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-catalog-association" disabled>Apply source association</button></section>
     <div id="detection-editors">{''.join(cards) or '<p>No current measurements.</p>'}</div>
     <section id="provider-result-editor" class="detection" hidden>
       <h3>Provider result</h3>
@@ -1674,15 +1948,6 @@ def _target_page(
       </div>
     </section>
     <section id="provider-result-preview-panel" class="preview-panel" hidden><h2>Provider result preview</h2><div id="provider-result-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-provider-result" disabled>Apply provider result action</button></section>
-    <section id="catalog-association-editor" class="detection" hidden>
-      <h3>Source association</h3>
-      <p id="catalog-association-context" class="muted"></p>
-      <div class="drawer-actions">
-        <button type="button" class="preview-catalog-association" data-action="accept">Accept for this target</button>
-        <button type="button" class="preview-catalog-association" data-action="reject">Reject for this target</button>
-      </div>
-    </section>
-    <section id="catalog-association-preview-panel" class="preview-panel" hidden><h2>Source association preview</h2><div id="catalog-association-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-catalog-association" disabled>Apply source association</button></section>
     <div class="preview-grid">
       <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
       <section class="preview-panel"><h2>Fit include/exclude preview</h2><p class="muted">Fit inclusion is independent of component ownership. Changes apply by origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band action, then preview.</div><button id="apply-eligibility" disabled>Apply include/exclude changes</button></section>
@@ -1704,6 +1969,21 @@ def _target_page(
     <section class="decision-meta"><label>Actor <input id="relatives-actor" value="{_e(default_actor)}"></label><label>Reason <input id="relatives-reason" placeholder="Preview suggests a reason"></label></section>
     <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
     <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
+  </dialog>
+  <dialog id="nearby-import-dialog" class="nearby-import-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Import nearby SIMBAD objects</h2><code>{_e(requested_target_label)}</code></div><button value="cancel" aria-label="Close nearby import dialog">×</button></form>
+    <p>Search around the target position, select new objects, then import them with configured provider coverage. Angular proximity alone does not create a system relationship or sample membership.</p>
+    <div class="nearby-search-controls">
+      <label>Radius <span><input id="nearby-import-radius" type="number" min="1" max="600" step="1" value="60"> arcsec</span></label>
+      <button id="search-nearby-import" type="button">Search SIMBAD</button>
+    </div>
+    <div id="nearby-import-search-status" class="change-summary muted">Search to list nearby SIMBAD objects.</div>
+    <div id="nearby-import-results" class="nearby-import-results" hidden>
+      <table><thead><tr><th>Import</th><th>SIMBAD ID</th><th>Type</th><th>Spectral type</th><th>d</th><th>SDB status</th></tr></thead><tbody id="nearby-import-rows"></tbody></table>
+    </div>
+    <div class="dialog-actions"><button id="apply-nearby-import" type="button" disabled>Import selected</button></div>
+    <div id="nearby-import-summary" class="change-summary muted"></div>
+    <div id="nearby-import-target-links" class="import-target-links"></div>
   </dialog>
   <dialog id="catalog-coverage-dialog">
     <form method="dialog" class="dialog-header"><div><h2>Catalog coverage</h2><code>{_e(requested_target_label)}</code></div><button value="cancel" aria-label="Close catalog coverage dialog">×</button></form>
@@ -1765,8 +2045,10 @@ def _display_number(value: object) -> str:
 
 
 _CSS = """
-body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.assignment-default{background:#edf8f1;border-left:4px solid #3b8b5d;padding:9px}.attribution-exception{margin:10px 0}.attribution-exception summary{color:#475569;cursor:pointer}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:18px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{overflow:hidden;text-overflow:ellipsis}.header-actions{display:flex;gap:8px;align-items:center;margin-left:auto}.live-header button{white-space:nowrap}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header button.needs-decision,.live-header button.needs-attention{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
+body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.assignment-default{background:#edf8f1;border-left:4px solid #3b8b5d;padding:9px}.attribution-exception{margin:10px 0}.attribution-exception summary{color:#475569;cursor:pointer}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:12px;align-items:center;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{min-width:0;overflow:hidden;text-overflow:ellipsis}.header-actions{display:flex;flex-shrink:0;gap:4px;align-items:center;margin-left:auto}.live-header button,.external-resource{white-space:nowrap}.live-header button{padding:6px 9px}.external-resource{display:inline-block;padding:4px 6px;border:1px solid #b7c1cf;border-radius:4px;background:#fff;color:#172033;text-decoration:none;font-size:12px}.external-resource:hover{border-color:#6b8fc7;background:#f1f5f9}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header button.needs-decision,.live-header button.needs-attention{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
 .live-review{--drawer-width:min(420px,38vw)}.band-row .eligibility-state{grid-column:1}.band-row .eligibility-toggle{grid-column:2;grid-row:1/3;align-self:center;min-width:124px}.band-row .eligibility-state.pending{color:#9a5b00;font-weight:600}.combined-system-control{display:grid;gap:8px;margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #dce3ec;border-radius:6px}.scope-target-field[hidden],.preview-grid[hidden]{display:none}.scope-target-field select{box-sizing:border-box;width:100%;margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.preview-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;margin-top:12px}.preview-grid .preview-panel{margin-top:0}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
+.nearby-import-dialog{width:min(900px,94vw)}.nearby-search-controls{display:flex;gap:12px;align-items:end;margin:12px 0}.nearby-search-controls label{display:grid;gap:4px}.nearby-search-controls input{width:90px}.nearby-import-results{max-height:46vh;overflow:auto;border:1px solid #dce3ec;border-radius:7px;margin:10px 0 12px}.nearby-import-results th{position:sticky;top:0;background:#f8fafc;z-index:1}.nearby-import-results td:first-child,.nearby-import-results th:first-child{text-align:center;width:55px}.nearby-import-results td:nth-last-child(2){white-space:nowrap}.import-target-links{display:flex;gap:8px;flex-wrap:wrap}.import-target-links a{display:inline-block;padding:6px 9px;background:white;border:1px solid #b7c1cf;border-radius:5px;text-decoration:none}
+@media(max-width:1400px){.live-header{gap:8px}.live-header>span:first-child{flex-shrink:0}.live-header>.muted{display:none}.live-header>strong{max-width:240px;overflow:hidden;text-overflow:ellipsis}.queue-navigation>span:nth-child(2){display:none}.external-resource{padding:3px 4px;font-size:11px}.live-header button{padding:5px 6px;font-size:12px}}
 """
 
 
@@ -1780,6 +2062,13 @@ let currentProviderPreview=null;
 let currentCatalogAssociationPayload=null;
 let currentCatalogAssociationPreview=null;
 const drawer=document.getElementById('assignment-drawer');
+const skyReview=document.getElementById('sky-review');
+let reviewDrawerVisible=false;
+try{
+  reviewDrawerVisible=sessionStorage.getItem('sdb-review-tools-visible')==='true';
+}catch(error){
+  reviewDrawerVisible=false;
+}
 function pointDisplayId(point){return point.source_display_name||point.source_id;}
 function escapeHtml(value){
   return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;')
@@ -1799,9 +2088,29 @@ function pointRunTarget(point){
   if(!point.run_target_sdbid) return '';
   return window.SDB_TARGET_NAMES[point.run_target_sdbid]||point.run_target_sdbid;
 }
-function closeDrawer(){
-  drawer.hidden=true;
-  document.body.classList.remove('drawer-open');
+function postDrawerState(){
+  skyReview.contentWindow?.postMessage(
+    {type:'sdb-review-drawer-state',visible:reviewDrawerVisible},
+    window.location.origin,
+  );
+}
+function syncDrawerVisibility(){
+  drawer.hidden=!reviewDrawerVisible;
+  document.body.classList.toggle('drawer-open',reviewDrawerVisible);
+}
+function setDrawerVisibility(visible){
+  reviewDrawerVisible=Boolean(visible);
+  try{
+    sessionStorage.setItem(
+      'sdb-review-tools-visible',String(reviewDrawerVisible),
+    );
+  }catch(error){
+    // The toggle still works when browser storage is unavailable.
+  }
+  syncDrawerVisibility();
+  postDrawerState();
+}
+function clearDrawerSelection(){
   currentPayload=null;
   currentPreview=null;
   currentEligibilityPayload=null;
@@ -1815,10 +2124,23 @@ function closeDrawer(){
   document.getElementById('apply-provider-result').disabled=true;
   document.getElementById('apply-catalog-association').disabled=true;
   document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
+  document.getElementById('detection-editors').hidden=true;
+  document.querySelector('.preview-grid').hidden=true;
+  document.getElementById('provider-result-editor').hidden=true;
+  document.getElementById('provider-result-preview-panel').hidden=true;
+  document.getElementById('catalog-association-editor').hidden=true;
+  document.getElementById('catalog-association-preview-panel').hidden=true;
+  document.getElementById('drawer-title').textContent='Review tools';
+  document.getElementById('selected-source').textContent='';
+  document.getElementById('assignment-prompt').textContent='Select a plotted catalog source to review it.';
+}
+function closeDrawer(){
+  clearDrawerSelection();
+  setDrawerVisibility(false);
 }
 function showDetection(point,detectionId){
   const section=document.querySelector(`.detection[data-detection="${detectionId}"]`);
-  if(!section){closeDrawer();return;}
+  if(!section){clearDrawerSelection();return;}
   document.querySelectorAll('.detection').forEach(value=>value.classList.toggle('active',value===section));
   document.getElementById('detection-editors').hidden=false;
   document.querySelector('.preview-grid').hidden=false;
@@ -1844,8 +2166,6 @@ function showDetection(point,detectionId){
   currentProviderPreview=null;
   currentCatalogAssociationPayload=null;
   currentCatalogAssociationPreview=null;
-  drawer.hidden=false;
-  document.body.classList.add('drawer-open');
 }
 function showProviderReview(point){
   document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
@@ -1874,8 +2194,6 @@ function showProviderReview(point){
   document.getElementById('apply-provider-result').disabled=true;
   currentProviderPayload=null;
   currentProviderPreview=null;
-  drawer.hidden=false;
-  document.body.classList.add('drawer-open');
 }
 function showCatalogAssociation(point,detectionId){
   document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
@@ -1910,18 +2228,25 @@ function showCatalogAssociation(point,detectionId){
   document.getElementById('apply-catalog-association').disabled=true;
   currentCatalogAssociationPayload=null;
   currentCatalogAssociationPreview=null;
-  drawer.hidden=false;
-  document.body.classList.add('drawer-open');
 }
 window.addEventListener('message',event=>{
   if(event.origin!==window.location.origin) return;
+  if(event.source!==skyReview.contentWindow) return;
+  if(event.data?.type==='sdb-review-drawer-ready'){
+    postDrawerState();
+    return;
+  }
+  if(event.data?.type==='sdb-review-drawer-toggle'){
+    setDrawerVisibility(event.data.visible);
+    return;
+  }
   if(event.data?.type==='sdb-review-relatives'){
     openRelativesDialog();
     return;
   }
   if(event.data?.type!=='sdb-review-selection') return;
   const point=event.data.point;
-  if(!point){closeDrawer();return;}
+  if(!point){clearDrawerSelection();return;}
   const detectionId=point.raw_row_id==null?null:window.SDB_RAW_ROW_DETECTIONS[String(point.raw_row_id)];
   if(point.kind==='catalog_association'){
     showCatalogAssociation(point,detectionId);
@@ -1931,10 +2256,12 @@ window.addEventListener('message',event=>{
     showProviderReview(point);
     return;
   }
-  if(detectionId==null){closeDrawer();return;}
+  if(detectionId==null){clearDrawerSelection();return;}
   showDetection(point,detectionId);
 });
 document.getElementById('close-drawer').addEventListener('click',closeDrawer);
+clearDrawerSelection();
+syncDrawerVisibility();
 function payloadFor(section){
   const combinedSystem=section.querySelector('.composite-scope');
   const scopeTarget=section.querySelector('.scope-target');
@@ -2238,6 +2565,113 @@ document.getElementById('apply-relatives').addEventListener('click',async()=>{
     setTimeout(()=>location.reload(),1000);
   }catch(error){renderRequestError(document.getElementById('relatives-preview'),error);button.disabled=false;}
   finally{button.textContent='Import and reconcile stellar relatives';}
+});
+const nearbyImportDialog=document.getElementById('nearby-import-dialog');
+let nearbyImportSearch=null;
+function updateNearbyImportButton(){
+  document.getElementById('apply-nearby-import').disabled=
+    document.querySelectorAll('#nearby-import-rows input:checked').length===0;
+}
+function renderNearbyImportRows(value){
+  const body=document.getElementById('nearby-import-rows');
+  body.innerHTML=value.candidates.map(row=>{
+    const params=new URLSearchParams({submit:'submit id',Ident:row.main_id});
+    const simbadUrl=`https://simbad.cds.unistra.fr/simbad/sim-id?${params}`;
+    const objectType=row.object_type_description||row.object_type_label||
+      row.primary_object_type||
+      (row.object_types||[]).join(', ')||'—';
+    let status='New';
+    if(row.current_target){
+      status='Current target';
+    }else if(row.existing_sdbid){
+      status=`<a href="/target/${encodeURIComponent(row.existing_sdbid)}">${escapeHtml(row.existing_sdbid)}</a>`;
+    }else if(row.blocked_reason){
+      status=`Context only · ${escapeHtml(row.blocked_reason)}`;
+    }
+    const selection=row.selectable
+      ? `<input type="checkbox" value="${escapeHtml(row.main_id)}" aria-label="Import ${escapeHtml(row.main_id)}">`
+      : '—';
+    return `<tr><td>${selection}</td>`+
+      `<td><a href="${escapeHtml(simbadUrl)}" target="_blank" rel="noopener">${escapeHtml(row.main_id)}</a></td>`+
+      `<td>${escapeHtml(objectType)}</td>`+
+      `<td>${escapeHtml(row.spectral_type||'—')}</td>`+
+      `<td>${Number(row.separation_arcsec).toFixed(2)}″</td>`+
+      `<td>${status}</td></tr>`;
+  }).join('');
+  document.getElementById('nearby-import-results').hidden=false;
+  body.querySelectorAll('input').forEach(
+    input=>input.addEventListener('change',updateNearbyImportButton)
+  );
+  updateNearbyImportButton();
+}
+async function searchNearbyImport(){
+  const radius=Number(document.getElementById('nearby-import-radius').value);
+  const status=document.getElementById('nearby-import-search-status');
+  const button=document.getElementById('search-nearby-import');
+  if(!Number.isFinite(radius)||radius<=0||radius>600){
+    alert('Radius must be between 1 and 600 arcsec.');
+    return;
+  }
+  button.disabled=true;
+  button.textContent='Searching…';
+  document.getElementById('apply-nearby-import').disabled=true;
+  document.getElementById('nearby-import-results').hidden=true;
+  document.getElementById('nearby-import-summary').textContent='';
+  document.getElementById('nearby-import-target-links').innerHTML='';
+  status.classList.add('muted');
+  status.textContent='Searching SIMBAD around the target position…';
+  try{
+    nearbyImportSearch=await request('/api/nearby-import/search',{
+      target:window.SDB_TARGET,
+      radius_arcsec:radius,
+    });
+    renderNearbyImportRows(nearbyImportSearch);
+    status.textContent=`${nearbyImportSearch.candidates.length} object(s), ${nearbyImportSearch.new_count} available to import, ${nearbyImportSearch.blocked_count} context only; sorted by distance.`;
+  }catch(error){
+    nearbyImportSearch=null;
+    renderRequestError(status,error);
+  }finally{
+    button.disabled=false;
+    button.textContent='Search SIMBAD';
+  }
+}
+document.getElementById('nearby-import').addEventListener('click',()=>{
+  if(!nearbyImportDialog.open)nearbyImportDialog.showModal();
+  if(!nearbyImportSearch)searchNearbyImport();
+});
+document.getElementById('search-nearby-import').addEventListener('click',searchNearbyImport);
+document.getElementById('apply-nearby-import').addEventListener('click',async()=>{
+  const selected=[
+    ...document.querySelectorAll('#nearby-import-rows input:checked')
+  ].map(input=>input.value);
+  if(!selected.length)return;
+  if(!confirm(`Import ${selected.length} selected SIMBAD object(s) and fill provider coverage?`))return;
+  const button=document.getElementById('apply-nearby-import');
+  const summary=document.getElementById('nearby-import-summary');
+  button.disabled=true;
+  button.textContent='Importing and updating…';
+  try{
+    const value=await request('/api/nearby-import/apply',{
+      target:window.SDB_TARGET,
+      main_ids:selected,
+    });
+    renderHumanSummary(summary,value);
+    const links=value.items.filter(item=>item.sdbid).map(item=>
+      `<a href="/target/${encodeURIComponent(item.sdbid)}">Open ${escapeHtml(item.requested_name)}</a>`
+    );
+    document.getElementById('nearby-import-target-links').innerHTML=links.join('');
+    for(const input of document.querySelectorAll('#nearby-import-rows input:checked')){
+      input.checked=false;
+      input.disabled=true;
+      input.closest('tr').lastElementChild.textContent='Imported';
+    }
+  }catch(error){
+    renderRequestError(summary,error);
+    button.disabled=false;
+  }finally{
+    button.textContent='Import selected';
+    updateNearbyImportButton();
+  }
 });
 const catalogCoverageDialog=document.getElementById('catalog-coverage-dialog');
 let catalogCoveragePreview=null;

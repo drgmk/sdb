@@ -12,6 +12,7 @@ from sdb_identity.database import make_session_factory
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateSummary
+from tests.fakes import FakeGaia, FakeSimbad, astrometry, simbad_result
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.test_metadata import FakeMetadataProvider, snapshot
 
@@ -114,6 +115,67 @@ def test_cli_unresolved_name_returns_error(tmp_path, capsys):
     capsys.readouterr()
     assert main(["--database", str(database), "--offline", "add", "Unknown source"]) == 2
     assert "could not be resolved" in capsys.readouterr().err
+
+
+def test_cli_add_ensure_uses_configured_providers(
+    tmp_path, capsys, monkeypatch,
+):
+    database = tmp_path / "cli.sqlite"
+    reference = tmp_path / "reference.sqlite"
+    config = tmp_path / "sdb.toml"
+    config.write_text(
+        "[catalog]\n"
+        'providers = ["gaia_dr3", "2mass"]\n'
+    )
+    main(["--database", str(database), "init"])
+    capsys.readouterr()
+    calls = []
+
+    class FakeUpdateService:
+        def update_targets(self, targets, *, providers, force):
+            calls.append((tuple(targets), tuple(providers), force))
+            return UpdateSummary(
+                target_count=len(tuple(targets)),
+                refreshed=0,
+                skipped=0,
+                missing=0,
+                failed=0,
+                items=(),
+            )
+
+    monkeypatch.setattr(
+        "sdb_identity.live_providers.AstroquerySimbad",
+        lambda: FakeSimbad({
+            "HD 1": simbad_result(
+                "HD   1",
+                astrometry(10.0, -20.0, source="simbad"),
+            ),
+        }),
+    )
+    monkeypatch.setattr(
+        "sdb_identity.live_providers.AstroqueryGaia",
+        FakeGaia,
+    )
+    monkeypatch.setattr(
+        "sdb_identity.cli._update_service",
+        lambda *args, **kwargs: FakeUpdateService(),
+    )
+
+    assert main([
+        "--config", str(config),
+        "--database", str(database),
+        "--reference-database", str(reference),
+        "add", "HD 1", "--ensure",
+    ]) == 0
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["created_count"] == 1
+    assert result["providers"] == ["simbad", "gaia_dr3", "2mass"]
+    assert calls == [(
+        (result["items"][0]["sdbid"],),
+        ("simbad", "gaia_dr3", "2mass"),
+        False,
+    )]
 
 
 def test_cli_catalog_status_and_export(tmp_path, capsys):

@@ -46,6 +46,12 @@ class TwoMassAdapter(VizierConeAdapter):
         (1, "H", BandDefinition("2MH", "Hmag", "e_Hmag", 0.01)),
         (2, "KS", BandDefinition("2MKS", "Kmag", "e_Kmag", 0.01)),
     )
+    # Read-mode variants (2MR1*/2MR2*) share these passbands.
+    band_wavelengths_micron = (
+        ("2MJ", 1.2376),
+        ("2MH", 1.6476),
+        ("2MKS", 2.1621),
+    )
     # Provider columns exposed directly to match review.
     review_fields = (
         ReviewField(

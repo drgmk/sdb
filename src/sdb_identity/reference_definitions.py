@@ -11,6 +11,7 @@ from .service import normalize_identifier
 from .serialization import row_float, row_payload, row_text
 from .ubv_components import ubv_component_identifiers
 from .tdsc_components import tdsc_component_identifiers
+from .v70a_components import v70a_component_identifiers
 
 
 GASPAR_CATALOG = "J/ApJ/768/25"
@@ -83,6 +84,7 @@ class SnapshotCatalogDefinition:
     query_epoch: float = 2000.0
     radius_arcsec: float = 5.0
     bibliography: str = ""
+    band_wavelengths_micron: tuple[tuple[str, float], ...] = ()
     match_tables: tuple[str, ...] = ()
     relationships: tuple[RelationshipDefinition, ...] = ()
     identifier_audit: IdentifierAuditPolicy | None = None
@@ -114,6 +116,8 @@ class SnapshotCatalogDefinition:
 
     def identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
         result = self._base_identifiers(payload)
+        if self.adapter == "v70a":
+            return v70a_component_identifiers(result, payload)
         if self.adapter == "ubvmeans":
             return ubv_component_identifiers(result, payload)
         if self.adapter == "tdsc":
@@ -207,6 +211,7 @@ GASPAR_DEFINITION = SnapshotCatalogDefinition(
     ra_column="_RA",
     dec_column="_DE",
     bibliography=GASPAR_BIBCODE,
+    band_wavelengths_micron=(("MIPS70", 71.4193),),
     relationships=(RelationshipDefinition(
         GASPAR_MAIN_TABLE,
         "r_Age",
@@ -248,6 +253,12 @@ IRAS_PSC_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=1983.5,
     radius_arcsec=60.0,
     bibliography=IRAS_PSC_BIBCODE,
+    band_wavelengths_micron=(
+        ("IRAS12", 11.2248),
+        ("IRAS25", 23.3438),
+        ("IRAS60", 59.3524),
+        ("IRAS100", 100.3468),
+    ),
     identifier_audit=IdentifierAuditPolicy(
         simbad_patterns=(r"^IRAS\s+\d",),
         description="SIMBAD IRAS identifiers without the FSC F prefix",
@@ -269,6 +280,12 @@ IRAS_FSC_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=1983.5,
     radius_arcsec=60.0,
     bibliography=IRAS_FSC_BIBCODE,
+    band_wavelengths_micron=(
+        ("IRAS12", 11.2248),
+        ("IRAS25", 23.3438),
+        ("IRAS60", 59.3524),
+        ("IRAS100", 100.3468),
+    ),
     identifier_audit=IdentifierAuditPolicy(
         simbad_patterns=(r"^IRAS\s+F",),
         description="SIMBAD IRAS Faint Source Catalog identifiers",
@@ -288,6 +305,7 @@ HIP2_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=1991.25,
     radius_arcsec=2.0,
     bibliography=HIP2_BIBCODE,
+    band_wavelengths_micron=(("HP", 0.5420),),
 )
 
 TDSC_DEFINITION = SnapshotCatalogDefinition(
@@ -307,6 +325,7 @@ TDSC_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=2000.0,
     radius_arcsec=2.0,
     bibliography=TDSC_BIBCODE,
+    band_wavelengths_micron=(("BT", 0.4203), ("VT", 0.5317)),
 )
 
 UBVMEANS_DEFINITION = SnapshotCatalogDefinition(
@@ -321,6 +340,13 @@ UBVMEANS_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=2000.0,
     radius_arcsec=2.0,
     bibliography=UBVMEANS_BIBCODE,
+    # Colour indices are placed at the shortest contributing passband so
+    # catalogue rows retain the natural U-to-V ordering in review.
+    band_wavelengths_micron=(
+        ("UJ_BJ", 0.36),
+        ("BJ_VJ", 0.44),
+        ("VJ", 0.5498),
+    ),
 )
 
 PAUNZEN15_DEFINITION = SnapshotCatalogDefinition(
@@ -336,6 +362,13 @@ PAUNZEN15_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=2000.0,
     radius_arcsec=2.0,
     bibliography=PAUNZEN15_BIBCODE,
+    # Stroemgren indices span several filters; use the shortest contributing
+    # passband as their review-order wavelength.
+    band_wavelengths_micron=(
+        ("STROMC1", 0.35),
+        ("STROMM1", 0.41),
+        ("BS_YS", 0.467),
+    ),
 )
 
 KOEN10_DEFINITION = SnapshotCatalogDefinition(
@@ -350,6 +383,13 @@ KOEN10_DEFINITION = SnapshotCatalogDefinition(
     query_epoch=2000.0,
     radius_arcsec=2.0,
     bibliography=KOEN10_BIBCODE,
+    band_wavelengths_micron=(
+        ("UJ_BJ", 0.36),
+        ("BJ_VJ", 0.44),
+        ("VJ", 0.5498),
+        ("VJ_RC", 0.5498),
+        ("VJ_IC", 0.5498),
+    ),
 )
 
 SNAPSHOT_CATALOGS = {

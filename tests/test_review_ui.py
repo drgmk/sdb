@@ -15,6 +15,7 @@ from sdb_identity.models import (
     CatalogDetection,
     CatalogMatchOverride,
     CatalogTargetAssociationAction,
+    ExternalIdentifier,
     MeasurementTargetAssociation,
     MetadataRun,
     NormalizedMeasurement,
@@ -22,11 +23,11 @@ from sdb_identity.models import (
     RawCatalogRow,
     SimbadMetadata,
 )
-from sdb_identity.providers import ProviderError
+from sdb_identity.providers import ProviderError, SimbadNeighbour
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui
 from sdb_identity.samples import SampleService
-from sdb_identity.service import AddRequest, IdentityService
+from sdb_identity.service import AddRequest, IdentityService, normalize_identifier
 from sdb_identity.update import UpdateItem, UpdateSummary
 from tests.fakes import FakeSimbad, astrometry, simbad_result
 from tests.test_review_actions import _wise_measurements
@@ -63,6 +64,13 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
                 ra_deg=10,
                 dec_deg=-20,
             ))
+            if index == 1:
+                session.add(ExternalIdentifier(
+                    target_id=target.target_id,
+                    value=main_id,
+                    normalized_value=normalize_identifier(main_id),
+                    source="simbad_metadata",
+                ))
         session.commit()
     measurements = _wise_measurements(session_factory, system)
     for measurement in measurements:
@@ -85,6 +93,12 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     queue = client.get("/")
     assert queue.status_code == 200
     assert system.sdbid in queue.text
+    assert "<th>SIMBAD name</th><th>SDB ID</th>" in queue.text
+    assert "<th>providers</th>" in queue.text
+    assert "<th>providers/bands</th>" not in queue.text
+    assert ">HD TEST AB</a>" in queue.text
+    assert f"<code>{system.sdbid}</code></a></td>" in queue.text
+    assert "allwise: WISE3P4" not in queue.text
 
     workspace = client.get(f"/target/{system.sdbid}")
     assert workspace.status_code == 200
@@ -99,11 +113,30 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert "sdb-review-selection" in workspace.text
     assert "Decide target role" not in workspace.text
     assert "Change target role" in workspace.text
+    assert workspace.text.count("class='external-resource'") == 7
+    assert workspace.text.index("class='external-resource'") < workspace.text.index(
+        'id="catalog-coverage"'
+    )
+    assert (
+        "https://simbad.cds.unistra.fr/simbad/sim-id?"
+        "submit=submit+id&amp;Ident=HD+TEST+AB"
+        in workspace.text
+    )
+    assert "https://cdsportal.u-strasbg.fr/?target=10.0+-20.0" in workspace.text
+    assert "cassis.sirtf.com/atlas/cgi/radec.py?ra=10.0" in workspace.text
+    assert "locstr=10.0%2C-20.0" in workspace.text
+    assert "WorldPt=10.0%3B-20.0%3BEQ_J2000" in workspace.text
+    assert "searchQuery=10.0%2C-20.0" in workspace.text
+    assert "hips=AllWISE+color" in workspace.text
     assert "Physical / fitted model" in workspace.text
     assert "Composite / measurement scope" in workspace.text
     assert ".drawer-open .live-workspace iframe" in workspace.text
-    assert "document.body.classList.add('drawer-open')" in workspace.text
-    assert "document.body.classList.remove('drawer-open')" in workspace.text
+    assert "document.body.classList.toggle('drawer-open',reviewDrawerVisible)" in workspace.text
+    assert "drawer.hidden=!reviewDrawerVisible" in workspace.text
+    assert "drawer.hidden=false" not in workspace.text
+    assert "sdb-review-drawer-toggle" in workspace.text
+    assert "sdb-review-drawer-state" in workspace.text
+    assert "sessionStorage.getItem('sdb-review-tools-visible')" in workspace.text
     assert 'id="relatives-dialog"' in workspace.text
     assert "renderHumanSummary" in workspace.text
     assert "/api/relatives/preview" in workspace.text
@@ -127,13 +160,25 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert "<code>HD TEST B</code> (physical)" in workspace.text
     assert 'id="catalog-coverage-dialog"' in workspace.text
     assert "/api/catalog-coverage/preview" in workspace.text
+    assert 'id="nearby-import-dialog"' in workspace.text
+    assert "/api/nearby-import/search" in workspace.text
+    assert "/api/nearby-import/apply" in workspace.text
 
-    sky = client.get(f"/target/{system.sdbid}/sky")
+    sky = client.get(f"/target/{system.sdbid}/sky?radius=42")
     assert sky.status_code == 200
     assert '<body class="embedded">' in sky.text
+    assert '"radius_arcsec": 42.0' in sky.text
+    assert 'id="system-context-radius-form"' in sky.text
+    assert 'id="system-context-radius"' in sky.text
+    assert 'url.searchParams.set("radius", String(radius))' in sky.text
     assert "window.parent.postMessage" in sky.text
     assert "Plotly.newPlot" in sky.text
     assert "sdb-review-relatives" in sky.text
+    assert 'id="toggle-review-drawer"' in sky.text
+    assert "Show review tools" in sky.text
+    assert "sdb-review-drawer-ready" in sky.text
+    assert "sdb-review-drawer-toggle" in sky.text
+    assert "sdb-review-drawer-state" in sky.text
 
     payload = {
         "detection_id": measurements[0].detection_id,
@@ -281,6 +326,29 @@ def test_review_ui_applies_catalog_target_association_without_provider_query(
         assert action.action == "accept"
 
 
+def test_review_ui_places_source_association_before_photometry_controls(
+    session_factory, monkeypatch,
+):
+    monkeypatch.setenv("SDB_ACTOR", "browser reviewer")
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=0.0)
+    )
+    CatalogService(session_factory, {
+        "2mass": FakeCatalog([
+            candidate("source", ra=10.0, dec=0.0),
+        ]),
+    }).refresh(target.sdbid, "2mass")
+
+    workspace = TestClient(
+        create_review_app(session_factory)
+    ).get(f"/target/{target.sdbid}")
+
+    assert workspace.status_code == 200
+    assert workspace.text.index(
+        'id="catalog-association-editor"'
+    ) < workspace.text.index('id="detection-editors"')
+
+
 def test_review_ui_assignment_drawer_uses_snapshot_catalog_display_id(
     session_factory,
 ):
@@ -382,6 +450,112 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
     assert workspace.status_code == 200
     assert "<code>HD 1 AB</code>" in workspace.text
     assert "<code>HD 1B</code> (physical)" in workspace.text
+
+
+def test_review_ui_searches_and_imports_selected_nearby_simbad_objects(
+    session_factory,
+):
+    simbad = FakeSimbad(
+        resolutions={
+            "HD 1": simbad_result(
+                "HD   1",
+                astrometry(10.0, -20.0, source="simbad"),
+            ),
+            "HD   1B": simbad_result(
+                "HD   1B",
+                astrometry(10.001, -20.0, source="simbad"),
+            ),
+        },
+        neighbours=[
+            SimbadNeighbour(
+                1,
+                "HD   1",
+                astrometry(10.0, -20.0, source="simbad"),
+                0.0,
+                primary_object_type="Star",
+                object_type_label="Star",
+            ),
+            SimbadNeighbour(
+                2,
+                "HD   1B",
+                astrometry(10.001, -20.0, source="simbad"),
+                3.38,
+                primary_object_type="Star",
+                object_type_label="Star",
+                spectral_type="M3V",
+            ),
+            SimbadNeighbour(
+                3,
+                "HD   1b",
+                astrometry(10.0, -20.0, source="simbad"),
+                0.0,
+                primary_object_type="Planet",
+                object_type_label="Planet",
+                object_types=("Planet",),
+            ),
+        ],
+    )
+    identity = IdentityService(session_factory, simbad=simbad)
+    root = identity.add(AddRequest(name="HD 1"))
+    update_calls = []
+
+    class FakeUpdateService:
+        def update_targets(self, targets, *, providers, force):
+            update_calls.append((tuple(targets), tuple(providers), force))
+            return UpdateSummary(
+                target_count=len(tuple(targets)),
+                refreshed=0,
+                skipped=0,
+                missing=0,
+                failed=0,
+                items=(),
+            )
+
+    client = TestClient(create_review_app(
+        session_factory,
+        identity_service_factory=lambda: identity,
+        catalog_coverage_providers=("gaia_dr3", "2mass"),
+        catalog_update_factory=FakeUpdateService,
+    ))
+
+    workspace = client.get(f"/target/{root.sdbid}")
+    assert workspace.status_code == 200
+    assert '<button id="nearby-import" type="button"' in workspace.text
+    assert "Import nearby SIMBAD objects" in workspace.text
+
+    searched = client.post("/api/nearby-import/search", json={
+        "target": root.sdbid,
+        "radius_arcsec": 60,
+    })
+    assert searched.status_code == 200
+    search = searched.json()
+    assert search["new_count"] == 1
+    assert search["blocked_count"] == 1
+    assert search["candidates"][0]["current_target"] is True
+    assert search["candidates"][0]["selectable"] is False
+    assert search["candidates"][1]["main_id"] == "HD   1b"
+    assert search["candidates"][1]["blocked_reason"] == "planet"
+    assert search["candidates"][1]["selectable"] is False
+    assert search["candidates"][2]["main_id"] == "HD   1B"
+    assert search["candidates"][2]["selectable"] is True
+
+    applied = client.post("/api/nearby-import/apply", json={
+        "target": root.sdbid,
+        "main_ids": ["HD   1B"],
+    })
+    assert applied.status_code == 200
+    value = applied.json()
+    assert value["created_count"] == 1
+    assert value["failed_count"] == 0
+    assert value["items"][0]["requested_name"] == "HD   1B"
+    assert value["human_summary"]["title"].startswith(
+        "Nearby import finished"
+    )
+    assert update_calls == [(
+        (value["items"][0]["sdbid"],),
+        ("simbad", "gaia_dr3", "2mass"),
+        False,
+    )]
 
 
 def test_review_ui_previews_catalog_accept_no_match_and_retry(session_factory):

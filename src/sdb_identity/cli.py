@@ -112,6 +112,22 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--ra", type=float)
     add.add_argument("--dec", type=float)
     add.add_argument("--epoch", type=float, default=2000.0)
+    add.add_argument(
+        "--ensure",
+        action="store_true",
+        help=(
+            "after adding a named SIMBAD target, fill missing configured "
+            "provider coverage and refresh WDS/CCDM target matches"
+        ),
+    )
+    add.add_argument(
+        "--providers",
+        default="",
+        help=(
+            "comma-separated --ensure provider override; defaults to SIMBAD "
+            "plus [catalog] providers, or use all"
+        ),
+    )
     status = _add_parser(commands, "status", "Show the identity and provider state for one target.", "TARGET may be an sdbid or known identifier. The report is intended for quick inspection before refreshing catalogs, reviewing matches, or exporting photometry.")
     status.add_argument("target")
     history = _add_parser(commands, "history", "Show operator decisions for one target system.", "Builds a normalized timeline on demand from the domain-specific action tables. By default it includes every imported member of the target's systems.")
@@ -1862,6 +1878,63 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
     if args.command == "add":
+        if args.ensure:
+            try:
+                if args.offline:
+                    raise ValueError("--ensure is unavailable in offline mode")
+                if args.name is None or args.ra is not None or args.dec is not None:
+                    raise ValueError(
+                        "--ensure requires one target name without --ra/--dec"
+                    )
+                from .live_providers import AstroqueryGaia, AstroquerySimbad
+                from .target_import import TargetImportService
+                from .update import DEFAULT_PROVIDERS
+
+                configured = tuple(
+                    value.strip()
+                    for value in args.providers.split(",")
+                    if value.strip()
+                )
+                if configured == ("all",):
+                    providers = DEFAULT_PROVIDERS
+                elif "all" in configured:
+                    raise ValueError("--providers may use all only by itself")
+                elif configured:
+                    providers = configured
+                else:
+                    providers = (
+                        "simbad",
+                        *args.sdb_config.catalog_providers(
+                            DEFAULT_PROVIDERS[1:]
+                        ),
+                    )
+                with _provider_output_to_stderr():
+                    result = TargetImportService(
+                        sessions,
+                        identity_service=IdentityService(
+                            sessions,
+                            simbad=AstroquerySimbad(),
+                            gaia=AstroqueryGaia(),
+                        ),
+                        update_service=_update_service(
+                            sessions,
+                            args.reference_database,
+                            reporter=reporter,
+                        ),
+                    ).import_many(
+                        [args.name],
+                        providers=providers,
+                        command=" ".join(sys.argv),
+                    )
+            except (ValueError, UnresolvedTarget, RuntimeError) as error:
+                print(str(error), file=sys.stderr)
+                return 2
+            print(_format_json(args, result.as_dict(), sort_keys=True))
+            update_failed = (
+                result.update_summary is not None
+                and result.update_summary.failed > 0
+            )
+            return 1 if result.failed_count or update_failed else 0
         try:
             with _provider_output_to_stderr():
                 if args.offline:

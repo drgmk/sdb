@@ -12,7 +12,10 @@ from typing import TypedDict
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters import catalog_source_display_name
+from .adapters import (
+    catalog_band_wavelength_micron,
+    catalog_source_display_name,
+)
 from .assignment_proposals import (
     effective_target_role,
     measurement_assignment_proposals,
@@ -48,6 +51,7 @@ class AssignmentMatrixCell(TypedDict):
 
 class AssignmentMatrixBand(TypedDict):
     band: str
+    wavelength_micron: float | None
     measurement_ids: list[object]
     stored_measurement_count: int
     value: object
@@ -71,6 +75,7 @@ class AssignmentMatrixRow(TypedDict):
     source_display_name: str
     provenance: list[dict[str, object]]
     band: str
+    wavelength_micron: float | None
     band_count: int
     bands: list[AssignmentMatrixBand]
     value: object
@@ -404,8 +409,24 @@ def measurement_assignment_matrix(
         for proposal in group:
             band_groups.setdefault(str(proposal["band"]), []).append(proposal)
 
+        def band_order(
+            item: tuple[str, list[dict[str, object]]],
+        ) -> tuple[bool, float, str]:
+            band = item[0]
+            wavelength = catalog_band_wavelength_micron(provider, band)
+            return (
+                wavelength is None,
+                float("inf") if wavelength is None else wavelength,
+                band,
+            )
+
+        ordered_band_groups = sorted(
+            band_groups.items(),
+            key=band_order,
+        )
+
         bands: list[AssignmentMatrixBand] = []
-        for band, band_group in sorted(band_groups.items()):
+        for band, band_group in ordered_band_groups:
             first_band = band_group[0]
             values = {
                 (
@@ -418,6 +439,9 @@ def measurement_assignment_matrix(
             duplicate_conflict = group_has_duplicate_conflict(band_group)
             bands.append({
                 "band": band,
+                "wavelength_micron": catalog_band_wavelength_micron(
+                    provider, band
+                ),
                 "measurement_ids": [
                     proposal["measurement_id"] for proposal in band_group
                 ],
@@ -448,7 +472,7 @@ def measurement_assignment_matrix(
             sdbid = column["sdbid"]
             states = {
                 band: band_cell_state(band_group, column)
-                for band, band_group in sorted(band_groups.items())
+                for band, band_group in ordered_band_groups
             }
             current_signatures = {
                 tuple(state["current_roles"]) for state in states.values()
@@ -557,6 +581,14 @@ def measurement_assignment_matrix(
             ),
             "provenance": list(first.get("provenance") or []),
             "band": bands[0]["band"] if len(bands) == 1 else "multiple",
+            "wavelength_micron": min(
+                (
+                    float(band["wavelength_micron"])
+                    for band in bands
+                    if band["wavelength_micron"] is not None
+                ),
+                default=None,
+            ),
             "band_count": len(bands),
             "bands": bands,
             "value": bands[0]["value"] if len(bands) == 1 else None,
@@ -607,6 +639,15 @@ def measurement_assignment_matrix(
             "mixed_band_assignments": mixed_band_assignments,
             "cells": cells,
         })
+
+    rows.sort(key=lambda row: (
+        row["wavelength_micron"] is None,
+        row["wavelength_micron"]
+        if row["wavelength_micron"] is not None
+        else float("inf"),
+        row["provider"],
+        row["source_display_name"],
+    ))
 
     comparison_counts: dict[str, int] = {}
     for row in rows:

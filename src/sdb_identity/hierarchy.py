@@ -154,6 +154,17 @@ class HierarchyMatchResult:
 
 
 @dataclass(frozen=True)
+class HierarchyTargetMatchResult:
+    provider: str
+    target_count: int
+    record_count: int
+    candidate_count: int
+    created_count: int
+    updated_count: int
+    radius_arcsec: float
+
+
+@dataclass(frozen=True)
 class HierarchyMatchReviewRow:
     candidate_id: int
     provider: str
@@ -660,6 +671,7 @@ class HierarchyService:
         target_reference: str | int,
         *,
         catalog_providers: Iterable[str] | None = None,
+        radius_arcsec: float | None = None,
     ) -> dict[str, object]:
         """Return a read-only, system-level review context for one target.
 
@@ -668,12 +680,20 @@ class HierarchyService:
         such as A/B components, rejected sibling Gaia candidates, and blended
         photometry visible before we decide what should become auditable state.
         """
+        if radius_arcsec is not None:
+            radius_arcsec = float(radius_arcsec)
+            if (
+                not math.isfinite(radius_arcsec)
+                or not 1.0 <= radius_arcsec <= 600.0
+            ):
+                raise ValueError("system context radius must be between 1 and 600 arcsec")
         target_context = self.target_context(target_reference, include_diagnostics=True)
         with self.session_factory() as session:
             target = _find_required_target(session, target_reference)
             system_keys = _target_context_system_keys(target_context)
             component_positions = _system_component_positions(target_context)
-            radius_arcsec = _system_context_radius_arcsec(component_positions)
+            if radius_arcsec is None:
+                radius_arcsec = _system_context_radius_arcsec(component_positions)
             nearby_targets = _nearby_sdb_targets(
                 session,
                 target,
@@ -1441,6 +1461,103 @@ class HierarchyService:
                 source_id=source_id,
                 record_count=len(records),
                 candidate_count=candidate_count,
+                radius_arcsec=radius_arcsec,
+            )
+
+    def match_targets(
+        self,
+        provider: str,
+        target_references: Iterable[str | int],
+        *,
+        radius_arcsec: float = 30.0,
+    ) -> HierarchyTargetMatchResult:
+        """Incrementally add or refresh hierarchy candidates for target(s).
+
+        Unlike ``match_records``, this leaves candidates for unrelated targets
+        untouched. Existing candidate decisions retain their current status.
+        """
+        provider = provider.lower().strip()
+        if provider not in {"wds", "ccdm"}:
+            raise ValueError(f"unsupported hierarchy provider: {provider}")
+        if radius_arcsec <= 0:
+            raise ValueError("radius must be positive")
+        with self.session_factory.begin() as session:
+            targets = []
+            seen_target_ids = set()
+            for reference in target_references:
+                target = _find_required_target(session, reference)
+                if target.id not in seen_target_ids:
+                    targets.append(target)
+                    seen_target_ids.add(target.id)
+            records = tuple(session.scalars(
+                select(HierarchyRecord)
+                .where(HierarchyRecord.provider == provider)
+                .order_by(HierarchyRecord.id)
+            ))
+            if not targets or not records:
+                return HierarchyTargetMatchResult(
+                    provider=provider,
+                    target_count=len(targets),
+                    record_count=len(records),
+                    candidate_count=0,
+                    created_count=0,
+                    updated_count=0,
+                    radius_arcsec=radius_arcsec,
+                )
+            alias_index = _build_alias_index_for_targets(session, targets)
+            target_index = _build_target_index(tuple(targets))
+            components_by_system = _components_by_system(records)
+            existing = {
+                (candidate.record_id, candidate.target_id): candidate
+                for candidate in session.scalars(
+                    select(HierarchyMatchCandidate).where(
+                        HierarchyMatchCandidate.provider == provider,
+                        HierarchyMatchCandidate.target_id.in_(
+                            [target.id for target in targets]
+                        ),
+                    )
+                )
+            }
+            candidate_count = 0
+            created_count = 0
+            updated_count = 0
+            for record in records:
+                candidates = _hierarchy_candidates_for_record(
+                    record,
+                    radius_arcsec,
+                    alias_index,
+                    target_index,
+                    components_by_system=components_by_system,
+                )
+                for target_id, candidate in candidates.items():
+                    candidate_count += 1
+                    row = existing.get((record.id, target_id))
+                    if row is None:
+                        session.add(HierarchyMatchCandidate(
+                            record_id=record.id,
+                            target_id=target_id,
+                            provider=provider,
+                            match_method="+".join(candidate["methods"]),
+                            score=float(candidate["score"]),
+                            separation_arcsec=candidate["separation_arcsec"],
+                            identifier=candidate["identifier"],
+                            reason="; ".join(candidate["reasons"]),
+                        ))
+                        created_count += 1
+                    else:
+                        row.match_method = "+".join(candidate["methods"])
+                        row.score = float(candidate["score"])
+                        row.separation_arcsec = candidate["separation_arcsec"]
+                        row.identifier = candidate["identifier"]
+                        row.reason = "; ".join(candidate["reasons"])
+                        updated_count += 1
+            return HierarchyTargetMatchResult(
+                provider=provider,
+                target_count=len(targets),
+                record_count=len(records),
+                candidate_count=candidate_count,
+                created_count=created_count,
+                updated_count=updated_count,
                 radius_arcsec=radius_arcsec,
             )
 
@@ -3792,6 +3909,27 @@ def _build_alias_index(session: Session) -> dict[str, tuple[tuple[str, Target], 
     )
     for alias, target in rows:
         values.setdefault(alias.normalized_value, []).append((alias.value, target))
+    return {key: tuple(value) for key, value in values.items()}
+
+
+def _build_alias_index_for_targets(
+    session: Session,
+    targets: Iterable[Target],
+) -> dict[str, tuple[tuple[str, Target], ...]]:
+    values: dict[str, list[tuple[str, Target]]] = {}
+    target_by_id = {target.id: target for target in targets}
+    if not target_by_id:
+        return {}
+    rows = session.scalars(
+        select(ExternalIdentifier)
+        .where(ExternalIdentifier.target_id.in_(target_by_id))
+        .order_by(ExternalIdentifier.target_id, ExternalIdentifier.value)
+    )
+    for alias in rows:
+        target = target_by_id[alias.target_id]
+        values.setdefault(alias.normalized_value, []).append(
+            (alias.value, target)
+        )
     return {key: tuple(value) for key, value in values.items()}
 
 

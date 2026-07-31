@@ -51,6 +51,12 @@ class AllWiseAdapter(VizierConeAdapter):
         (2, BandDefinition("WISE12", "W3mag", "e_W3mag", 0.045), 0.0),
         (3, BandDefinition("WISE22", "W4mag", "e_W4mag", 0.057), 0.0),
     )
+    band_wavelengths_micron = (
+        ("WISE3P4", 3.3792),
+        ("WISE4P6", 4.6293),
+        ("WISE12", 12.3321),
+        ("WISE22", 22.2533),
+    )
     resolution_arcsec = (6.1, 6.4, 6.5, 12.0)
     timeout_seconds = 30.0
     # Provider columns exposed directly to match review.

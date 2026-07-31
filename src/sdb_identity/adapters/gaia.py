@@ -43,6 +43,11 @@ class GaiaDr3Adapter:
             "NRPcont", "NRPblend",
         ),
     )
+    band_wavelengths_micron = (
+        ("GAIA.BP", 0.5129),
+        ("GAIA.G", 0.6425),
+        ("GAIA.RP", 0.7799),
+    )
     # Provider columns exposed directly to match review.
     review_fields = (
         ReviewField(

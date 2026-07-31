@@ -30,6 +30,7 @@ class Tycho2Adapter(VizierConeAdapter):
     bibcode = "2000A&A...355L..27H"
     source_id_columns = ()
     identifier_prefixes = ("TYC ",)
+    band_wavelengths_micron = (("BT", 0.4203), ("VT", 0.5317))
     # suppl_2 is retained by the upstream catalogue for completeness, but its
     # ReadMe describes the entries as probably false or heavily disturbed.
     # It is therefore intentionally not eligible for SDB matching/photometry.

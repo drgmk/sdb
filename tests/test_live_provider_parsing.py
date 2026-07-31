@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from sdb_identity.live_providers import AstroqueryGaia, AstroquerySimbad
+from sdb_identity.providers import Astrometry
 
 
 class FakeSimbadTapClient:
@@ -87,6 +88,55 @@ def test_simbad_resolve_many_groups_rows_and_identifiers():
     assert result["HD 2"].astrometry.pm_dec_masyr == -4.0
     assert result["Missing"] is None
     assert len(client.queries) == 2
+
+
+def test_simbad_search_region_parses_and_sorts_rows():
+    class Client:
+        def __init__(self):
+            self.query = None
+
+        def query_tap(self, query):
+            self.query = query
+            return [
+                {
+                    "oid": 2,
+                    "main_id": "HD 1B",
+                    "ra": 10.001,
+                    "dec": -20.0,
+                    "otype": "Star",
+                    "otypes": "Star|PM*",
+                    "otype_label": "Star",
+                    "otype_description": "Star",
+                    "sp_type": "M3V",
+                    "separation_deg": 0.001,
+                },
+                {
+                    "oid": 1,
+                    "main_id": "HD 1",
+                    "ra": 10.0,
+                    "dec": -20.0,
+                    "otype": "Star",
+                    "otypes": "Star",
+                    "otype_label": "Star",
+                    "separation_deg": 0.0,
+                },
+            ]
+
+    provider = AstroquerySimbad.__new__(AstroquerySimbad)
+    provider.client = Client()
+    result = provider.search_region(
+        Astrometry(10.0, -20.0),
+        radius_arcsec=60,
+        limit=25,
+    )
+
+    assert [row.main_id for row in result] == ["HD 1", "HD 1B"]
+    assert result[1].separation_arcsec == pytest.approx(3.6)
+    assert result[1].object_types == ("Star", "PM*")
+    assert result[1].object_type_description == "Star"
+    assert result[1].spectral_type == "M3V"
+    assert "SELECT TOP 25" in provider.client.query
+    assert "0.016666666666666666" in provider.client.query
 
 
 @pytest.mark.live

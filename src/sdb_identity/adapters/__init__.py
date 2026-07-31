@@ -118,6 +118,32 @@ def catalog_source_display_name(
     return str(source_id).strip()
 
 
+def catalog_band_wavelength_micron(provider: str, band: str) -> float | None:
+    """Return repository-owned wavelength metadata for matrix ordering."""
+    value = str(band).strip().upper()
+    if provider == "submm_obs" and value.startswith("WAV"):
+        try:
+            return float(value[3:])
+        except ValueError:
+            return None
+
+    definition = SNAPSHOT_CATALOGS.get(provider)
+    if definition is not None:
+        return dict(definition.band_wavelengths_micron).get(value)
+
+    adapter = _IDENTIFIER_ADAPTERS.get(provider)
+    wavelengths = () if adapter is None else getattr(
+        adapter, "band_wavelengths_micron", ()
+    )
+    wavelength = dict(wavelengths).get(value)
+    if wavelength is not None:
+        return wavelength
+    if provider == "2mass":
+        read_mode_band = re.sub(r"^2MR[12]", "2M", value)
+        return dict(wavelengths).get(read_mode_band)
+    return None
+
+
 def catalog_position_matches_components(provider: str) -> bool:
     """Whether a close catalog position can identify a system component."""
     return provider not in _SYSTEM_SCALE_POSITION_PROVIDERS
@@ -140,5 +166,6 @@ __all__ = [
     "catalog_source_id_matches_identifiers",
     "catalog_source_display_name",
     "catalog_candidate_identifiers",
+    "catalog_band_wavelength_micron",
     "catalog_position_matches_components",
 ]

@@ -1,19 +1,37 @@
 from __future__ import annotations
 
-from sdb_identity.providers import Astrometry, Candidate, NameResolution, ProviderError
+from sdb_identity.providers import (
+    Astrometry,
+    Candidate,
+    NameResolution,
+    ProviderError,
+)
 
 
 class FakeSimbad:
     name = "simbad"
 
-    def __init__(self, resolutions=None, error: str | None = None):
+    def __init__(
+        self,
+        resolutions=None,
+        error: str | None = None,
+        neighbours=None,
+    ):
         self.resolutions = resolutions or {}
         self.error = error
+        self.neighbours = neighbours or []
+        self.region_calls = []
 
     def resolve_name(self, name: str):
         if self.error:
             raise ProviderError(self.error, transient=True)
         return self.resolutions.get(name)
+
+    def search_region(self, astrometry, *, radius_arcsec, limit=100):
+        if self.error:
+            raise ProviderError(self.error, transient=True)
+        self.region_calls.append((astrometry, radius_arcsec, limit))
+        return list(self.neighbours)[:limit]
 
 
 class FakeGaia:
@@ -47,4 +65,3 @@ def simbad_result(name, value, identifiers=()):
 
 def gaia_candidate(source_id, value, identifiers=()):
     return Candidate(source_id=str(source_id), astrometry=value, identifiers=tuple(identifiers))
-

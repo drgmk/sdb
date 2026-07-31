@@ -31,6 +31,7 @@ from ..reference_definitions import (
 )
 from ..ubv_components import decode_ubv_component, ubv_photometry_scope
 from ..tdsc_components import decode_tdsc_component
+from ..v70a_components import decode_v70a_component
 from ..reference_store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
 from .vizier import row_float, row_text
 
@@ -432,7 +433,13 @@ class V70ASnapshotAdapter(SnapshotCatalogAdapter):
         association = candidate.payload.get("_sdb_association", {})
         if association.get("identifier_agreement") and separation_arcsec <= 120.0:
             return 1.0
-        return math.exp(-0.5 * (separation_arcsec / 2.0) ** 2)
+        positional = math.exp(-0.5 * (separation_arcsec / 2.0) ** 2)
+        # A component row must not become an automatic match for a nearby
+        # composite/system target. Position remains useful review evidence,
+        # but the component-qualified Gliese name is the secure identity.
+        if decode_v70a_component(candidate.payload, candidate.source_id).native_code:
+            return min(positional, 0.45)
+        return positional
 
     def attributes(self, payload):
         values = []
