@@ -1,0 +1,26 @@
+<main>
+  <h1>SDB sample review <a class="section-link" href="/catalogs">Catalogs</a></h1>
+  <p class="muted">Sample <code>$sample</code>. Current detections and accepted ownership are live from SQLite; open a target for detailed proposals.</p>
+  <div class="summary">
+    <span><strong>$target_count</strong> sample targets</span>
+    <span><strong>$actionable_target_count</strong> actionable</span>
+    <span><strong>$clean_target_count</strong> clean/current</span>
+    <span><strong>$scope_blocker_target_count</strong> scope blockers</span>
+    <span><strong>$unassigned_detection_count</strong> unassigned detections</span>
+    <span><strong>$mixed_detection_count</strong> mixed-ownership detections</span>
+  </div>
+  <form class="queue-filters" method="get">
+    <label>View <select name="view">$view_options</select></label>
+    <label>Priority <select name="priority">$priority_options</select></label>
+    <label>Role <select name="role">$role_options</select></label>
+    <label>Classification <select name="classification">$classification_options</select></label>
+    <label>Provider <select name="provider">$provider_options</select></label>
+    <label>Search <input name="search" value="$search" placeholder="name, target, band, action"></label>
+    <div class="filter-actions"><button type="submit">Apply filters</button><a href="/">Clear</a></div>
+  </form>
+  <p class="muted queue-count">Showing <strong>$shown_count</strong> of $total_count sample targets.</p>
+  <table>
+    <thead><tr><th>priority</th><th>SIMBAD name</th><th>SDB ID</th><th>classification</th><th>role</th><th>detections</th><th>unassigned / mixed</th><th>providers</th><th>recommended action</th></tr></thead>
+    <tbody>$rows</tbody>
+  </table>
+</main>

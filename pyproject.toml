@@ -30,6 +30,7 @@ where = ["src"]
 sdb_identity = [
   "migrations/script.py.mako",
   "review_assets/*.css",
+  "review_assets/*.html",
   "review_assets/*.js",
 ]
 

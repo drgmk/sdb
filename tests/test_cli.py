@@ -118,6 +118,110 @@ def test_cli_unresolved_name_returns_error(tmp_path, capsys):
     assert "could not be resolved" in capsys.readouterr().err
 
 
+def test_cli_alma_domain_commands_share_parser_and_handler(tmp_path, capsys):
+    database = tmp_path / "cli.sqlite"
+    assert main(["--database", str(database), "init"]) == 0
+    capsys.readouterr()
+
+    assert main(["--database", str(database), "alma", "status"]) == 0
+    assert capsys.readouterr().out == ""
+
+    assert main([
+        "--database",
+        str(database),
+        "alma",
+        "status",
+        "--limit",
+        "0",
+    ]) == 2
+    assert "--limit must be at least 1" in capsys.readouterr().err
+
+    assert main([
+        "--database",
+        str(database),
+        "--offline",
+        "alma",
+        "sync",
+        "--bootstrap",
+    ]) == 2
+    assert "ALMA sync is unavailable in offline mode" in capsys.readouterr().err
+
+
+def test_cli_cache_domain_uses_configured_cache_path(tmp_path, capsys):
+    cache = tmp_path / "provider-cache.sqlite"
+
+    assert main([
+        "--cache-database",
+        str(cache),
+        "cache",
+        "status",
+    ]) == 0
+    assert capsys.readouterr().out == ""
+    assert cache.exists()
+
+    assert main([
+        "--cache-database",
+        str(cache),
+        "cache",
+        "tables",
+        "missing/catalog",
+    ]) == 2
+    assert "cached snapshot not found" in capsys.readouterr().err
+
+
+def test_cli_reference_domain_uses_context_database_paths(tmp_path, capsys):
+    database = tmp_path / "main.sqlite"
+    reference = tmp_path / "reference.sqlite"
+
+    assert main([
+        "--database",
+        str(database),
+        "--reference-database",
+        str(reference),
+        "reference",
+        "status",
+        "hip2",
+    ]) == 2
+    assert "reference snapshot not found: hip2" in capsys.readouterr().err
+    assert reference.exists()
+
+    assert main([
+        "--database",
+        str(database),
+        "--reference-database",
+        str(reference),
+        "reference",
+        "application-status",
+        "hip2",
+    ]) == 2
+    assert "database does not exist" in capsys.readouterr().err
+
+
+def test_cli_dataset_domain_uses_main_database_context(tmp_path, capsys):
+    database = tmp_path / "main.sqlite"
+    assert main(["--database", str(database), "init"]) == 0
+    capsys.readouterr()
+
+    assert main([
+        "--database",
+        str(database),
+        "dataset",
+        "status",
+        "submm_obs",
+    ]) == 0
+    assert capsys.readouterr().out == ""
+
+    assert main([
+        "--database",
+        str(database),
+        "dataset",
+        "import",
+        "submm_obs",
+        str(tmp_path / "missing.csv"),
+    ]) == 2
+    assert "No such file" in capsys.readouterr().err
+
+
 def test_cli_add_ensure_uses_configured_providers(
     tmp_path, capsys, monkeypatch,
 ):

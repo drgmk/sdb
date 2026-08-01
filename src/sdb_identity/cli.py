@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
-from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import os
@@ -14,6 +13,16 @@ from sqlalchemy import select
 
 from .catalog_results import effective_catalog_results
 from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
+from .cli_alma import register_alma_parser, run_alma_command
+from .cli_cache import register_cache_parser, run_cache_command
+from .cli_context import CliContext
+from .cli_datasets import register_dataset_parser, run_dataset_command
+from .cli_output import (
+    format_json as _format_json,
+    provider_output_to_stderr as _provider_output_to_stderr,
+)
+from .cli_reference import register_reference_parser, run_reference_command
+from .cli_samples import register_sample_parser, run_sample_command
 from .database import init_database, make_session_factory
 from .decisions import configured_actor
 from .models import AstrometricSolution, CatalogRun, MatchCandidate, RawCatalogRow, Target
@@ -199,36 +208,8 @@ def parser() -> argparse.ArgumentParser:
         "--workers", type=int, default=min(4, os.cpu_count() or 1),
         help="worker processes used to export independent targets",
     )
-    alma = _add_parser(commands, "alma", "Manage the local ALMA archive lookup cache.", "The ALMA cache stores compact project/member/pointing data used to find archive projects near a target. Syncing is separate from photometry updates and can be bootstrapped, resumed, or incrementally refreshed.")
-    alma_commands = alma.add_subparsers(dest="alma_command", required=True)
-    alma_sync = _add_parser(alma_commands, "sync", "Synchronise ALMA archive observations into the local cache.", "Use --bootstrap for a full archive load, --incremental for recent archive updates, or --resume to continue a previous sync run. The cache is used for target-nearby project links and is independent of photometry export.")
-    alma_mode = alma_sync.add_mutually_exclusive_group(required=True)
-    alma_mode.add_argument("--bootstrap", action="store_true")
-    alma_mode.add_argument("--incremental", action="store_true")
-    alma_mode.add_argument("--resume", type=int, metavar="RUN_ID")
-    alma_sync.add_argument("--start-year", type=int, default=2011)
-    alma_sync.add_argument("--end-year", type=int)
-    alma_sync.add_argument("--chunk-months", type=int, default=3)
-    alma_sync.add_argument("--archive-url")
-    alma_sync.add_argument("--timeout", type=float, default=300)
-    alma_status = _add_parser(alma_commands, "status", "Show recent ALMA sync and cache status.", "Reports recent sync runs and chunk progress so long-running archive updates can be monitored. Use --limit to control how much history is shown.")
-    alma_status.add_argument("--limit", type=int, default=10)
-    alma_projects = _add_parser(alma_commands, "projects", "List ALMA projects near one target.", "Searches cached ALMA pointings near the target position and reports associated project/member information. It does not contact the ALMA archive.")
-    alma_projects.add_argument("target")
-    alma_projects.add_argument("--radius", type=float, default=10.0)
-    cache = _add_parser(commands, "cache", "Inspect the generic provider snapshot cache.", "Shows cached raw-provider snapshots used by hierarchy and reference fetches. These commands are read-only and do not query remote services.")
-    cache_commands = cache.add_subparsers(dest="cache_command", required=True)
-    cache_status = _add_parser(cache_commands, "status", "List cached provider snapshots.", "Reports cached snapshots by provider and catalog, including table counts, row counts, checksums, source URLs, and fetch times.")
-    cache_status.add_argument("--all", action="store_true", dest="cache_all", help="include superseded cached snapshots")
-    cache_tables = _add_parser(cache_commands, "tables", "List tables in one cached provider snapshot.", "Shows table names, row counts, descriptions, and column metadata for a cached provider catalog. Use --provider if the same catalog ID exists from more than one provider.")
-    cache_tables.add_argument("catalog")
-    cache_tables.add_argument("--provider")
-    cache_readme = _add_parser(cache_commands, "readme", "Print the ReadMe for one cached provider snapshot.", "Reads the cached provider ReadMe without making a network request. Use --provider if the same catalog ID exists from more than one provider.")
-    cache_readme.add_argument("catalog")
-    cache_readme.add_argument("--provider")
-    cache_validate = _add_parser(cache_commands, "validate", "Validate one cached provider snapshot.", "Checks that a current cached snapshot has source metadata, ReadMe text, tables, rows, and column metadata. If a matching reference snapshot exists, its interpreted row count is reported for comparison.")
-    cache_validate.add_argument("catalog")
-    cache_validate.add_argument("--provider")
+    register_alma_parser(commands, _add_parser)
+    register_cache_parser(commands, _add_parser)
     hierarchy = _add_parser(commands, "hierarchy", "Create and inspect target systems and relationships.", "Hierarchy records keep binary/multiple-system structure separate from photometry. This first layer supports manual systems and relationships; WDS, CCDM, and SIMBAD imports can later write the same tables.")
     hierarchy_commands = hierarchy.add_subparsers(dest="hierarchy_command", required=True)
     hierarchy_create = _add_parser(hierarchy_commands, "create-system", "Create a target system.", "A system groups related components such as a binary or multiple. The optional primary target is also added as the first system member and marked export-dirty.")
@@ -372,37 +353,9 @@ def parser() -> argparse.ArgumentParser:
     _add_actor_argument(note_add)
     note_list = _add_parser(note_commands, "list", "List operator notes for a target.", "Shows notes in database order for quick review. Use this before making manual overrides when the target has known caveats.")
     note_list.add_argument("target")
-    sample = _add_parser(commands, "sample", "Create, edit, inspect, and export target samples.", "Samples group arbitrary targets and keep small metadata such as date and note. Membership changes are audited and can drive readiness checks and sample exports.")
-    sample_commands = sample.add_subparsers(dest="sample_command", required=True)
-    sample_create = _add_parser(sample_commands, "create", "Create a named target sample.", "Samples group targets for update, readiness, and export workflows. Optional date and note fields capture lightweight provenance about the sample definition.")
-    sample_create.add_argument("name")
-    sample_create.add_argument("--date")
-    sample_create.add_argument("--note")
-    sample_set = _add_parser(sample_commands, "set", "Update sample metadata.", "Changes the sample date or note without changing membership. Membership additions and removals use separate audited commands.")
-    sample_set.add_argument("name")
-    sample_set.add_argument("--date")
-    sample_set.add_argument("--note")
-    _add_parser(sample_commands, "list", "List known samples.", "Shows sample names and stored metadata. Use this to discover sample names for update, readiness, or export commands.")
-    for action in ("add", "remove"):
-        sample_action = _add_parser(sample_commands, action, f"{action.title()} one target {'to' if action == 'add' else 'from'} a sample.", "Membership changes are audited with actor and reason. A target can belong to any number of samples.")
-        sample_action.add_argument("name")
-        sample_action.add_argument("target")
-        _add_actor_argument(sample_action)
-        _add_reason_argument(sample_action)
-    sample_members = _add_parser(sample_commands, "members", "List current members of a sample.", "Outputs the targets currently assigned to the sample. This is the membership source used by sample readiness and sample export.")
-    sample_members.add_argument("name")
-    sample_readiness = _add_parser(sample_commands, "readiness", "Check whether a sample is ready for export or review.", "Reports missing, ambiguous, failed, dirty, and sample-relevant unresolved curated state. Database-wide unresolved curated rows remain a diagnostic count and do not block an unrelated sample. The command exits non-zero when blockers remain.")
-    sample_readiness.add_argument("name")
-    sample_readiness.add_argument(
-        "--providers",
-        default="simbad,gaia_dr3,tycho2,2mass,allwise",
-        help="comma-separated providers expected for every sample member",
+    register_sample_parser(
+        commands, _add_parser, _add_actor_argument, _add_reason_argument,
     )
-    sample_import = _add_parser(sample_commands, "import", "Import sample membership from a file.", "Adds memberships in bulk while recording actor and reason. The target identities must already exist or be resolvable by the importer format.")
-    sample_import.add_argument("name")
-    sample_import.add_argument("file")
-    _add_actor_argument(sample_import)
-    _add_reason_argument(sample_import)
     import_command = _add_parser(commands, "import", "Import a CSV batch of target submissions.", "The batch importer creates durable per-row work items that can be resumed or retried. Optional refresh stages run after identity creation with per-stage worker limits.")
     import_command.add_argument("file")
     import_command.add_argument(
@@ -538,84 +491,10 @@ def parser() -> argparse.ArgumentParser:
         "--format", choices=["table", "json", "jsonl"], default="table",
         help="readiness view only; full and assignments views always print JSON",
     )
-    dataset = _add_parser(commands, "dataset", "Import and manage curated source-controlled datasets.", "Curated datasets such as submm_obs are reimportable tables maintained outside remote providers. The commands reconcile records to targets, review unresolved rows, and control export inclusion.")
-    dataset_commands = dataset.add_subparsers(dest="dataset_command", required=True)
-    dataset_import = _add_parser(dataset_commands, "import", "Import a curated dataset file.", "Loads source-controlled curated records such as submm_obs into versioned dataset tables. Reimports are expected as the file evolves through manual edits or pull requests.")
-    dataset_import.add_argument("dataset", choices=["submm_obs"])
-    dataset_import.add_argument("file")
-    dataset_status = _add_parser(dataset_commands, "status", "Show curated dataset import and association status.", "Reports the latest import state and unresolved records. Use this after importing to see whether records need target association review.")
-    dataset_status.add_argument("dataset", choices=["submm_obs"])
-    dataset_review = _add_parser(dataset_commands, "review", "List unresolved curated dataset records.", "Shows records that could not be confidently associated with targets. These can be manually associated or left unresolved until more identity information is available.")
-    dataset_review.add_argument("dataset", choices=["submm_obs"])
-    dataset_reconcile = _add_parser(dataset_commands, "reconcile", "Re-run curated dataset association logic.", "Attempts to associate current dataset records to targets using the latest identifiers and astrometry. This is safe to rerun after adding targets or improving matching rules.")
-    dataset_reconcile.add_argument("dataset", choices=["submm_obs"])
-    dataset_associate = _add_parser(dataset_commands, "associate", "Manually associate one curated record with a target.", "Records an audited association for a dataset record that automatic matching could not resolve. Use record_no from dataset review output.")
-    dataset_associate.add_argument("dataset", choices=["submm_obs"])
-    dataset_associate.add_argument("record_no", type=int)
-    dataset_associate.add_argument("target")
-    _add_actor_argument(dataset_associate)
-    _add_reason_argument(dataset_associate)
-    dataset_unassociate = _add_parser(dataset_commands, "unassociate", "Remove a manual curated-record association.", "Records an audited unassociation without deleting the curated record. Use this when a previous association was wrong or superseded.")
-    dataset_unassociate.add_argument("dataset", choices=["submm_obs"])
-    dataset_unassociate.add_argument("record_no", type=int)
-    _add_actor_argument(dataset_unassociate)
-    _add_reason_argument(dataset_unassociate)
-    for action in ("exclude", "include"):
-        dataset_override = _add_parser(dataset_commands, action, f"{action.title()} one curated dataset record for export.", "This records an audited inclusion/exclusion decision for curated photometry. The underlying source-controlled record remains unchanged.")
-        dataset_override.add_argument("dataset", choices=["submm_obs"])
-        dataset_override.add_argument("record_no", type=int)
-        _add_actor_argument(dataset_override)
-        _add_reason_argument(dataset_override)
-    dataset_pending = _add_parser(dataset_commands, "pending", "List targets with pending curated-data export work.", "Shows dataset changes that have not yet flowed through to target exports. Use this to decide which rawphot files need regeneration.")
-    dataset_pending.add_argument("dataset", choices=["submm_obs"])
-    dataset_mark_exported = _add_parser(dataset_commands, "mark-exported", "Mark curated-data export work complete for a target.", "Clears pending curated export state after an external export step. This is mainly for controlled workflows where export completion is handled outside `sdb export-dirty`.")
-    dataset_mark_exported.add_argument("dataset", choices=["submm_obs"])
-    dataset_mark_exported.add_argument("target")
-    reference = _add_parser(commands, "reference", "Fetch, inspect, apply, and audit whole-catalog reference snapshots.", "Reference snapshots store provider tables in a separate SQLite database for fast local matching. Use these commands for catalogs where full-table ingestion is preferable to per-target remote queries.")
-    reference_commands = reference.add_subparsers(dest="reference_command", required=True)
-    reference_fetch = None
-    for action in ("fetch", "status", "references", "relationships", "readme"):
-        command = _add_parser(reference_commands, action, f"{action.title()} reference snapshot information.", "Reference commands operate on the separate reference SQLite database. Use fetch to download a snapshot, status/readme/describe to inspect it, and references/relationships to inspect catalog metadata.")
-        command.add_argument("adapter", choices=REFERENCE_ADAPTERS)
-        if action == "fetch":
-            reference_fetch = command
-    assert reference_fetch is not None
-    reference_fetch.add_argument("--refresh-cache", action="store_true", help="download a fresh raw-provider snapshot before importing")
-    reference_fetch.add_argument("--no-cache", action="store_true", help="fetch directly into the reference database without using the snapshot cache")
-    reference_ensure = _add_parser(
-        reference_commands,
-        "ensure",
-        "Fetch missing or stale configured reference snapshots.",
-        "Checks the configured reference provider list, reports current, missing, "
-        "and stale snapshots, and fetches only missing or stale providers. With no "
-        "provider arguments the [reference] providers list is used; its default is all.",
+    register_dataset_parser(
+        commands, _add_parser, _add_actor_argument, _add_reason_argument,
     )
-    reference_ensure.add_argument(
-        "providers", nargs="*", choices=REFERENCE_ADAPTERS,
-        help="optional provider override; defaults to the configured provider list",
-    )
-    reference_ensure.add_argument(
-        "--max-age-days", type=float,
-        help="override reference.max_age_days from configuration",
-    )
-    reference_ensure.add_argument(
-        "--check", action="store_true",
-        help="report current, missing, and stale snapshots without fetching",
-    )
-    reference_describe = _add_parser(reference_commands, "describe", "Describe tables and columns in a reference snapshot.", "Shows VizieR-derived table metadata, column descriptions, units, and stable local table names. Add a table name to focus on one table.")
-    reference_describe.add_argument("adapter", choices=REFERENCE_ADAPTERS)
-    reference_describe.add_argument("table", nargs="?")
-    reference_apply = _add_parser(reference_commands, "apply", "Apply a reference snapshot to current targets.", "Runs local catalog matching for all targets using a fetched reference snapshot. Results are versioned like remote catalog refreshes and can produce matched, no-match, or ambiguous outcomes.")
-    reference_apply.add_argument("adapter", choices=REFERENCE_ADAPTERS)
-    reference_apply.add_argument("--all", action="store_true", dest="apply_all")
-    reference_apply.add_argument("--force", action="store_true")
-    reference_audit = _add_parser(reference_commands, "audit-identifiers", "Audit catalog identifiers against SIMBAD identifiers.", "Checks whether position-matched catalog rows with meaningful identifiers agree with target SIMBAD aliases. Use --problems-only to focus on conflicts and missing expected identifiers.")
-    reference_audit.add_argument("adapter", choices=REFERENCE_ADAPTERS)
-    reference_audit.add_argument("--all-targets", action="store_true")
-    reference_audit.add_argument("--problems-only", action="store_true")
-    for action in ("application-status", "review", "pending"):
-        command = _add_parser(reference_commands, action, f"{action.title()} reference application state.", "Use application-status to inspect previous local snapshot applications, review to inspect unmatched or ambiguous rows, and pending to see targets needing export after reference changes.")
-        command.add_argument("adapter", choices=REFERENCE_ADAPTERS)
+    register_reference_parser(commands, _add_parser)
     return result
 
 
@@ -704,34 +583,6 @@ def _update_service(
         bulk_chunk_size=bulk_chunk_size,
         reporter=reporter,
     )
-
-
-def _format_json(args, value, **kwargs) -> str:
-    kwargs.setdefault("sort_keys", True)
-    compact = getattr(args, "compact_json", False) or _is_json_record_stream(args)
-    if compact:
-        kwargs.pop("indent", None)
-        kwargs.setdefault("separators", (",", ":"))
-    else:
-        kwargs["indent"] = kwargs.get("indent", 2)
-    return json.dumps(value, **kwargs)
-
-
-@contextmanager
-def _provider_output_to_stderr():
-    """Keep unstructured dependency output out of the CLI JSON channel.
-
-    Several remote clients print service notices directly instead of using
-    logging. Redirect stdout process-wide while provider work is active so
-    worker-thread notices follow stderr and the final CLI result remains the
-    only stdout payload.
-    """
-    output = sys.stdout
-    try:
-        sys.stdout = sys.stderr
-        yield
-    finally:
-        sys.stdout = output
 
 
 def _photometry_review_priority_rank(priority: str) -> int:
@@ -998,56 +849,6 @@ def _format_table_value(key: str, value) -> str:
     return str(value)
 
 
-def _is_json_record_stream(args) -> bool:
-    command = getattr(args, "command", None)
-    if command in {
-        "attributes",
-        "catalog-status",
-        "dirty",
-        "export-dirty",
-        "metadata-status",
-        "review",
-    }:
-        return True
-    if command == "alma":
-        return getattr(args, "alma_command", None) in {"projects", "status"}
-    if command == "cache":
-        return getattr(args, "cache_command", None) in {"status", "tables"}
-    if command == "dataset":
-        return getattr(args, "dataset_command", None) in {"pending", "review", "status"}
-    if command == "hierarchy":
-        hierarchy_command = getattr(args, "hierarchy_command", None)
-        if hierarchy_command in {"photometry-review", "review-queue"}:
-            return getattr(args, "format", None) == "jsonl"
-        return hierarchy_command in {
-            "graph",
-            "graph-diagnostics",
-            "review",
-            "sources",
-        }
-    if command == "reference":
-        return getattr(args, "reference_command", None) in {
-            "application-status",
-            "audit-identifiers",
-            "describe",
-            "pending",
-            "references",
-            "relationships",
-            "review",
-        }
-    if command == "photometry":
-        return (
-            getattr(args, "photometry_command", None) == "review"
-            or (
-                getattr(args, "photometry_command", None) == "review-queue"
-                and getattr(args, "format", None) == "jsonl"
-            )
-        )
-    if command == "sample":
-        return getattr(args, "sample_command", None) in {"list", "members"}
-    return False
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
@@ -1062,6 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     from .progress import ProgressReporter
 
     reporter = ProgressReporter.for_cli(quiet=args.quiet, force=args.progress)
+    context = CliContext.from_args(args, reporter)
     if args.command == "maintenance" and args.maintenance_command == "compare-export":
         from .parity import compare_exports
 
@@ -1073,217 +875,19 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_json(args, result, indent=2, sort_keys=True))
         return 0
     if args.command == "cache":
-        from .cache_store import SnapshotCache
-
-        cache = SnapshotCache(args.cache_database)
-        try:
-            if args.cache_command == "status":
-                for value in cache.summaries(include_old=args.cache_all):
-                    print(_format_json(args, asdict(value), sort_keys=True))
-            elif args.cache_command == "tables":
-                snapshot = cache.current_snapshot_for_catalog(
-                    args.catalog, provider=args.provider
-                )
-                if snapshot is None:
-                    raise KeyError(f"cached snapshot not found: {args.catalog}")
-                for table in snapshot.tables:
-                    columns = table.metadata.get("columns", [])
-                    print(_format_json(args, {
-                        "provider": snapshot.provider,
-                        "catalog": snapshot.catalog_id,
-                        "source_id": snapshot.source_id,
-                        "table": table.name,
-                        "description": table.description,
-                        "row_count": len(table.rows),
-                        "columns": columns,
-                    }, sort_keys=True))
-            elif args.cache_command == "readme":
-                snapshot = cache.current_snapshot_for_catalog(
-                    args.catalog, provider=args.provider
-                )
-                if snapshot is None:
-                    raise KeyError(f"cached snapshot not found: {args.catalog}")
-                print(snapshot.readme)
-            elif args.cache_command == "validate":
-                value = asdict(cache.validate(args.catalog, provider=args.provider))
-                reference_path = Path(args.reference_database)
-                if reference_path.exists():
-                    from .reference import ReferenceStore
-                    from .reference_definitions import SNAPSHOT_CATALOGS
-
-                    reference = ReferenceStore(reference_path)
-                    comparisons = []
-                    for adapter, definition in SNAPSHOT_CATALOGS.items():
-                        if definition.catalog != value["catalog_id"]:
-                            continue
-                        snapshot = reference.current_snapshot(adapter)
-                        if snapshot is None:
-                            continue
-                        row_count = sum(
-                            item["row_count"]
-                            for item in reference.describe(adapter=adapter)
-                        )
-                        comparisons.append({
-                            "adapter": adapter,
-                            "snapshot_id": snapshot.id,
-                            "content_sha256": snapshot.content_sha256,
-                            "row_count": row_count,
-                            "row_count_matches_cache": row_count == value["row_count"],
-                        })
-                    if comparisons:
-                        value["reference_snapshots"] = comparisons
-                print(_format_json(args, value, sort_keys=True))
-                return 0 if value["ok"] else 1
-            return 0
-        except (KeyError, ValueError) as error:
-            print(str(error), file=sys.stderr)
-            return 2
-    path = Path(args.database)
+        return run_cache_command(context)
+    path = context.database_path
     if args.command == "init":
         init_database(path)
         print(path.resolve())
         return 0
     if args.command == "reference":
-        from .reference import ReferenceApplicationService, ReferenceStore
-
-        store = ReferenceStore(args.reference_database)
-        try:
-            if args.reference_command == "fetch":
-                with _provider_output_to_stderr():
-                    value = store.fetch(
-                        args.adapter,
-                        cache_path=None if args.no_cache else args.cache_database,
-                        refresh_cache=args.refresh_cache,
-                    )
-                print(_format_json(args, value.__dict__, sort_keys=True))
-            elif args.reference_command == "ensure":
-                from .reference_ensure import ensure_reference_snapshots
-
-                providers = (
-                    tuple(args.providers)
-                    if args.providers
-                    else args.sdb_config.reference_providers(REFERENCE_ADAPTERS)
-                )
-                max_age_days = (
-                    args.max_age_days
-                    if args.max_age_days is not None
-                    else args.sdb_config.reference_max_age_days()
-                )
-                with _provider_output_to_stderr():
-                    value = ensure_reference_snapshots(
-                        store,
-                        providers,
-                        cache_path=args.cache_database,
-                        max_age_days=max_age_days,
-                        check_only=args.check,
-                    )
-                print(_format_json(args, value, sort_keys=True))
-            elif args.reference_command == "status":
-                value = store.current_snapshot(args.adapter)
-                if value is None:
-                    raise KeyError(f"reference snapshot not found: {args.adapter}")
-                print(_format_json(args, {
-                    "snapshot_id": value.id,
-                    "adapter": value.adapter,
-                    "catalog": value.catalog,
-                    "content_sha256": value.content_sha256,
-                    "source_url": value.source_url,
-                    "retrieved_at": value.retrieved_at.isoformat(),
-                }, sort_keys=True))
-            elif args.reference_command == "describe":
-                values = store.describe(adapter=args.adapter)
-                if args.table:
-                    values = [
-                        value for value in values
-                        if value["name"] == args.table
-                        or value["name"].rsplit("/", 1)[-1] == args.table
-                    ]
-                    if not values:
-                        raise KeyError(f"reference table not found: {args.table}")
-                for value in values:
-                    print(_format_json(args, value, sort_keys=True))
-            elif args.reference_command == "relationships":
-                for value in store.relationships(adapter=args.adapter):
-                    print(_format_json(args, {
-                        "from_table": value.from_table,
-                        "from_column": value.from_column,
-                        "to_table": value.to_table,
-                        "to_column": value.to_column,
-                        "parser": value.parser,
-                        "description": value.description,
-                    }, sort_keys=True))
-            elif args.reference_command == "references":
-                values = store.rows("refs", adapter=args.adapter)
-                for value in values:
-                    print(_format_json(args, value, sort_keys=True))
-            elif args.reference_command == "readme":
-                value = store.current_snapshot(args.adapter)
-                if value is None:
-                    raise KeyError(f"reference snapshot not found: {args.adapter}")
-                print(value.readme)
-            else:
-                if not path.exists():
-                    raise KeyError(f"database does not exist: {path}; run 'sdb init'")
-                application = ReferenceApplicationService(
-                    make_session_factory(path), store
-                )
-                if args.reference_command == "apply":
-                    if not args.apply_all:
-                        raise ValueError("reference apply requires --all")
-                    value = application.apply(args.adapter, force=args.force)
-                    print(_format_json(args, value.__dict__, sort_keys=True))
-                elif args.reference_command == "application-status":
-                    for value in application.runs(args.adapter):
-                        print(_format_json(args, {
-                            "application_run_id": value.id,
-                            "provider": value.provider,
-                            "snapshot_sha256": value.snapshot_sha256,
-                            "status": value.status,
-                            "targets": value.target_count,
-                            "refreshed": value.refreshed_count,
-                            "matched": value.match_count,
-                            "ambiguous": value.ambiguous_count,
-                            "no_match": value.no_match_count,
-                            "catalog_rows": value.row_count,
-                            "unmatched_rows": value.unmatched_row_count,
-                        }, sort_keys=True))
-                elif args.reference_command == "audit-identifiers":
-                    from .identifier_audit import audit_catalog_identifiers
-
-                    values = audit_catalog_identifiers(
-                        make_session_factory(path),
-                        args.adapter,
-                        include_unmatched=args.all_targets,
-                    )
-                    for value in values:
-                        if args.problems_only and value.status == "agree":
-                            continue
-                        print(_format_json(args, value.__dict__, sort_keys=True))
-                elif args.reference_command == "review":
-                    for value in application.unmatched(provider=args.adapter):
-                        print(_format_json(args, {
-                            "source_identifier": value.source_identifier,
-                            "status": value.status,
-                            "candidate_target_ids": json.loads(value.candidate_target_ids_json),
-                            "selected_target_ids": json.loads(value.selected_target_ids_json),
-                        }, sort_keys=True))
-                else:
-                    for dirty, target, run in application.pending(args.adapter):
-                        print(_format_json(args, {
-                            "application_run_id": run.id,
-                            "provider": run.provider,
-                            "target_id": target.id,
-                            "sdbid": target.sdbid,
-                            "reason": dirty.reason,
-                        }, sort_keys=True))
-        except (KeyError, ValueError, RuntimeError, ProviderError) as error:
-            print(str(error), file=sys.stderr)
-            return 2
-        return 0
+        return run_reference_command(context)
     if not path.exists():
         print(f"database does not exist: {path}; run 'sdb init'", file=sys.stderr)
         return 2
     sessions = make_session_factory(path)
+    context = context.with_sessions(sessions)
     if args.command == "history":
         from .decision_history import system_decision_history
 
@@ -1299,68 +903,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     if args.command == "alma":
-        from .alma import AlmaSyncService
-        from .alma_lookup import AlmaLookupService
-
-        try:
-            if args.alma_command == "sync":
-                if args.offline:
-                    raise ValueError("ALMA sync is unavailable in offline mode")
-                with _provider_output_to_stderr():
-                    from .alma_transport import AstroqueryAlmaArchive
-
-                    service = AlmaSyncService(
-                        sessions, AstroqueryAlmaArchive(
-                            args.archive_url, timeout_seconds=args.timeout,
-                        ),
-                    )
-                    if args.bootstrap:
-                        summary = service.bootstrap(
-                            args.start_year, args.end_year, args.chunk_months,
-                        )
-                    elif args.incremental:
-                        summary = service.incremental()
-                    else:
-                        summary = service.resume(
-                            args.resume,
-                            start_year=args.start_year,
-                            end_year=args.end_year,
-                            chunk_months=args.chunk_months,
-                        )
-                print(_format_json(args, asdict(summary), sort_keys=True))
-            elif args.alma_command == "projects":
-                # Project lookup is local and deliberately requires no archive client.
-                service = AlmaLookupService(sessions)
-                for project in service.projects(args.target, args.radius):
-                    print(_format_json(args, asdict(project), sort_keys=True))
-            else:
-                from .models import AlmaSyncRun
-
-                if args.limit < 1:
-                    raise ValueError("--limit must be at least 1")
-                with sessions() as session:
-                    runs = list(session.scalars(
-                        select(AlmaSyncRun)
-                        .order_by(AlmaSyncRun.id.desc())
-                        .limit(args.limit)
-                    ))
-                for run in runs:
-                    print(_format_json(args, {
-                        "run_id": run.id,
-                        "mode": run.mode,
-                        "archive_url": run.archive_url,
-                        "status": run.status,
-                        "row_count": run.row_count,
-                        "upserted_count": run.upserted_count,
-                        "deactivated_count": run.deactivated_count,
-                        "watermark_before": run.watermark_before,
-                        "watermark_after": run.watermark_after,
-                        "error": run.error,
-                    }, sort_keys=True))
-        except (KeyError, ValueError, RuntimeError, ProviderError) as error:
-            print(str(error), file=sys.stderr)
-            return 2
-        return 0
+        return run_alma_command(context)
     if args.command == "export-sample":
         from .sample_export import SampleExportService
 
@@ -1671,60 +1214,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     if args.command == "sample":
-        from .samples import SampleService
-
-        service = SampleService(sessions)
-        try:
-            if args.sample_command == "create":
-                value = service.create(args.name, sample_date=args.date, note=args.note)
-                print(_format_json(args, {"id": value.id, "name": value.name}, sort_keys=True))
-            elif args.sample_command == "set":
-                value = service.set_metadata(
-                    args.name, sample_date=args.date, note=args.note,
-                )
-                print(_format_json(args, {"id": value.id, "name": value.name}, sort_keys=True))
-            elif args.sample_command == "list":
-                for value in service.list():
-                    data = asdict(value)
-                    data["sample_date"] = (
-                        value.sample_date.isoformat() if value.sample_date else None
-                    )
-                    print(_format_json(args, data, sort_keys=True))
-            elif args.sample_command in {"add", "remove"}:
-                value = getattr(service, args.sample_command)(
-                    args.name, args.target, actor=args.actor, reason=args.reason,
-                )
-                print(_format_json(args, {
-                    "action_id": value.id,
-                    "action": value.action,
-                    "sample_id": value.sample_id,
-                    "target_id": value.target_id,
-                }, sort_keys=True))
-            elif args.sample_command == "members":
-                for target in service.members(args.name):
-                    print(_format_json(args, {
-                        "target_id": target.id, "sdbid": target.sdbid,
-                    }, sort_keys=True))
-            elif args.sample_command == "readiness":
-                from .readiness import ReadinessService
-
-                providers = tuple(
-                    value.strip() for value in args.providers.split(",")
-                    if value.strip()
-                )
-                report = ReadinessService(sessions).report(
-                    args.name, providers=providers,
-                )
-                print(_format_json(args, asdict(report), sort_keys=True))
-                return 1 if report.status == "blocked" else 0
-            else:
-                print(_format_json(args, service.import_members(
-                    args.name, args.file, actor=args.actor, reason=args.reason,
-                ), sort_keys=True))
-        except (KeyError, ValueError) as error:
-            print(str(error), file=sys.stderr)
-            return 2
-        return 0
+        return run_sample_command(context)
     if args.command == "dirty":
         from .dirty import pending_export_targets
 
@@ -2454,85 +1944,7 @@ def main(argv: list[str] | None = None) -> int:
                     }, sort_keys=True))
         return 0
     if args.command == "dataset":
-        from .datasets import SubmmObsService
-
-        service = SubmmObsService(sessions)
-        try:
-            if args.dataset_command == "import":
-                value = service.import_submm_obs(args.file)
-                print(_format_json(args, value.__dict__, sort_keys=True))
-            elif args.dataset_command == "status":
-                for value in service.revisions(args.dataset):
-                    print(_format_json(args, {
-                        "revision_id": value.id,
-                        "dataset": value.dataset,
-                        "source_sha256": value.source_sha256,
-                        "status": value.status,
-                        "is_current": value.is_current,
-                        "rows": value.row_count,
-                        "new": value.new_count,
-                        "changed": value.changed_count,
-                        "removed": value.removed_count,
-                        "unresolved": value.unresolved_count,
-                        "ambiguous": value.ambiguous_count,
-                    }, sort_keys=True))
-            elif args.dataset_command == "review":
-                for value in service.unresolved(args.dataset):
-                    print(_format_json(args, {
-                        "record_no": value.record_no,
-                        "identifier": value.source_identifier,
-                        "status": value.association_status,
-                        "message": value.association_message,
-                    }, sort_keys=True))
-            elif args.dataset_command == "reconcile":
-                value = service.reconcile(args.dataset)
-                print(_format_json(args, value.__dict__, sort_keys=True))
-            elif args.dataset_command == "associate":
-                value = service.associate(
-                    args.dataset, args.record_no, args.target,
-                    actor=args.actor, reason=args.reason,
-                )
-                print(_format_json(args, {
-                    "action_id": value.id, "dataset": value.dataset,
-                    "record_no": value.record_no, "action": value.action,
-                    "target_id": value.target_id,
-                }, sort_keys=True))
-            elif args.dataset_command == "unassociate":
-                value = service.unassociate(
-                    args.dataset, args.record_no,
-                    actor=args.actor, reason=args.reason,
-                )
-                print(_format_json(args, {
-                    "action_id": value.id, "dataset": value.dataset,
-                    "record_no": value.record_no, "action": value.action,
-                    "target_id": value.target_id,
-                }, sort_keys=True))
-            elif args.dataset_command in {"exclude", "include"}:
-                value = service.set_record_override(
-                    args.dataset, args.record_no,
-                    excluded=args.dataset_command == "exclude",
-                    actor=args.actor, reason=args.reason,
-                )
-                print(_format_json(args, {
-                    "action_id": value.id,
-                    "measurement_id": value.measurement_id,
-                    "excluded": value.excluded,
-                }, sort_keys=True))
-            elif args.dataset_command == "pending":
-                for dirty, target in service.pending(args.dataset):
-                    print(_format_json(args, {
-                        "dirty_id": dirty.id,
-                        "revision_id": None if dirty.source_id is None else int(dirty.source_id),
-                        "target_id": target.id, "sdbid": target.sdbid,
-                        "reason": dirty.reason,
-                    }, sort_keys=True))
-            else:
-                count = service.mark_exported(args.dataset, args.target)
-                print(_format_json(args, {"marked_exported": count}, sort_keys=True))
-        except (OSError, ValueError, KeyError) as error:
-            print(str(error), file=sys.stderr)
-            return 2
-        return 0
+        return run_dataset_command(context)
     if args.command == "import":
         refresh = tuple(value.strip() for value in args.refresh.split(",") if value.strip())
         if args.offline and refresh:

@@ -1,0 +1,15 @@
+<main>
+  <p><a href="/">← readiness queue</a></p>
+  <h1>Catalog providers</h1>
+  <p class="muted">One operational view of remote catalogs and locally retained reference snapshots. Expand a provider for matching, component, provenance, and snapshot details.</p>
+  <div class="summary">
+    <span><strong>$provider_count</strong> providers</span>
+    <span><strong>$remote_count</strong> remote</span>
+    <span><strong>$snapshot_current_count</strong> snapshots current</span>
+    <span><strong>$snapshot_missing_count</strong> snapshots missing</span>
+  </div>
+  <table class="catalog-overview">
+    <thead><tr><th>provider</th><th>catalog / release</th><th>acquisition</th><th>products / bands</th><th>status</th></tr></thead>
+    <tbody>$rows</tbody>
+  </table>
+</main>

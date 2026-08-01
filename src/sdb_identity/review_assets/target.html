@@ -1,0 +1,85 @@
+<main class="live-workspace">
+  <header class="live-header">
+    <span><a href="$back_url">← readiness queue</a></span>
+    <span><a href="/catalogs">Catalogs</a></span>
+    <strong>$target_heading</strong>
+    <span class="muted">$target_role/$target_state · $readiness_text</span>
+    $navigation
+    <div class="header-actions">
+      $external_resources
+      <button id="nearby-import" type="button"$nearby_import_disabled title="$nearby_import_title">Import nearby</button>
+      <button id="catalog-coverage" class="$coverage_class" type="button">$coverage_label</button>
+      <button id="classify-target" class="$role_button_class" type="button">$role_button_label</button>
+    </div>
+  </header>
+  <iframe id="sky-review" title="Sky and system review for $sdbid" src="/target/$quoted_sdbid/sky"></iframe>
+  <aside id="assignment-drawer" class="assignment-drawer" hidden>
+    <div class="drawer-header"><div><h2 id="drawer-title">Review tools</h2><div id="selected-source" class="muted"></div></div><button id="close-drawer" type="button" aria-label="Close review drawer">×</button></div>
+    <p id="assignment-prompt" class="muted">Select a plotted catalog source to review it.</p>
+    <section class="decision-meta"><label>Actor <input id="actor" value="$default_actor"></label><label>Reason <input id="reason" placeholder="Preview suggests a reason"></label></section>
+    <section id="catalog-association-editor" class="detection" hidden>
+      <h3>Source association</h3>
+      <p id="catalog-association-context" class="muted"></p>
+      <div class="drawer-actions">
+        <button type="button" class="preview-catalog-association" data-action="accept">Accept for this target</button>
+        <button type="button" class="preview-catalog-association" data-action="reject">Reject for this target</button>
+      </div>
+    </section>
+    <section id="catalog-association-preview-panel" class="preview-panel" hidden><h2>Source association preview</h2><div id="catalog-association-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-catalog-association" disabled>Apply source association</button></section>
+    <div id="detection-editors">$detection_cards</div>
+    <section id="provider-result-editor" class="detection" hidden>
+      <h3>Provider result</h3>
+      <p id="provider-result-context" class="muted"></p>
+      <div class="drawer-actions">
+        <button type="button" class="preview-provider-result" data-action="accept_candidate">Preview accept candidate</button>
+        <button type="button" class="preview-provider-result" data-action="reviewed_no_match">Preview no match</button>
+        <button type="button" class="preview-provider-result" data-action="retry">Preview retry</button>
+      </div>
+    </section>
+    <section id="provider-result-preview-panel" class="preview-panel" hidden><h2>Provider result preview</h2><div id="provider-result-preview" class="change-summary muted">Choose an action, then preview.</div><button id="apply-provider-result" disabled>Apply provider result action</button></section>
+    <div class="preview-grid">
+      <section class="preview-panel"><h2>Decision preview</h2><div id="preview" class="change-summary muted">Choose assignments, then preview.</div><button id="apply" disabled>Apply audited decision</button></section>
+      <section class="preview-panel"><h2>Fit include/exclude preview</h2><p class="muted">Fit inclusion is independent of component ownership. Changes apply by origin target, provider, and band.</p><div id="eligibility-preview" class="change-summary muted">Choose a band action, then preview.</div><button id="apply-eligibility" disabled>Apply include/exclude changes</button></section>
+    </div>
+  </aside>
+  <dialog id="lifecycle-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Target modelling role</h2><code>$requested_target_label</code></div><button value="cancel" aria-label="Close target role dialog">×</button></form>
+    <p>This decision describes how the target participates in fitting; it does not assert whether the object is single or multiple.</p>
+    <label class="role-choice"><input type="radio" name="lifecycle-role" value="physical"$physical_checked> <strong>Physical / fitted model</strong><span>Fit one photospheric model for this target. Use this for an unresolved combined-light AB system when A and B are not separately modelled; WDS multiplicity remains recorded.</span></label>
+    <label class="role-choice"><input type="radio" name="lifecycle-role" value="composite"$composite_checked> <strong>Composite / measurement scope</strong><span>Do not fit this target itself. Its measurements must be assigned to separately imported physical contributors such as A and B.</span></label>
+    <p id="lifecycle-warning" class="warning" hidden>A composite without imported physical contributors will remain unresolved for joint fitting. Choose physical if one combined-light model is the intended approximation.</p>
+    <section class="decision-meta"><label>Actor <input id="lifecycle-actor" value="$default_actor"></label><label>Reason <input id="lifecycle-reason" placeholder="Preview suggests a reason"></label></section>
+    <div class="dialog-actions"><button id="preview-lifecycle" type="button">Preview role decision</button><button id="apply-lifecycle" type="button" disabled>Apply audited decision</button></div>
+    <div id="lifecycle-preview" class="change-summary muted">Choose a role, then preview.</div>
+  </dialog>
+  <dialog id="relatives-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Immediate SIMBAD relatives</h2><code>$requested_target_label</code></div><button value="cancel" aria-label="Close relative import dialog">×</button></form>
+    <p>Preview or import only immediate stellar parents and children. Contextual groups, planets, and unknown object types are retained for review but are not imported; newly imported targets are not expanded recursively.</p>
+    <section class="decision-meta"><label>Actor <input id="relatives-actor" value="$default_actor"></label><label>Reason <input id="relatives-reason" placeholder="Preview suggests a reason"></label></section>
+    <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
+    <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
+  </dialog>
+  <dialog id="nearby-import-dialog" class="nearby-import-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Import nearby SIMBAD objects</h2><code>$requested_target_label</code></div><button value="cancel" aria-label="Close nearby import dialog">×</button></form>
+    <p>Search around the target position, select new objects, then import them with configured provider coverage. Angular proximity alone does not create a system relationship or sample membership.</p>
+    <div class="nearby-search-controls">
+      <label>Radius <span><input id="nearby-import-radius" type="number" min="1" max="600" step="1" value="60"> arcsec</span></label>
+      <button id="search-nearby-import" type="button">Search SIMBAD</button>
+    </div>
+    <div id="nearby-import-search-status" class="change-summary muted">Search to list nearby SIMBAD objects.</div>
+    <div id="nearby-import-results" class="nearby-import-results" hidden>
+      <table><thead><tr><th>Import</th><th>SIMBAD ID</th><th>Type</th><th>Spectral type</th><th>d</th><th>SDB status</th></tr></thead><tbody id="nearby-import-rows"></tbody></table>
+    </div>
+    <div class="dialog-actions"><button id="apply-nearby-import" type="button" disabled>Import selected</button></div>
+    <div id="nearby-import-summary" class="change-summary muted"></div>
+    <div id="nearby-import-target-links" class="import-target-links"></div>
+  </dialog>
+  <dialog id="catalog-coverage-dialog">
+    <form method="dialog" class="dialog-header"><div><h2>Catalog coverage</h2><code>$requested_target_label</code></div><button value="cancel" aria-label="Close catalog coverage dialog">×</button></form>
+    <p>Normalize stored catalog candidates and complete direct provider searches for system targets that do not yet have a current result. Existing results are skipped.</p>
+    <div class="dialog-actions"><button id="preview-catalog-coverage" type="button">Refresh preview</button><button id="apply-catalog-coverage" type="button" disabled>Complete catalog gaps</button></div>
+    <div id="catalog-coverage-preview" class="change-summary muted">Open this dialog to check direct provider coverage.</div>
+  </dialog>
+</main>
+<script>window.SDB_TARGET=$sdbid_json;window.SDB_TARGET_NAMES=$target_names_json;window.SDB_RAW_ROW_DETECTIONS=$raw_row_detections_json;window.SDB_CATALOG_UPDATE_AVAILABLE=$catalog_update_available_json;</script>
+<script>$workspace_js</script>
