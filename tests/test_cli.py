@@ -110,6 +110,41 @@ def test_cli_hierarchy_review_queue_lists_targets(tmp_path, capsys):
     assert "provide exactly one" in capsys.readouterr().err
 
 
+def test_cli_hierarchy_source_graph_and_matching_subhandlers(tmp_path, capsys):
+    database = tmp_path / "cli.sqlite"
+    assert main(["--database", str(database), "init"]) == 0
+    capsys.readouterr()
+
+    assert main([
+        "--database",
+        str(database),
+        "hierarchy",
+        "source",
+        "list",
+    ]) == 0
+    assert capsys.readouterr().out == ""
+
+    assert main([
+        "--database",
+        str(database),
+        "hierarchy",
+        "graph",
+        "diagnostics",
+        "--summary",
+    ]) == 0
+    assert capsys.readouterr().out == ""
+
+    assert main([
+        "--database",
+        str(database),
+        "hierarchy",
+        "summary",
+    ]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["sources"] == []
+    assert summary["record_counts"] == []
+
+
 def test_cli_unresolved_name_returns_error(tmp_path, capsys):
     database = tmp_path / "cli.sqlite"
     main(["--database", str(database), "init"])
