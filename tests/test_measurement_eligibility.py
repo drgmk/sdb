@@ -3,11 +3,11 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
-from sdb_identity.measurement_eligibility import (
+from sdb_identity.photometry.eligibility import (
     effective_measurement_eligibility,
 )
 from sdb_identity.models.catalogs import NormalizedMeasurement
-from sdb_identity.photometry import set_measurement_eligibility
+from sdb_identity.photometry.assignments import set_measurement_eligibility
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 

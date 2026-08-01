@@ -4,7 +4,7 @@ from astropy.table import Table
 
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.export import export_ipac
-from sdb_identity.photometry import (
+from sdb_identity.photometry.assignments import (
     list_measurement_eligibility_actions,
     photometry_review_queue,
     review_photometry_associations,

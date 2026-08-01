@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sdb_identity.system_photometry import load_system_photometry_state
+from sdb_identity.photometry.state import load_system_photometry_state
 from tests.test_fitting_groups import _assign_pair, _measurement
 from tests.test_system_photometry_foundation import _configured_system
 

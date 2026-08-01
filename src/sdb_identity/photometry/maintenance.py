@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .effective_assignments import derived_measurement_assignments
-from .models.photometry import MeasurementTargetAssociation
+from .effective import derived_measurement_assignments
+from ..models.photometry import MeasurementTargetAssociation
 
 
 @dataclass(frozen=True)

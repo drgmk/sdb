@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from sdb_identity.assignment_maintenance import (
+from sdb_identity.photometry.maintenance import (
     audit_automatic_assignment_sets,
 )
 from sdb_identity.catalogs.measurements import current_measurement_encounters
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import MeasurementValue
-from sdb_identity.photometry import assign_measurement_target
+from sdb_identity.photometry.assignments import assign_measurement_target
 from tests.test_catalog import FakeCatalog, candidate
 from tests.test_system_photometry_foundation import _configured_system
 

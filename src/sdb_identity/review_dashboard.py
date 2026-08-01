@@ -5,7 +5,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .assignment_readiness import assignment_readiness_report
+from .photometry.readiness import assignment_readiness_report
 from .fitting_groups import fitting_group_report
 from .models.identity import ExternalIdentifier
 from .vocabulary import INACTIVE_TARGET_STATES, ReviewPriority, review_priority_rank

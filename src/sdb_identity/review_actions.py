@@ -12,8 +12,8 @@ from .catalogs.associations import catalog_target_candidates
 from .catalogs.measurements import current_measurement_target_ids
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
-from .effective_assignments import effective_measurement_assignments
-from .measurement_eligibility import effective_measurement_eligibility
+from .photometry.effective import effective_measurement_assignments
+from .photometry.eligibility import effective_measurement_eligibility
 from .models.catalogs import (
     CatalogDetection,
     CatalogRun,

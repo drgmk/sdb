@@ -4,12 +4,12 @@ from collections import Counter
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .assignment_proposals import measurement_assignment_proposals
-from .decisions import configured_actor, resolve_reason
-from .photometry import assign_measurement_target
-from .progress import NULL_PROGRESS, ProgressReporter
-from .samples import SampleService
-from .targets import resolve_target
+from .proposals import measurement_assignment_proposals
+from ..decisions import configured_actor, resolve_reason
+from .assignments import assign_measurement_target
+from ..progress import NULL_PROGRESS, ProgressReporter
+from ..samples import SampleService
+from ..targets import resolve_target
 
 
 def apply_measurement_assignment_proposals(

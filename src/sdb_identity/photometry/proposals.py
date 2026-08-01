@@ -6,22 +6,22 @@ from collections.abc import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .astrometry import angular_separation_arcsec
-from .catalogs.policy import (
+from ..astrometry import angular_separation_arcsec
+from ..catalogs.policy import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
-from .models.identity import AstrometricSolution, ExternalIdentifier, Target
-from .models.catalogs import NormalizedMeasurement, RawCatalogRow
-from .providers import Astrometry
-from .system_photometry import (
+from ..models.identity import AstrometricSolution, ExternalIdentifier, Target
+from ..models.catalogs import NormalizedMeasurement, RawCatalogRow
+from ..providers import Astrometry
+from .state import (
     SystemPhotometryState,
     load_system_photometry_state,
 )
-from .catalogs.ubv_components import decode_ubv_component
-from .catalogs.tdsc_components import decode_tdsc_component
-from .targets import resolve_target
-from .vocabulary import INACTIVE_TARGET_STATES, TargetRole, TargetState
+from ..catalogs.ubv_components import decode_ubv_component
+from ..catalogs.tdsc_components import decode_tdsc_component
+from ..targets import resolve_target
+from ..vocabulary import INACTIVE_TARGET_STATES, TargetRole, TargetState
 _AMBIGUOUS_SCOPES = {"ambiguous", "neighbour_context", "reject"}
 _SIMBAD_IDENTIFIER_SOURCES = {"simbad", "simbad_metadata"}
 
@@ -41,8 +41,8 @@ def measurement_assignment_proposals(
     proposal never changes the materialized assignment table.
     """
     if system_context is None or target_context_loader is None:
-        from .hierarchy.system_context import HierarchySystemContextService
-        from .hierarchy.target_context import HierarchyTargetContextService
+        from ..hierarchy.system_context import HierarchySystemContextService
+        from ..hierarchy.target_context import HierarchyTargetContextService
 
         if system_context is None:
             system_context = HierarchySystemContextService(

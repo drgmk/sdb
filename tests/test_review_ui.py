@@ -24,7 +24,7 @@ from sdb_identity.models.photometry import (
 )
 from sdb_identity.models.metadata import MetadataRun, SimbadMetadata
 from sdb_identity.providers import ProviderError, SimbadNeighbour
-from sdb_identity.photometry import assign_measurement_target
+from sdb_identity.photometry.assignments import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui
 from sdb_identity.samples import SampleService
 from sdb_identity.identifiers import normalize_identifier

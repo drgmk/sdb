@@ -1,6 +1,6 @@
 import pytest
 
-from sdb_identity.photometry_semantics import validate_photometry_semantics
+from sdb_identity.photometry.semantics import validate_photometry_semantics
 
 
 @pytest.mark.parametrize(

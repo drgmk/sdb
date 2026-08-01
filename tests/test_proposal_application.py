@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from sdb_identity.models.photometry import MeasurementTargetAssociation
-from sdb_identity.proposal_application import (
+from sdb_identity.photometry.application import (
     apply_measurement_assignment_proposals,
 )
 from tests.test_fitting_groups import _measurement
@@ -43,7 +43,7 @@ def test_apply_proposals_does_not_store_ordinary_derived_default(
         "derived": True,
     }
     monkeypatch.setattr(
-        "sdb_identity.proposal_application.measurement_assignment_proposals",
+        "sdb_identity.photometry.application.measurement_assignment_proposals",
         lambda _sessions, _reference: [
             _proposal(
                 measurement,
@@ -94,7 +94,7 @@ def test_apply_proposals_materializes_complete_exception_over_derived_default(
         },
     ]
     monkeypatch.setattr(
-        "sdb_identity.proposal_application.measurement_assignment_proposals",
+        "sdb_identity.photometry.application.measurement_assignment_proposals",
         lambda _sessions, _reference: [
             _proposal(
                 measurement,

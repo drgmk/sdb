@@ -15,7 +15,7 @@ from .models.metadata import MetadataRun
 from .models.samples import Sample, SampleExportRun
 from .samples import SampleService
 from .identifiers import normalize_identifier
-from .system_photometry import load_system_photometry_state
+from .photometry.state import load_system_photometry_state
 from .update import DEFAULT_PROVIDERS
 from .vocabulary import PROVIDER_REVIEW_STATUSES
 

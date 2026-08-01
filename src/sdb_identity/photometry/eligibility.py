@@ -8,16 +8,16 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .catalogs.measurements import (
+from ..catalogs.measurements import (
     current_catalog_detection_target_pairs,
     current_measurement_encounters,
 )
-from .models.catalogs import (
+from ..models.catalogs import (
     IrasBandSelection,
     IrasDetectionFamily,
     NormalizedMeasurement,
 )
-from .models.photometry import MeasurementEligibilityAction
+from ..models.photometry import MeasurementEligibilityAction
 
 
 @dataclass(frozen=True)

@@ -6,13 +6,13 @@ from sqlalchemy import select
 
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import MeasurementValue
-from sdb_identity.assignment_readiness import assignment_readiness_report
+from sdb_identity.photometry.readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report
 from sdb_identity.joint_fit_manifest import write_joint_fit_manifest
 from sdb_identity.models.photometry import MeasurementTargetAssociation
 from sdb_identity.models.catalogs import NormalizedMeasurement, RawCatalogRow
-from sdb_identity.photometry import (
+from sdb_identity.photometry.assignments import (
     assign_measurement_target,
     set_measurement_eligibility,
 )

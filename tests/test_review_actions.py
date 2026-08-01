@@ -12,7 +12,7 @@ from sdb_identity.models.photometry import (
 )
 from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.models.hierarchy import TargetLifecycleAction
-from sdb_identity.photometry import assign_measurement_target
+from sdb_identity.photometry.assignments import assign_measurement_target
 from sdb_identity.review_actions import (
     review_detection_decision,
     review_photometry_eligibility_decision,

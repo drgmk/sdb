@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import CatalogCandidate, MeasurementValue
 from sdb_identity.catalogs.policy import catalog_band_wavelength_micron
-from sdb_identity.assignment_proposals import measurement_assignment_proposals
-from sdb_identity.assignment_review import build_measurement_assignment_review
+from sdb_identity.photometry.proposals import measurement_assignment_proposals
+from sdb_identity.photometry.review import build_measurement_assignment_review
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
@@ -23,7 +23,7 @@ from sdb_identity.models.photometry import (
     MeasurementAssociationAction,
     MeasurementTargetAssociation,
 )
-from sdb_identity.photometry import (
+from sdb_identity.photometry.assignments import (
     assign_measurement_target,
     list_measurement_assignment_history,
     list_measurement_target_assignments,
@@ -32,7 +32,7 @@ from sdb_identity.photometry import (
 )
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.identifiers import normalize_identifier
-from sdb_identity.proposal_application import apply_measurement_assignment_proposals
+from sdb_identity.photometry.application import apply_measurement_assignment_proposals
 from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService
 from sdb_identity.target_lifecycle import (
@@ -153,7 +153,7 @@ def test_measurement_contributors_are_many_to_many_and_audited_without_changing_
         export_ipac(session_factory, system.sdbid, tmp_path / "before.txt"),
         format="ascii.ipac",
     )
-    review = __import__("sdb_identity.photometry", fromlist=["review_photometry_associations"])
+    review = __import__("sdb_identity.photometry.assignments", fromlist=["review_photometry_associations"])
     measurement_id = review.review_photometry_associations(
         session_factory, system.sdbid
     )[0].measurement_id
@@ -210,7 +210,7 @@ def test_cli_records_lifecycle_and_measurement_assignments(tmp_path, capsys):
     origin = identity.add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
     component = identity.add(AddRequest(ra_deg=10.01, dec_deg=-20.0))
     CatalogAcquisitionService(sessions, {"allwise": _wise_catalog()}).refresh(origin.sdbid, "allwise")
-    review = __import__("sdb_identity.photometry", fromlist=["review_photometry_associations"])
+    review = __import__("sdb_identity.photometry.assignments", fromlist=["review_photometry_associations"])
     measurement_id = review.review_photometry_associations(sessions, origin.sdbid)[0].measurement_id
     common = ["--database", str(database)]
 

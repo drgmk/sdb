@@ -27,7 +27,7 @@ from ..models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from ..photometry_semantics import validate_photometry_semantics
+from ..photometry.semantics import validate_photometry_semantics
 
 
 LOGGER = logging.getLogger(__name__)

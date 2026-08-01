@@ -6,10 +6,10 @@ from typing import Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .catalogs.measurements import current_measurement_target_ids
-from .models.photometry import MeasurementTargetAssociation
-from .models.hierarchy import TargetLifecycleAction
-from .vocabulary import (
+from ..catalogs.measurements import current_measurement_target_ids
+from ..models.photometry import MeasurementTargetAssociation
+from ..models.hierarchy import TargetLifecycleAction
+from ..vocabulary import (
     INACTIVE_TARGET_STATES,
     MeasurementTargetRole,
     TargetRole,

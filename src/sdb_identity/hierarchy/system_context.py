@@ -35,7 +35,7 @@ from ..models.hierarchy import (
 )
 from ..models.metadata import MetadataRun, SimbadMetadata
 from ..providers import Astrometry
-from ..system_photometry import SystemPhotometryState, load_system_photometry_state
+from ..photometry.state import SystemPhotometryState, load_system_photometry_state
 from ..targets import resolve_target
 from ..vocabulary import ProviderRunStatus
 

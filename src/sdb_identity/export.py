@@ -16,11 +16,11 @@ from .dirty import (
     export_dirty_watermark,
     mark_exported_through,
 )
-from .measurement_eligibility import EffectiveMeasurementEligibility
+from .photometry.eligibility import EffectiveMeasurementEligibility
 from .models.identity import ExternalIdentifier, Target
 from .models.metadata import MetadataRun, SimbadMetadata
 from .models.catalogs import NormalizedMeasurement
-from .system_photometry import load_system_photometry_state
+from .photometry.state import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import ProviderRunStatus
 

@@ -1,6 +1,6 @@
 """Read-only measurement-assignment review projections.
 
-Proposal generation remains domain logic in :mod:`assignment_proposals`.
+Proposal generation remains domain logic in :mod:`sdb_identity.photometry.proposals`.
 This module owns the presentation-oriented target-by-measurement matrix used by
 the interactive review surface.
 """
@@ -12,11 +12,11 @@ from typing import TypedDict
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs.policy import (
+from ..catalogs.policy import (
     catalog_band_wavelength_micron,
     catalog_source_display_name,
 )
-from .assignment_proposals import (
+from .proposals import (
     effective_target_role,
     measurement_assignment_proposals,
 )
@@ -133,7 +133,7 @@ def build_measurement_assignment_review(
 ) -> MeasurementAssignmentReview:
     """Build proposal and matrix state for an interactive assignment review."""
     if system_context is None:
-        from .hierarchy.system_context import HierarchySystemContextService
+        from ..hierarchy.system_context import HierarchySystemContextService
 
         system_context = HierarchySystemContextService(session_factory).system_context(
             target_reference

@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from sdb_identity.models.identity import ExternalIdentifier, Target
-from sdb_identity.photometry import assign_measurement_target
+from sdb_identity.photometry.assignments import assign_measurement_target
 from sdb_identity.review_dashboard import review_dashboard_report
 from sdb_identity.review_actions import review_catalog_target_association_decision
 from sdb_identity.samples import SampleService

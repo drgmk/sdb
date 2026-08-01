@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalogs.policy import catalog_source_display_name
 from .catalogs.adapters.review_metadata import normalize_review_payload
-from .assignment_review import build_measurement_assignment_review
+from .photometry.review import build_measurement_assignment_review
 from .catalogs.results import (
     effective_catalog_results,
     effective_catalog_selected_rows,
