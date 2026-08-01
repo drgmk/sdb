@@ -83,7 +83,10 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         simbad_metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(simbad_metadata)")
         }
-    assert version == "0052_identity_candidate_decisions"
+        alma_member_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(alma_members)")
+        }
+    assert version == "0053_alma_member_canonical"
     assert {
         "measurement_eligibility_actions",
         "dataset_revisions", "curated_records",
@@ -96,7 +99,7 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "samples", "sample_membership_actions", "sample_export_runs",
         "sample_export_items",
         "catalog_batch_requests",
-        "alma_sync_runs", "alma_sync_chunks", "alma_observations", "alma_members",
+        "alma_sync_runs", "alma_sync_chunks", "alma_members",
         "alma_member_positions",
         "hierarchy_sources", "hierarchy_records", "target_systems",
         "target_system_members",
@@ -107,6 +110,8 @@ def test_batch_database_upgrades_to_photometry_override_schema(tmp_path):
         "catalog_target_association_actions",
         "structural_edges", "structural_edge_actions",
     } <= tables
+    assert "alma_observations" not in tables
+    assert "positions_json" not in alma_member_columns
     assert {
         "pm_ra_cosdec_masyr", "pm_dec_masyr", "proper_motion_available",
         "parallax_mas", "radial_velocity_kms", "position_bibcode",
@@ -378,5 +383,5 @@ def test_catalog_identifier_policy_removes_promoted_aliases_only(tmp_path):
             "SELECT value, source FROM external_identifiers ORDER BY id"
         ))
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert version == "0052_identity_candidate_decisions"
+    assert version == "0053_alma_member_canonical"
     assert identifiers == [("HD 1", "simbad"), ("Preferred name", "manual")]

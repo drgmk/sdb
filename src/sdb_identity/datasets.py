@@ -13,9 +13,11 @@ from astropy.table import Table
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_provenance import CatalogProvenance
+from .catalog_types import CatalogCandidate, MeasurementValue
+from .detection_ingestion import DetectionIngestor
 from .models import (
     CatalogRun,
-    CatalogDetection,
     CuratedAssociationAction,
     CuratedRecord,
     DatasetRevision,
@@ -106,7 +108,29 @@ def _payload(row) -> dict[str, object]:
     return {str(name): _value(row[name]) for name in row.colnames}
 
 
-class CuratedDatasetService:
+class SubmmObsAdapter:
+    """Map one source-controlled submm_obs revision into canonical values."""
+
+    name = "submm_obs"
+    query_epoch = 2000.0
+
+    def __init__(self, release: str, source_path: str):
+        self.release = release
+        self.source_path = source_path
+
+    def query(self, _context):
+        raise RuntimeError("submm_obs is imported from a curated revision")
+
+    @staticmethod
+    def normalize(candidate: CatalogCandidate) -> tuple[MeasurementValue, ...]:
+        return candidate.measurements
+
+    @staticmethod
+    def detection_key(candidate: CatalogCandidate) -> str:
+        return str(candidate.detection_key)
+
+
+class SubmmObsService:
     """Import source-controlled photometry files as atomic dataset revisions."""
 
     def __init__(self, session_factory: sessionmaker[Session]):
@@ -295,6 +319,7 @@ class CuratedDatasetService:
     @staticmethod
     def _materialize(session, revision, records_by_target):
         release = f"sha256:{revision.source_sha256[:16]}"
+        adapter = SubmmObsAdapter(release, revision.source_path)
         for target_id, values in records_by_target.items():
             target = session.get(Target, target_id)
             run = CatalogRun(
@@ -313,57 +338,56 @@ class CuratedDatasetService:
             session.add(run)
             session.flush()
             for record, item in values:
-                source_id = f"submm_obs:{record.record_no}"
-                detection = CatalogDetection(
-                    provider="submm_obs",
-                    release=release,
-                    detection_key=str(record.record_no),
+                band = f"WAV{int(round(float(item['wav'])))}"
+                candidate = CatalogCandidate(
                     source_id=str(item["id"]),
                     ra_deg=target.ra2000_deg,
                     dec_deg=target.dec2000_deg,
                     epoch=2000.0,
-                    payload_json=record.payload_json,
-                    normalization_status="completed",
-                    normalized_at=datetime.now(timezone.utc),
+                    payload=json.loads(record.payload_json),
+                    detection_key=str(record.record_no),
+                    provenance=(CatalogProvenance(
+                        service="curated",
+                        catalog_id="submm_obs",
+                        table_id=revision.source_path,
+                        row_key=str(record.record_no),
+                        identifier_column="id",
+                        identifier_value=str(item["id"]),
+                    ),),
+                    measurements=(MeasurementValue(
+                        band=band,
+                        measurement_key=f"{band}:0",
+                        value=float(item["fnu_mjy"]),
+                        error=float(
+                            _float(item.get("err_mjy"), default=0.0) or 0.0
+                        ),
+                        upper_limit=_truthy(item.get("sig3lim")),
+                        unit="mJy",
+                        bibcode=_text(item.get("ref")) or "",
+                        note1=f"Instr:{_text(item.get('instrument')) or ''}",
+                        note2=f"Name:{_text(item.get('name')) or ''}",
+                        excluded=_truthy(item.get("exclude")),
+                        exclusion_reason=(
+                            "submm_obs exclude flag"
+                            if _truthy(item.get("exclude"))
+                            else None
+                        ),
+                        ownership_scope="component",
+                        blend_state="clear",
+                    ),),
                 )
-                session.add(detection)
-                session.flush()
-                raw = RawCatalogRow(
+                DetectionIngestor.ingest(
+                    session,
+                    adapter=adapter,
+                    candidate=candidate,
                     run_id=run.id,
-                    detection_id=detection.id,
-                    source_id=source_id,
-                    ra_deg=target.ra2000_deg,
-                    dec_deg=target.dec2000_deg,
-                    epoch=2000.0,
+                    target_id=target_id,
+                    raw_source_id=f"submm_obs:{record.record_no}",
                     separation_arcsec=0.0,
                     score=100.0,
                     accepted=True,
-                    payload_json=record.payload_json,
+                    strict=True,
                 )
-                session.add(raw)
-                session.flush()
-                session.add(NormalizedMeasurement(
-                    run_id=run.id,
-                    target_id=target_id,
-                    raw_row_id=raw.id,
-                    detection_id=detection.id,
-                    measurement_key=f"WAV{int(round(float(item['wav'])))}:0",
-                    provider="submm_obs",
-                    source_id=str(item["id"]),
-                    band=f"WAV{int(round(float(item['wav'])))}",
-                    value=float(item["fnu_mjy"]),
-                    error=float(_float(item.get("err_mjy"), default=0.0) or 0.0),
-                    systematic_error=0.0,
-                    upper_limit=_truthy(item.get("sig3lim")),
-                    unit="mJy",
-                    bibcode=_text(item.get("ref")) or "",
-                    note1=f"Instr:{_text(item.get('instrument')) or ''}",
-                    note2=f"Name:{_text(item.get('name')) or ''}",
-                    excluded=_truthy(item.get("exclude")),
-                    exclusion_reason="submm_obs exclude flag" if _truthy(item.get("exclude")) else None,
-                    ownership_scope="component",
-                    blend_state="clear",
-                ))
 
     @staticmethod
     def _result(session, revision, *, matched=None, unchanged_revision=False):

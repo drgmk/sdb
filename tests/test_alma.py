@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 
 from astropy.time import Time
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from sdb_identity.alma import AlmaArchiveService
+from sdb_identity.alma import AlmaSyncService
+from sdb_identity.alma_lookup import AlmaLookupService
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
 from sdb_identity.models import (
-    AlmaMember, AlmaObservation, AlmaSyncChunk, AlmaSyncRun, AstrometricSolution,
+    AlmaMember, AlmaMemberPosition, AlmaSyncChunk, AlmaSyncRun,
+    AstrometricSolution,
 )
 from sdb_identity.providers import ProviderError
 from sdb_identity.providers import Astrometry
@@ -78,7 +80,7 @@ def alma_row(provider_id="ivo://alma/1", **values):
 
 def test_alma_bootstrap_stores_band_and_sync_provenance(session_factory):
     provider = FakeAlmaArchive([alma_row()])
-    result = AlmaArchiveService(session_factory, provider).bootstrap(2024, 2026)
+    result = AlmaSyncService(session_factory, provider).bootstrap(2024, 2026)
 
     assert (result.status, result.row_count, result.upserted_count) == (
         "completed", 1, 1,
@@ -97,7 +99,7 @@ def test_alma_bootstrap_stores_band_and_sync_provenance(session_factory):
 
 def test_alma_incremental_uses_last_modified_and_upserts(session_factory):
     provider = FakeAlmaArchive([alma_row()])
-    service = AlmaArchiveService(session_factory, provider)
+    service = AlmaSyncService(session_factory, provider)
     service.bootstrap(2024, 2025)
     provider.incremental_rows = [alma_row(
         band_list="3 6 7", lastModified="2026-03-04T00:00:00",
@@ -117,7 +119,7 @@ def test_full_bootstrap_deactivates_rows_absent_from_reconciliation(session_fact
     provider = FakeAlmaArchive([
         alma_row("ivo://alma/1"), alma_row("ivo://alma/2"),
     ])
-    service = AlmaArchiveService(session_factory, provider)
+    service = AlmaSyncService(session_factory, provider)
     service.bootstrap(2024, 2025)
     provider.bootstrap_rows = [alma_row("ivo://alma/1")]
 
@@ -151,10 +153,10 @@ def test_alma_project_lookup_propagates_target_to_observation_epoch(session_fact
         t_max=float(Time(2024.0, format="jyear").mjd),
         band_list="7",
     )])
-    service = AlmaArchiveService(session_factory, provider)
+    service = AlmaSyncService(session_factory, provider)
     service.bootstrap(2024, 2025)
 
-    projects = service.projects(target.target_id)
+    projects = AlmaLookupService(session_factory).projects(target.target_id)
 
     assert len(projects) == 1
     assert projects[0].proposal_id == "2024.1.00001.S"
@@ -163,7 +165,7 @@ def test_alma_project_lookup_propagates_target_to_observation_epoch(session_fact
 
 def test_alma_projects_cli_is_local(session_factory, db_path, capsys):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
-    AlmaArchiveService(
+    AlmaSyncService(
         session_factory, FakeAlmaArchive([alma_row()]),
     ).bootstrap(2024, 2025)
 
@@ -185,21 +187,50 @@ def test_alma_rows_deduplicate_to_member_with_all_positions_and_bands(
             s_ra=10.1, band_list="7",
         ),
     ]
-    AlmaArchiveService(
+    AlmaSyncService(
         session_factory, FakeAlmaArchive(rows),
     ).bootstrap(2024, 2025)
 
     with session_factory() as session:
         members = list(session.scalars(select(AlmaMember)))
+        position_count = session.scalar(
+            select(func.count(AlmaMemberPosition.id))
+        )
     assert len(members) == 1
-    assert members[0].member_ous_uid == "2024.1.00001.S|uid://member/1"
+    assert members[0].member_ous_uid == "uid://member/1"
     assert members[0].band_list == "6 7"
-    assert len(json.loads(members[0].positions_json)) == 2
+    assert position_count == 2
+
+
+def test_alma_member_uid_is_unique_within_proposal(session_factory):
+    rows = [
+        alma_row(member_ous_uid="uid://member/reused"),
+        alma_row(
+            "ivo://product/other",
+            member_ous_uid="uid://member/reused",
+            proposal_id="2024.1.00002.S",
+        ),
+    ]
+    AlmaSyncService(
+        session_factory, FakeAlmaArchive(rows),
+    ).bootstrap(2024, 2025)
+
+    with session_factory() as session:
+        members = list(session.scalars(
+            select(AlmaMember).order_by(AlmaMember.proposal_id)
+        ))
+    assert [member.proposal_id for member in members] == [
+        "2024.1.00001.S",
+        "2024.1.00002.S",
+    ]
+    assert {member.member_ous_uid for member in members} == {
+        "uid://member/reused"
+    }
 
 
 def test_failed_alma_bootstrap_resumes_only_unfinished_chunks(session_factory):
     provider = FailingAlmaArchive(fail_call=3)
-    service = AlmaArchiveService(session_factory, provider)
+    service = AlmaSyncService(session_factory, provider)
     try:
         service.bootstrap(2024, 2026, chunk_months=3)
     except ProviderError:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from astropy.table import Table
 from sqlalchemy import select
 
-from sdb_identity.datasets import CuratedDatasetService
+from sdb_identity.datasets import SubmmObsService
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.export import export_ipac
 from sdb_identity.models import CatalogRun, ExportDirtyTarget, ExternalIdentifier
@@ -41,7 +41,7 @@ def test_submm_import_associates_and_flows_to_export(session_factory, tmp_path):
         (2, "Unknown", "", "", 1300, "ALMA", 0.5, "", "1", "2021A&A...2B", "0"),
     ])
 
-    result = CuratedDatasetService(session_factory).import_submm_obs(source)
+    result = SubmmObsService(session_factory).import_submm_obs(source)
     assert (result.rows, result.matched, result.unresolved) == (2, 1, 1)
     assert (result.new, result.changed, result.removed, result.affected_targets) == (2, 0, 0, 1)
 
@@ -53,7 +53,7 @@ def test_submm_import_associates_and_flows_to_export(session_factory, tmp_path):
     assert list(exported["Unit"]) == ["mJy"]
     assert list(exported["Note1"]) == ["Instr:SCUBA-2"]
 
-    unresolved = CuratedDatasetService(session_factory).unresolved()
+    unresolved = SubmmObsService(session_factory).unresolved()
     assert [(row.record_no, row.source_identifier) for row in unresolved] == [(2, "Unknown")]
 
 
@@ -67,7 +67,7 @@ def test_submm_reimport_is_idempotent_and_tracks_changes(session_factory, tmp_pa
         (1, "HD 1", "1", "", 850, "SCUBA", 10.0, 1.0, "0", "ref1", "0"),
         (2, "HD 2", "2", "", 1300, "ALMA", 2.0, 0.2, "0", "ref2", "0"),
     ])
-    service = CuratedDatasetService(session_factory)
+    service = SubmmObsService(session_factory)
     initial = service.import_submm_obs(source)
     repeated = service.import_submm_obs(source)
     assert repeated.revision_id == initial.revision_id
@@ -114,7 +114,7 @@ def test_submm_import_rejects_duplicate_record_numbers(session_factory, tmp_path
         (1, "HD 2", "", "", 850, "SCUBA", 1.0, 0.1, "0", "ref", "0"),
     ])
     try:
-        CuratedDatasetService(session_factory).import_submm_obs(source)
+        SubmmObsService(session_factory).import_submm_obs(source)
     except ValueError as error:
         assert "duplicate record_no" in str(error)
     else:
@@ -126,7 +126,7 @@ def test_reconcile_matches_rows_after_target_alias_is_added(session_factory, tmp
     write_catalog(source, [
         (1, "HD 99", "99", "", 850, "SCUBA", 4.0, 0.4, "0", "ref", "0"),
     ])
-    service = CuratedDatasetService(session_factory)
+    service = SubmmObsService(session_factory)
     imported = service.import_submm_obs(source)
     assert imported.unresolved == 1
 
@@ -148,7 +148,7 @@ def test_manual_associations_survive_reimport_and_can_be_removed(session_factory
     write_catalog(source, [
         (1, "Unknown", "", "", 850, "SCUBA", 4.0, 0.4, "0", "ref", "0"),
     ])
-    service = CuratedDatasetService(session_factory)
+    service = SubmmObsService(session_factory)
     service.import_submm_obs(source)
     action = service.associate(
         "submm_obs", 1, target.sdbid, actor="tester", reason="identified from paper",
@@ -175,6 +175,52 @@ def test_manual_associations_survive_reimport_and_can_be_removed(session_factory
     assert service.unresolved()[0].association_method == "manual_unassociated"
 
 
+def test_reassociation_rematerializes_existing_revision_without_duplicate_detections(
+    session_factory, tmp_path,
+):
+    first = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
+    second = IdentityService(session_factory).add(AddRequest(ra_deg=20, dec_deg=-30))
+    add_alias(session_factory, first.target_id, "HD 1")
+    source = tmp_path / "submm_obs.txt"
+    write_catalog(source, [
+        (1, "HD 1", "", "first", 850, "SCUBA", 4.0, 0.4, "0", "ref1", "0"),
+        (2, "HD 1", "", "second", 450, "SCUBA", 5.0, 0.5, "0", "ref2", "0"),
+    ])
+    service = SubmmObsService(session_factory)
+    service.import_submm_obs(source)
+
+    service.associate(
+        "submm_obs",
+        1,
+        second.sdbid,
+        actor="tester",
+        reason="record belongs to the companion",
+    )
+
+    first_output = Table.read(
+        export_ipac(session_factory, first.sdbid, tmp_path / "first.txt"),
+        format="ascii.ipac",
+    )
+    second_output = Table.read(
+        export_ipac(session_factory, second.sdbid, tmp_path / "second.txt"),
+        format="ascii.ipac",
+    )
+    assert list(first_output["Phot"]) == [5.0]
+    assert list(second_output["Phot"]) == [4.0]
+
+    with session_factory() as session:
+        current_runs = list(session.scalars(
+            select(CatalogRun).where(
+                CatalogRun.provider == "submm_obs",
+                CatalogRun.is_current.is_(True),
+            )
+        ))
+        assert {run.target_id for run in current_runs} == {
+            first.target_id,
+            second.target_id,
+        }
+
+
 def test_record_override_is_granular_and_export_clears_pending(session_factory, tmp_path):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     add_alias(session_factory, target.target_id, "HD 1")
@@ -183,7 +229,7 @@ def test_record_override_is_granular_and_export_clears_pending(session_factory, 
         (1, "HD 1", "", "first", 850, "SCUBA", 4.0, 0.4, "0", "ref1", "0"),
         (2, "HD 1", "", "second", 850, "SCUBA", 5.0, 0.5, "0", "ref2", "0"),
     ])
-    service = CuratedDatasetService(session_factory)
+    service = SubmmObsService(session_factory)
     service.import_submm_obs(source)
     assert len(service.pending()) == 1
 

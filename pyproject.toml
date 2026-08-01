@@ -27,7 +27,11 @@ sdb = "sdb_identity.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-sdb_identity = ["migrations/script.py.mako"]
+sdb_identity = [
+  "migrations/script.py.mako",
+  "review_assets/*.css",
+  "review_assets/*.js",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

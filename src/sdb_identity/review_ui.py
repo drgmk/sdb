@@ -8,25 +8,33 @@ import os
 import threading
 import webbrowser
 from collections import defaultdict
+from importlib.resources import files
 from typing import Callable
 from urllib.parse import quote, urlencode
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .assignment_readiness import assignment_readiness_report
 from .decisions import DecisionContext
-from .fitting_groups import fitting_group_report
 from .hierarchy_system_context import HierarchySystemContextService
-from .models import CatalogResultDecision, CatalogRun, RawCatalogRow, Target
-from .review_actions import (
-    review_catalog_target_association_decision,
-    review_detection_decision,
-    review_photometry_eligibility_decision,
-    review_target_lifecycle_decision,
+from .models import CatalogRun, RawCatalogRow, Target
+from .review_commands import (
+    review_catalog_association_command,
+    review_detection_command,
+    review_eligibility_command,
+    review_lifecycle_command,
+    review_provider_result_command,
 )
 from .review_dashboard import review_dashboard_report
-from .review_widget import build_review_sky_view, render_review_sky_html
+from .review_workspace import (
+    TargetWorkspace,
+    build_target_workspace,
+    filtered_queue_rows as _filtered_queue_rows,
+    queue_filters as _queue_filters,
+    queue_query as _queue_query,
+)
+from .review_sky_render import render_review_sky_html
+from .review_widget import build_review_sky_view
 from .service import IdentityService
 from .system_expansion import (
     import_immediate_relatives,
@@ -36,7 +44,16 @@ from .target_import import (
     TargetImportService,
     search_nearby_simbad,
 )
-from .vocabulary import PROVIDER_FAILURE_STATUSES
+
+
+def _review_asset(name: str) -> str:
+    return files("sdb_identity.review_assets").joinpath(name).read_text(
+        encoding="utf-8"
+    )
+
+
+_CSS = _review_asset("review.css")
+_WORKSPACE_JS = _review_asset("workspace.js")
 
 
 def create_review_app(
@@ -102,60 +119,20 @@ def create_review_app(
                 provider=provider,
                 search=search,
             )
-            readiness = assignment_readiness_report(
-                session_factory, target_reference=sdbid,
-            )
-            graph = fitting_group_report(
-                session_factory, target_reference=sdbid,
-            )
-            system_context = HierarchySystemContextService(
+            workspace = build_target_workspace(
                 session_factory,
-            ).system_context(
                 sdbid,
-                catalog_providers=catalog_coverage_providers,
-            )
-            simbad_main_ids = dict(
-                system_context.get("simbad_main_id_by_target", {})
-            )
-            for relative in system_context.get("simbad_relative_preview", []):
-                if (
-                    relative.get("action") != "context_only"
-                    and relative.get("matched_sdbid")
-                    and relative.get("main_id")
-                ):
-                    simbad_main_ids.setdefault(
-                        str(relative["matched_sdbid"]),
-                        str(relative["main_id"]),
-                    )
-            raw_row_detections = _raw_row_detection_map(session_factory, graph)
-            navigation = None
-            display_name = None
-            if sample is not None:
-                queue_report = review_dashboard_report(
-                    session_factory, sample=sample,
-                )
-                display_name = next((
-                    str(row["display_name"])
-                    for row in queue_report["rows"]
-                    if row["sdbid"] == sdbid and row.get("display_name")
-                ), None)
-                navigation = _queue_navigation(
-                    queue_report, sdbid, filters, position,
-                )
-            display_name = display_name or simbad_main_ids.get(sdbid)
-            return _target_page(
-                sdbid, readiness, graph, raw_row_detections, navigation,
-                display_name, simbad_main_ids,
-                catalog_coverage=list(
-                    system_context.get("catalog_coverage_by_target", [])
-                ),
+                sample=sample,
+                filters=filters,
+                position=position,
+                catalog_coverage_providers=catalog_coverage_providers,
                 catalog_update_available=catalog_update_factory is not None,
                 nearby_import_available=(
                     identity_service_factory is not None
                     and catalog_update_factory is not None
                 ),
-                target_position=dict(system_context["target"]),
             )
+            return _target_page(workspace)
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -190,90 +167,102 @@ def create_review_app(
         return catalog_overview(reference_store)
 
     @app.get("/api/target/{sdbid}")
-    def target_api(sdbid: str):
+    def target_api(
+        sdbid: str,
+        view: str = "actionable",
+        priority: str = "",
+        role: str = "",
+        classification: str = "",
+        provider: str = "",
+        search: str = "",
+        position: int | None = None,
+    ):
         try:
-            return {
-                "readiness": assignment_readiness_report(
-                    session_factory, target_reference=sdbid,
+            return build_target_workspace(
+                session_factory,
+                sdbid,
+                sample=sample,
+                filters=_queue_filters(
+                    view=view,
+                    priority=priority,
+                    role=role,
+                    classification=classification,
+                    provider=provider,
+                    search=search,
                 ),
-                "fitting_graph": fitting_group_report(
-                    session_factory, target_reference=sdbid,
+                position=position,
+                catalog_coverage_providers=catalog_coverage_providers,
+                catalog_update_available=catalog_update_factory is not None,
+                nearby_import_available=(
+                    identity_service_factory is not None
+                    and catalog_update_factory is not None
                 ),
-            }
+            ).as_dict()
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.post("/api/decision/preview")
     async def preview(payload: dict[str, object]):
         try:
-            value = _decision_from_payload(
+            return review_detection_command(
                 session_factory, payload, apply=False,
             )
-            return _with_human_summary(value, _decision_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/decision/apply")
     async def apply(payload: dict[str, object]):
         try:
-            value = _decision_from_payload(
+            return review_detection_command(
                 session_factory, payload, apply=True,
             )
-            return _with_human_summary(value, _decision_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/lifecycle/preview")
     async def lifecycle_preview(payload: dict[str, object]):
         try:
-            value = _lifecycle_from_payload(
+            return review_lifecycle_command(
                 session_factory, payload, apply=False,
             )
-            return _with_human_summary(value, _lifecycle_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/lifecycle/apply")
     async def lifecycle_apply(payload: dict[str, object]):
         try:
-            value = _lifecycle_from_payload(
+            return review_lifecycle_command(
                 session_factory, payload, apply=True,
             )
-            return _with_human_summary(value, _lifecycle_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/eligibility/preview")
     async def eligibility_preview(payload: dict[str, object]):
         try:
-            value = _eligibility_from_payload(
+            return review_eligibility_command(
                 session_factory, payload, apply=False,
             )
-            return _with_human_summary(value, _eligibility_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/eligibility/apply")
     async def eligibility_apply(payload: dict[str, object]):
         try:
-            value = _eligibility_from_payload(
+            return review_eligibility_command(
                 session_factory, payload, apply=True,
             )
-            return _with_human_summary(value, _eligibility_summary(value))
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/provider-result/preview")
     async def provider_result_preview(payload: dict[str, object]):
         try:
-            value = _provider_result_from_payload(
+            return review_provider_result_command(
                 session_factory,
                 catalog_service_factory,
                 payload,
                 apply=False,
-            )
-            return _with_human_summary(
-                value, _provider_result_summary(value),
             )
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -281,14 +270,11 @@ def create_review_app(
     @app.post("/api/provider-result/apply")
     async def provider_result_apply(payload: dict[str, object]):
         try:
-            value = _provider_result_from_payload(
+            return review_provider_result_command(
                 session_factory,
                 catalog_service_factory,
                 payload,
                 apply=True,
-            )
-            return _with_human_summary(
-                value, _provider_result_summary(value),
             )
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -296,11 +282,8 @@ def create_review_app(
     @app.post("/api/catalog-association/preview")
     async def catalog_association_preview(payload: dict[str, object]):
         try:
-            value = _catalog_association_from_payload(
+            return review_catalog_association_command(
                 session_factory, payload, apply=False,
-            )
-            return _with_human_summary(
-                value, _catalog_association_summary(value),
             )
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -308,11 +291,8 @@ def create_review_app(
     @app.post("/api/catalog-association/apply")
     async def catalog_association_apply(payload: dict[str, object]):
         try:
-            value = _catalog_association_from_payload(
+            return review_catalog_association_command(
                 session_factory, payload, apply=True,
-            )
-            return _with_human_summary(
-                value, _catalog_association_summary(value),
             )
         except (KeyError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -434,479 +414,10 @@ def serve_review_ui(
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
-def _decision_from_payload(
-    session_factory: sessionmaker[Session],
-    payload: dict[str, object],
-    *,
-    apply: bool,
-) -> dict[str, object]:
-    return review_detection_decision(
-        session_factory,
-        detection_id=int(payload["detection_id"]),
-        scope_target_reference=str(payload["scope_target"]),
-        contributor_references=[
-            str(value) for value in payload.get("contributors", [])
-        ],
-        include_composite_scope=bool(payload.get("include_composite_scope")),
-        measurement_ids=[
-            int(value) for value in payload.get("measurement_ids", [])
-        ],
-        target_role=(
-            None if payload.get("target_role") in {None, ""}
-            else str(payload["target_role"])
-        ),
-        target_state=(
-            None if payload.get("target_state") in {None, ""}
-            else str(payload["target_state"])
-        ),
-        apply=apply,
-        actor=None if not apply else _optional_text(payload.get("actor")),
-        reason=None if not apply else _optional_text(payload.get("reason")),
-        expected_token=(
-            None if not apply else str(payload.get("state_token", ""))
-        ),
-    )
-
-
-def _lifecycle_from_payload(
-    session_factory: sessionmaker[Session],
-    payload: dict[str, object],
-    *,
-    apply: bool,
-) -> dict[str, object]:
-    return review_target_lifecycle_decision(
-        session_factory,
-        target_reference=str(payload["target"]),
-        role=str(payload["role"]),
-        state=str(payload["state"]),
-        apply=apply,
-        actor=None if not apply else _optional_text(payload.get("actor")),
-        reason=None if not apply else _optional_text(payload.get("reason")),
-        expected_token=(
-            None if not apply else str(payload.get("state_token", ""))
-        ),
-    )
-
-
-def _eligibility_from_payload(
-    session_factory: sessionmaker[Session],
-    payload: dict[str, object],
-    *,
-    apply: bool,
-) -> dict[str, object]:
-    raw_changes = payload.get("changes")
-    if not isinstance(raw_changes, list):
-        raise ValueError("changes must be a list")
-    return review_photometry_eligibility_decision(
-        session_factory,
-        changes=[dict(value) for value in raw_changes],
-        apply=apply,
-        actor=None if not apply else _optional_text(payload.get("actor")),
-        reason=None if not apply else _optional_text(payload.get("reason")),
-        expected_token=(
-            None if not apply else str(payload.get("state_token", ""))
-        ),
-    )
-
-
-def _catalog_association_from_payload(
-    session_factory: sessionmaker[Session],
-    payload: dict[str, object],
-    *,
-    apply: bool,
-) -> dict[str, object]:
-    return review_catalog_target_association_decision(
-        session_factory,
-        target_reference=str(payload["target"]),
-        detection_id=int(payload["detection_id"]),
-        action=str(payload["action"]),
-        reviewed_raw_row_id=int(payload["raw_row_id"]),
-        apply=apply,
-        actor=None if not apply else _optional_text(payload.get("actor")),
-        reason=None if not apply else _optional_text(payload.get("reason")),
-        expected_token=(
-            None if not apply else str(payload.get("state_token", ""))
-        ),
-    )
-
-
-def _provider_result_from_payload(
-    session_factory: sessionmaker[Session],
-    catalog_service_factory: Callable[[str, str], object] | None,
-    payload: dict[str, object],
-    *,
-    apply: bool,
-) -> dict[str, object]:
-    action = str(payload["action"])
-    if action not in {"accept_candidate", "reviewed_no_match", "retry"}:
-        raise ValueError(f"unknown provider-result action: {action}")
-    run_id = int(payload["run_id"])
-    raw_row_id = (
-        None if payload.get("raw_row_id") is None
-        else int(payload["raw_row_id"])
-    )
-    with session_factory() as session:
-        run = session.get(CatalogRun, run_id)
-        if run is None:
-            raise KeyError(f"catalog run not found: {run_id}")
-        target = session.get(Target, run.target_id)
-        if target is None:
-            raise KeyError(f"target not found for catalog run: {run_id}")
-        raw = None if raw_row_id is None else session.get(
-            RawCatalogRow, raw_row_id,
-        )
-        latest_decision = session.scalar(
-            select(CatalogResultDecision)
-            .where(CatalogResultDecision.reviewed_run_id == run.id)
-            .order_by(CatalogResultDecision.id.desc())
-            .limit(1)
-        )
-        if action == "accept_candidate":
-            if raw is None or raw.run_id != run.id:
-                raise ValueError("selected catalog candidate is not from this run")
-            if run.status != "ambiguous" or not run.is_current:
-                raise ValueError("candidate acceptance requires a current ambiguous run")
-        elif action == "reviewed_no_match":
-            if run.status != "ambiguous" or not run.is_current:
-                raise ValueError("reviewed no-match requires a current ambiguous run")
-        else:
-            if run.status not in PROVIDER_FAILURE_STATUSES:
-                raise ValueError("retry requires a failed catalog run")
-            latest_id = session.scalar(
-                select(CatalogRun.id)
-                .where(
-                    CatalogRun.target_id == run.target_id,
-                    CatalogRun.provider == run.provider,
-                )
-                .order_by(CatalogRun.id.desc())
-                .limit(1)
-            )
-            if latest_id != run.id:
-                raise ValueError("catalog failure has already been superseded")
-        token_state = {
-            "action": action,
-            "run_id": run.id,
-            "run_status": run.status,
-            "run_is_current": run.is_current,
-            "raw_row_id": None if raw is None else raw.id,
-            "source_id": None if raw is None else raw.source_id,
-            "decision_id": (
-                None if latest_decision is None else latest_decision.id
-            ),
-            "decision_action": (
-                None if latest_decision is None else latest_decision.action
-            ),
-            "decision_raw_row_id": (
-                None
-                if latest_decision is None
-                else latest_decision.reviewed_raw_row_id
-            ),
-        }
-        state_token = hashlib.sha256(
-            json.dumps(token_state, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        source_id = None if raw is None else raw.source_id
-        has_changes = not (
-            latest_decision is not None
-            and (
-                (
-                    action == "accept_candidate"
-                    and latest_decision.action == "accept_detection"
-                    and latest_decision.reviewed_raw_row_id == raw_row_id
-                )
-                or (
-                    action == "reviewed_no_match"
-                    and latest_decision.action == "reviewed_no_match"
-                )
-            )
-        )
-        base = {
-            "action": action,
-            "has_changes": has_changes,
-            "state_token": state_token,
-            "suggested_reason": {
-                "accept_candidate": (
-                    f"Selected {run.provider} source {source_id} for {target.sdbid}"
-                ),
-                "reviewed_no_match": (
-                    f"Reviewed {run.provider} candidates for {target.sdbid}; "
-                    "none is the target"
-                ),
-                "retry": (
-                    f"Retried failed {run.provider} result for {target.sdbid}"
-                ),
-            }[action],
-            "target": {"id": target.id, "sdbid": target.sdbid},
-            "run": {
-                "id": run.id,
-                "provider": run.provider,
-                "status": run.status,
-                "error": run.error,
-            },
-            "candidate": (
-                None if raw is None else {
-                    "raw_row_id": raw.id,
-                    "source_id": raw.source_id,
-                    "separation_arcsec": raw.separation_arcsec,
-                    "score": raw.score,
-                }
-            ),
-        }
-        provider = run.provider
-
-    if not apply:
-        if (
-            action in {"accept_candidate", "retry"}
-            and catalog_service_factory is None
-        ):
-            raise RuntimeError(
-                f"{action.replace('_', ' ')} is unavailable in this review server"
-            )
-        if action in {"accept_candidate", "retry"}:
-            catalog_service_factory(provider, action)
-        return {**base, "mode": "preview"}
-
-    expected_token = str(payload.get("state_token", ""))
-    if expected_token != state_token:
-        raise ValueError("provider result changed after preview; preview again")
-    actor = _optional_text(payload.get("actor"))
-    reason = _optional_text(payload.get("reason"))
-    if action == "reviewed_no_match":
-        from .catalog_decisions import CatalogDecisionService
-
-        result = CatalogDecisionService(session_factory).reviewed_no_match(
-            run_id, actor=actor, reason=reason,
-        )
-    else:
-        if catalog_service_factory is None:
-            raise RuntimeError(
-                f"{action.replace('_', ' ')} is unavailable in this review server"
-            )
-        service = catalog_service_factory(provider, action)
-        if action == "accept_candidate":
-            result = service.accept_candidate(
-                raw_row_id, actor=actor, reason=reason,
-            )
-        else:
-            result = service.retry_failed_run(
-                run_id, actor=actor, reason=reason,
-            )
-    return {
-        **base,
-        "mode": "applied",
-        "applied": result.__dict__,
-    }
-
-
 def _with_human_summary(
     value: dict[str, object], summary: dict[str, object],
 ) -> dict[str, object]:
     return {**value, "human_summary": summary}
-
-
-def _provider_result_summary(value: dict[str, object]) -> dict[str, object]:
-    action = str(value["action"])
-    provider = str(value["run"]["provider"])
-    candidate = value.get("candidate")
-    if action == "accept_candidate":
-        change = (
-            f"Accept {provider} source {candidate['source_id']} as the catalog match."
-        )
-    elif action == "reviewed_no_match":
-        change = (
-            f"Record that none of the reviewed {provider} candidates matches."
-        )
-    else:
-        change = f"Retry the failed {provider} provider request."
-    applied = value.get("applied") or {}
-    title = (
-        f"Provider action applied: {applied.get('status', action)}"
-        if value["mode"] == "applied"
-        else {
-            "accept_candidate": "Catalog candidate ready to accept",
-            "reviewed_no_match": "Reviewed no-match ready to record",
-            "retry": "Provider retry ready",
-        }[action]
-    )
-    warnings = []
-    if action == "retry":
-        warnings.append(
-            "Retry performs a provider request and records its new versioned result."
-        )
-    return {
-        "title": title,
-        "facts": [
-            f"Target: {value['target']['sdbid']}",
-            f"Current result: {provider} — {value['run']['status']}",
-        ],
-        "changes": [change],
-        "warnings": warnings,
-    }
-
-
-def _catalog_association_summary(
-    value: dict[str, object],
-) -> dict[str, object]:
-    detection = value["detection"]
-    target = value["target"]
-    action = str(value["action"])
-    verb = "Accept" if action == "accept" else "Reject"
-    source = (
-        detection.get("source_display_name") or detection["source_id"]
-    )
-    change = (
-        f"{verb} {detection['provider']} source {source} "
-        f"{'as' if action == 'accept' else 'for'} {target['sdbid']}."
-    )
-    if value["mode"] == "applied":
-        added = int((value.get("applied") or {}).get("actions_added", 0))
-        title = (
-            "Catalog source association applied"
-            if added
-            else "Catalog source association already current"
-        )
-    else:
-        title = (
-            "Catalog source association ready"
-            if value["has_changes"]
-            else "Catalog source association already current"
-        )
-    return {
-        "title": title,
-        "facts": [
-            (
-                f"Separation: "
-                f"{float(detection['separation_arcsec']):.2f} arcsec"
-            ),
-            "The original provider query and raw result remain unchanged.",
-            (
-                "Measurement contributor/composite assignment is a separate "
-                "decision."
-            ),
-        ],
-        "changes": [change] if value["has_changes"] else [
-            f"The latest manual decision is already {action}."
-        ],
-        "warnings": [],
-    }
-
-
-def _decision_summary(value: dict[str, object]) -> dict[str, object]:
-    measurements = {
-        int(row["measurement_id"]): row for row in value["measurements"]
-    }
-    bands = [str(row["band"]) for row in value["measurements"]]
-    changes = []
-    for verb, key in (("Add", "add_assignments"), ("Remove", "remove_assignments")):
-        grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
-        for row in value[key]:
-            measurement = measurements.get(int(row["measurement_id"]))
-            grouped[(str(row["role"]), str(row["sdbid"]))].append(
-                str(row["measurement_id"]) if measurement is None
-                else str(measurement["band"])
-            )
-        for (role, sdbid), assigned_bands in sorted(grouped.items()):
-            changes.append(
-                f"{verb} {role.replace('_', ' ')}: {sdbid} — "
-                f"{', '.join(sorted(assigned_bands))}"
-            )
-    lifecycle = value.get("lifecycle_change")
-    if lifecycle:
-        changes.append(
-            f"Change target role: {lifecycle['sdbid']} from "
-            f"{lifecycle['from_role']}/{lifecycle['from_state']} to "
-            f"{lifecycle['to_role']}/{lifecycle['to_state']}"
-        )
-    excluded = [
-        str(row["band"]) for row in value["measurements"] if row.get("excluded")
-    ]
-    warnings = []
-    if excluded:
-        warnings.append(
-            "Provider exclusions remain unchanged for: " + ", ".join(excluded)
-        )
-    applied = value.get("applied") or {}
-    title = (
-        f"Applied {int(applied.get('assignments_added', 0))} additions and "
-        f"{int(applied.get('assignments_removed', 0))} removals"
-        if value.get("mode") == "applied"
-        else ("Decision changes ready" if value["has_changes"] else "No assignment changes")
-    )
-    detection = value["detection"]
-    return {
-        "title": title,
-        "facts": [
-            f"Detection: {detection['provider']} "
-            f"{detection.get('source_display_name') or detection['source_id']}",
-            f"Selected bands: {', '.join(bands)}",
-            f"Scope target: {value['scope_target']['sdbid']}",
-        ],
-        "changes": changes or ["Current ownership already matches this decision."],
-        "warnings": warnings,
-    }
-
-
-def _lifecycle_summary(value: dict[str, object]) -> dict[str, object]:
-    reconciliation = value.get("assignment_reconciliation") or []
-    changes = []
-    if value["current"] != value["desired"]:
-        changes.append(
-            f"Change role from {value['current']['role']}/{value['current']['state']} "
-            f"to {value['desired']['role']}/{value['desired']['state']}."
-        )
-    if reconciliation:
-        changes.append(
-            f"Convert {len(reconciliation)} existing composite-scope assignment"
-            f"{'s' if len(reconciliation) != 1 else ''} to contributor ownership."
-        )
-    applied = value.get("applied") or {}
-    title = (
-        f"Applied role decision ({int(applied.get('lifecycle_actions', 0))} lifecycle action)"
-        if value.get("mode") == "applied"
-        else ("Role changes ready" if value["has_changes"] else "No role changes")
-    )
-    return {
-        "title": title,
-        "facts": [
-            f"Target: {value['target']['sdbid']}",
-            str(value["interpretation"]["summary"]),
-        ],
-        "changes": changes or ["The target already has this modelling role."],
-        "warnings": [str(value["interpretation"]["multiplicity"])],
-    }
-
-
-def _eligibility_summary(value: dict[str, object]) -> dict[str, object]:
-    changed = [row for row in value["changes"] if row["has_change"]]
-    unchanged = [row for row in value["changes"] if not row["has_change"]]
-    changes = [
-        f"{'Exclude' if row['desired_excluded'] else 'Include'} "
-        f"{row['provider']} {row['band']} for {row['sdbid']}."
-        for row in changed
-    ]
-    applied = value.get("applied") or {}
-    title = (
-        f"Applied {int(applied.get('actions_added', 0))} fit include/exclude change"
-        f"{'s' if int(applied.get('actions_added', 0)) != 1 else ''}"
-        if value.get("mode") == "applied"
-        else (
-            "Fit include/exclude changes ready"
-            if changed
-            else "No fit include/exclude changes"
-        )
-    )
-    return {
-        "title": title,
-        "facts": [
-            "These controls affect fitting/export eligibility, not ownership.",
-            f"Reviewed bands: {len(value['changes'])}",
-        ],
-        "changes": changes or ["The effective measurement settings already match."],
-        "warnings": ([
-            f"{len(unchanged)} selected setting"
-            f"{'s are' if len(unchanged) != 1 else ' is'} already current."
-        ] if unchanged else []),
-    }
 
 
 def _relative_from_payload(
@@ -1442,97 +953,6 @@ def _catalog_coverage_summary(value: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _queue_filters(**values: str) -> dict[str, str]:
-    return {
-        key: str(value or "").strip()
-        for key, value in values.items()
-        if str(value or "").strip()
-    }
-
-
-def _filtered_queue_rows(
-    report: dict[str, object], filters: dict[str, str],
-) -> list[dict[str, object]]:
-    rows = list(report["rows"])
-    view = filters.get("view", "actionable")
-    if view == "actionable":
-        rows = [row for row in rows if row["priority"] != "none"]
-    elif view == "clean":
-        rows = [row for row in rows if row["priority"] == "none"]
-    elif view != "all":
-        rows = []
-    for key in ("priority", "role", "classification"):
-        if key in filters:
-            rows = [row for row in rows if str(row[key]) == filters[key]]
-    if "provider" in filters:
-        rows = [
-            row for row in rows
-            if any(
-                str(value["provider"]) == filters["provider"]
-                for value in row["providers"]
-            )
-        ]
-    if "search" in filters:
-        needle = filters["search"].casefold()
-        rows = [row for row in rows if needle in " ".join([
-            str(row["sdbid"]),
-            str(row.get("display_name") or ""),
-            str(row["recommended_action"]),
-            str(row["classification"]),
-            *(str(value["provider"]) for value in row["providers"]),
-            *(str(band) for value in row["providers"] for band in value["bands"]),
-        ]).casefold()]
-    return rows
-
-
-def _queue_query(filters: dict[str, str], position: int | None = None) -> str:
-    values: dict[str, object] = dict(filters)
-    if position is not None:
-        values["position"] = position
-    encoded = urlencode(values)
-    return "" if not encoded else f"?{encoded}"
-
-
-def _queue_navigation(
-    report: dict[str, object],
-    sdbid: str,
-    filters: dict[str, str],
-    requested_position: int | None,
-) -> dict[str, object]:
-    rows = _filtered_queue_rows(report, filters)
-    current_index = next(
-        (index for index, row in enumerate(rows) if row["sdbid"] == sdbid),
-        None,
-    )
-    current_present = current_index is not None
-    if current_index is None:
-        cursor = max(0, int(requested_position or 0))
-        previous_index = min(cursor - 1, len(rows) - 1)
-        next_index = cursor if cursor < len(rows) else None
-    else:
-        previous_index = current_index - 1
-        next_index = current_index + 1 if current_index + 1 < len(rows) else None
-
-    def target_url(index: int | None) -> str | None:
-        if index is None or index < 0 or index >= len(rows):
-            return None
-        target = str(rows[index]["sdbid"])
-        return f"/target/{quote(target)}{_queue_query(filters, index)}"
-
-    display_position = (
-        current_index + 1 if current_index is not None
-        else min(max(int(requested_position or 0), 0) + 1, len(rows))
-    )
-    return {
-        "filters": filters,
-        "back_url": f"/{_queue_query(filters)}",
-        "previous_url": target_url(previous_index),
-        "next_url": target_url(next_index),
-        "position": display_position,
-        "count": len(rows),
-        "current_present": current_present,
-    }
-
 
 def _select_options(
     values: list[str], selected: str, *, empty_label: str,
@@ -1778,19 +1198,18 @@ def _target_external_resources(
     return resources
 
 
-def _target_page(
-    sdbid: str,
-    readiness: dict[str, object],
-    graph: dict[str, object],
-    raw_row_detections: dict[int, int],
-    navigation: dict[str, object] | None = None,
-    display_name: str | None = None,
-    simbad_main_ids: dict[str, str] | None = None,
-    catalog_coverage: list[dict[str, object]] | None = None,
-    catalog_update_available: bool = False,
-    nearby_import_available: bool = False,
-    target_position: dict[str, object] | None = None,
-) -> str:
+def _target_page(workspace: TargetWorkspace) -> str:
+    sdbid = workspace.sdbid
+    readiness = workspace.readiness
+    graph = workspace.fitting_graph
+    raw_row_detections = workspace.raw_row_detections
+    navigation = workspace.navigation
+    display_name = workspace.display_name
+    simbad_main_ids = workspace.simbad_main_ids
+    catalog_coverage = list(workspace.catalog_coverage)
+    catalog_update_available = workspace.catalog_update_available
+    nearby_import_available = workspace.nearby_import_available
+    target_position = workspace.target_position
     default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
         (row for row in graph["targets"] if row["sdbid"] == sdbid),
@@ -1799,7 +1218,6 @@ def _target_page(
     if target is None:
         raise KeyError(f"target is not present in its fitting graph: {sdbid}")
     targets = sorted(graph["targets"], key=lambda row: str(row["sdbid"]))
-    simbad_main_ids = simbad_main_ids or {}
 
     def target_label(row: dict[str, object]) -> str:
         target_sdbid = str(row["sdbid"])
@@ -2120,23 +1538,6 @@ def _page(title: str, body: str, *, body_class: str = "") -> str:
 <style>{_CSS}</style></head><body class="{_e(body_class)}">{body}</body></html>"""
 
 
-def _raw_row_detection_map(
-    session_factory: sessionmaker[Session], graph: dict[str, object],
-) -> dict[int, int]:
-    detection_ids = {
-        int(row["detection_id"]) for row in graph["measurements"]
-    }
-    if not detection_ids:
-        return {}
-    with session_factory() as session:
-        return {
-            int(raw_row_id): int(detection_id)
-            for raw_row_id, detection_id in session.execute(
-                select(RawCatalogRow.id, RawCatalogRow.detection_id)
-                .where(RawCatalogRow.detection_id.in_(detection_ids))
-            )
-        }
-
 
 def _e(value: object) -> str:
     return html.escape(str(value), quote=True)
@@ -2160,677 +1561,3 @@ def _display_number(value: object) -> str:
         return f"{number:.2f}"
     decimals = min(10, max(3, math.ceil(-math.log10(absolute)) + 1))
     return f"{number:.{decimals}f}"
-
-
-_CSS = """
-body{font-family:system-ui,-apple-system,sans-serif;color:#172033;margin:0;background:#f6f8fb}main{padding:22px;max-width:1600px;margin:auto}a{color:#2357a6}code{font-family:ui-monospace,monospace}.muted{color:#64748b}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.summary span,.decision-meta,.detection,.preview-panel{background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}table{border-collapse:collapse;width:100%;background:white}th,td{padding:8px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top}.priority-highest{background:#fff1e8}.priority-high{background:#fffbea}.queue-filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) minmax(180px,1.5fr) auto;gap:10px;align-items:end;background:white;border:1px solid #dce3ec;border-radius:8px;padding:12px}.queue-filters select,.queue-filters input{box-sizing:border-box;width:100%;min-height:34px}.filter-actions{display:flex;gap:10px;align-items:center;min-height:34px}.queue-count{margin:10px 0}.detection{display:none;margin:12px 0}.detection.active{display:block}.bands,.choices{display:grid;gap:7px;margin:8px 0 12px}.band-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding-bottom:7px;border-bottom:1px solid #eef2f7}.band-row .eligibility-state{font-size:12px;align-self:center}.band-row .included{color:#28734a}.band-row .eligibility{grid-column:1/-1;width:100%}.assignment-default{background:#edf8f1;border-left:4px solid #3b8b5d;padding:9px}.attribution-exception{margin:10px 0}.attribution-exception summary{color:#475569;cursor:pointer}.decision-meta{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}.decision-meta input{box-sizing:border-box;width:100%}label{display:block}.excluded{color:#a12828}.warning{background:#fff8df;border-left:4px solid #d99b16;padding:8px}button{padding:7px 12px}pre{white-space:pre-wrap;max-height:34vh;overflow:auto;font-size:12px}.change-summary{margin:10px 0}.change-summary h3{margin:0 0 8px;color:#172033}.change-summary ul{margin:7px 0;padding-left:20px}.change-summary .summary-warning{color:#92400e}.change-summary details{margin-top:10px}.change-summary details pre{background:#f1f5f9;border-radius:6px;padding:8px;color:#334155}.live-review{overflow:hidden;--drawer-width:min(420px,38vw)}.live-workspace{padding:0;max-width:none;height:100vh}.live-header{height:48px;box-sizing:border-box;display:flex;gap:12px;align-items:center;padding:8px 12px;background:#fff;border-bottom:1px solid #dce3ec;white-space:nowrap;overflow:hidden}.live-header .muted{min-width:0;overflow:hidden;text-overflow:ellipsis}.header-actions{display:flex;flex-shrink:0;gap:4px;align-items:center;margin-left:auto}.live-header button,.external-resource{white-space:nowrap}.live-header button{padding:6px 9px}.external-resource{display:inline-block;padding:4px 6px;border:1px solid #b7c1cf;border-radius:4px;background:#fff;color:#172033;text-decoration:none;font-size:12px}.external-resource:hover{border-color:#6b8fc7;background:#f1f5f9}.queue-navigation{display:flex;gap:9px;align-items:center;margin-left:auto;font-size:13px}.queue-navigation .nav-disabled{color:#94a3b8}.live-header button.needs-decision,.live-header button.needs-attention{background:#fff4db;border:1px solid #d99b16;border-radius:6px;font-weight:700}.live-workspace iframe{display:block;width:100%;height:calc(100vh - 48px);border:0;transition:width .18s ease}.drawer-open .live-workspace iframe{width:calc(100% - var(--drawer-width))}.assignment-drawer{position:fixed;z-index:20;right:0;top:48px;width:var(--drawer-width);height:calc(100vh - 48px);box-sizing:border-box;overflow:auto;background:#f6f8fb;border-left:1px solid #cbd5e1;box-shadow:-8px 0 20px rgba(15,23,42,.12);padding:14px}.drawer-header,.dialog-header{display:flex;align-items:start;justify-content:space-between;gap:12px}.drawer-header h2,.dialog-header h2{margin:0}.drawer-header button,.dialog-header button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.preview-panel{margin-top:12px}dialog{width:min(700px,90vw);max-height:88vh;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:18px;color:#172033;background:#f8fafc;box-shadow:0 20px 60px rgba(15,23,42,.3)}dialog::backdrop{background:rgba(15,23,42,.45)}.role-choice{display:grid;grid-template-columns:24px 1fr;column-gap:6px;margin:12px 0;padding:12px;background:white;border:1px solid #dce3ec;border-radius:8px}.role-choice input{grid-row:1/3}.role-choice span{color:#64748b;margin-top:4px}.dialog-actions{display:flex;gap:10px}@media(max-width:1100px){.queue-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
-.live-review{--drawer-width:min(420px,38vw)}.band-row .eligibility-state{grid-column:1}.band-row .eligibility-toggle{grid-column:2;grid-row:1/3;align-self:center;min-width:124px}.band-row .eligibility-state.pending{color:#9a5b00;font-weight:600}.combined-system-control{display:grid;gap:8px;margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #dce3ec;border-radius:6px}.scope-target-field[hidden],.preview-grid[hidden]{display:none}.scope-target-field select{box-sizing:border-box;width:100%;margin-top:4px}.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.preview-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;margin-top:12px}.preview-grid .preview-panel{margin-top:0}@media(max-width:800px){.live-review{--drawer-width:min(360px,48vw)}}
-.nearby-import-dialog{width:min(900px,94vw)}.nearby-search-controls{display:flex;gap:12px;align-items:end;margin:12px 0}.nearby-search-controls label{display:grid;gap:4px}.nearby-search-controls input{width:90px}.nearby-import-results{max-height:46vh;overflow:auto;border:1px solid #dce3ec;border-radius:7px;margin:10px 0 12px}.nearby-import-results th{position:sticky;top:0;background:#f8fafc;z-index:1}.nearby-import-results td:first-child,.nearby-import-results th:first-child{text-align:center;width:55px}.nearby-import-results td:nth-last-child(2){white-space:nowrap}.import-target-links{display:flex;gap:8px;flex-wrap:wrap}.import-target-links a{display:inline-block;padding:6px 9px;background:white;border:1px solid #b7c1cf;border-radius:5px;text-decoration:none}
-@media(max-width:1400px){.live-header{gap:8px}.live-header>span:first-child{flex-shrink:0}.live-header>.muted{display:none}.live-header>strong{max-width:240px;overflow:hidden;text-overflow:ellipsis}.queue-navigation>span:nth-child(2){display:none}.external-resource{padding:3px 4px;font-size:11px}.live-header button{padding:5px 6px;font-size:12px}}
-.section-link{font-size:14px;font-weight:500;margin-left:12px}.catalog-overview details summary{cursor:pointer}.catalog-overview td:first-child{min-width:260px}.catalog-detail{min-width:min(720px,70vw);padding:8px 0;color:#334155}.catalog-detail p{line-height:1.55}.warning-list{background:#fff8df;border-left:4px solid #d99b16;padding:8px 8px 8px 30px}.catalog-status-current{color:#28734a;font-weight:600}.catalog-status-missing{color:#9a5b00;font-weight:600}
-"""
-
-
-_WORKSPACE_JS = r"""
-let currentPayload=null;
-let currentPreview=null;
-let currentEligibilityPayload=null;
-let currentEligibilityPreview=null;
-let currentProviderPayload=null;
-let currentProviderPreview=null;
-let currentCatalogAssociationPayload=null;
-let currentCatalogAssociationPreview=null;
-const drawer=document.getElementById('assignment-drawer');
-const skyReview=document.getElementById('sky-review');
-let reviewDrawerVisible=false;
-try{
-  reviewDrawerVisible=sessionStorage.getItem('sdb-review-tools-visible')==='true';
-}catch(error){
-  reviewDrawerVisible=false;
-}
-function pointDisplayId(point){return point.source_display_name||point.source_id;}
-function escapeHtml(value){
-  return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;')
-    .replaceAll('>','&gt;').replaceAll('"','&quot;');
-}
-function selectedSourceHtml(point,suffix=''){
-  const label=escapeHtml(pointDisplayId(point));
-  const provenance=(point.provenance||[]).find(
-    value=>String(value.access_url||'').startsWith('https://')
-  );
-  const source=provenance
-    ? `<a href="${escapeHtml(provenance.access_url)}" target="_blank" rel="noopener">${label}</a>`
-    : label;
-  return `${escapeHtml(point.provider)} · ${source} · ${Number(point.separation_arcsec).toFixed(2)} arcsec${escapeHtml(suffix)}`;
-}
-function pointRunTarget(point){
-  if(!point.run_target_sdbid) return '';
-  return window.SDB_TARGET_NAMES[point.run_target_sdbid]||point.run_target_sdbid;
-}
-function postDrawerState(){
-  skyReview.contentWindow?.postMessage(
-    {type:'sdb-review-drawer-state',visible:reviewDrawerVisible},
-    window.location.origin,
-  );
-}
-function syncDrawerVisibility(){
-  drawer.hidden=!reviewDrawerVisible;
-  document.body.classList.toggle('drawer-open',reviewDrawerVisible);
-}
-function setDrawerVisibility(visible){
-  reviewDrawerVisible=Boolean(visible);
-  try{
-    sessionStorage.setItem(
-      'sdb-review-tools-visible',String(reviewDrawerVisible),
-    );
-  }catch(error){
-    // The toggle still works when browser storage is unavailable.
-  }
-  syncDrawerVisibility();
-  postDrawerState();
-}
-function clearDrawerSelection(){
-  currentPayload=null;
-  currentPreview=null;
-  currentEligibilityPayload=null;
-  currentEligibilityPreview=null;
-  currentProviderPayload=null;
-  currentProviderPreview=null;
-  currentCatalogAssociationPayload=null;
-  currentCatalogAssociationPreview=null;
-  document.getElementById('apply').disabled=true;
-  document.getElementById('apply-eligibility').disabled=true;
-  document.getElementById('apply-provider-result').disabled=true;
-  document.getElementById('apply-catalog-association').disabled=true;
-  document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
-  document.getElementById('detection-editors').hidden=true;
-  document.querySelector('.preview-grid').hidden=true;
-  document.getElementById('provider-result-editor').hidden=true;
-  document.getElementById('provider-result-preview-panel').hidden=true;
-  document.getElementById('catalog-association-editor').hidden=true;
-  document.getElementById('catalog-association-preview-panel').hidden=true;
-  document.getElementById('drawer-title').textContent='Review tools';
-  document.getElementById('selected-source').textContent='';
-  document.getElementById('assignment-prompt').textContent='Select a plotted catalog source to review it.';
-}
-function closeDrawer(){
-  clearDrawerSelection();
-  setDrawerVisibility(false);
-}
-function showDetection(point,detectionId){
-  const section=document.querySelector(`.detection[data-detection="${detectionId}"]`);
-  if(!section){clearDrawerSelection();return;}
-  document.querySelectorAll('.detection').forEach(value=>value.classList.toggle('active',value===section));
-  document.getElementById('detection-editors').hidden=false;
-  document.querySelector('.preview-grid').hidden=false;
-  document.getElementById('provider-result-editor').hidden=true;
-  document.getElementById('provider-result-preview-panel').hidden=true;
-  document.getElementById('catalog-association-editor').hidden=true;
-  document.getElementById('catalog-association-preview-panel').hidden=true;
-  document.getElementById('drawer-title').textContent='Photometry assignment';
-  resetEligibilityControls(section);
-  const combinedSystem=section.querySelector('.composite-scope');
-  if(combinedSystem) updateCombinedSystemControl(combinedSystem);
-  document.getElementById('selected-source').innerHTML=selectedSourceHtml(point);
-  document.getElementById('assignment-prompt').textContent='Review the selected catalog detection. All bands are selected by default.';
-  document.getElementById('preview').textContent='Choose assignments, then preview.';
-  document.getElementById('eligibility-preview').textContent='Choose a band action, then preview.';
-  document.getElementById('apply').disabled=true;
-  document.getElementById('apply-eligibility').disabled=true;
-  currentPayload=null;
-  currentPreview=null;
-  currentEligibilityPayload=null;
-  currentEligibilityPreview=null;
-  currentProviderPayload=null;
-  currentProviderPreview=null;
-  currentCatalogAssociationPayload=null;
-  currentCatalogAssociationPreview=null;
-}
-function showProviderReview(point){
-  document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
-  document.getElementById('detection-editors').hidden=true;
-  document.querySelector('.preview-grid').hidden=true;
-  const editor=document.getElementById('provider-result-editor');
-  editor.hidden=false;
-  editor.classList.add('active');
-  document.getElementById('provider-result-preview-panel').hidden=false;
-  document.getElementById('catalog-association-editor').hidden=true;
-  document.getElementById('catalog-association-preview-panel').hidden=true;
-  document.getElementById('drawer-title').textContent='Provider result review';
-  const runTarget=pointRunTarget(point);
-  document.getElementById('selected-source').innerHTML=selectedSourceHtml(
-    point,runTarget?` · catalog query for ${runTarget}`:''
-  );
-  document.getElementById('assignment-prompt').textContent='Review this catalog provider result.';
-  document.getElementById('provider-result-context').textContent=`${point.provider} · ${point.status}${runTarget?` · result belongs to the catalog run for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
-  for(const button of editor.querySelectorAll('.preview-provider-result')){
-    const action=button.dataset.action;
-    button.hidden=!((point.status==='ambiguous' && ['accept_candidate','reviewed_no_match'].includes(action))||(['transient_failure','permanent_failure'].includes(point.status)&&action==='retry'));
-    button.dataset.runId=point.run_id;
-    button.dataset.rawRowId=point.raw_row_id??'';
-  }
-  document.getElementById('provider-result-preview').textContent='Choose an action, then preview.';
-  document.getElementById('apply-provider-result').disabled=true;
-  currentProviderPayload=null;
-  currentProviderPreview=null;
-}
-function showCatalogAssociation(point,detectionId){
-  document.querySelectorAll('.detection').forEach(section=>section.classList.remove('active'));
-  const hasPhotometry=detectionId!=null && point.status==='accepted';
-  document.getElementById('detection-editors').hidden=!hasPhotometry;
-  document.querySelector('.preview-grid').hidden=!hasPhotometry;
-  if(hasPhotometry){
-    const section=document.querySelector(`.detection[data-detection="${detectionId}"]`);
-    if(section){
-      section.classList.add('active');
-      resetEligibilityControls(section);
-    }
-  }
-  document.getElementById('provider-result-editor').hidden=true;
-  document.getElementById('provider-result-preview-panel').hidden=true;
-  const editor=document.getElementById('catalog-association-editor');
-  editor.hidden=false;
-  editor.classList.add('active');
-  document.getElementById('catalog-association-preview-panel').hidden=false;
-  document.getElementById('drawer-title').textContent=hasPhotometry?'Source association and photometry':'Catalog source association';
-  const runTarget=pointRunTarget(point);
-  document.getElementById('selected-source').innerHTML=selectedSourceHtml(point);
-  document.getElementById('assignment-prompt').textContent=hasPhotometry
-    ? 'This source is accepted for the current target. Its photometry can be assigned below.'
-    : 'Decide whether this discovered source belongs to the current target.';
-  document.getElementById('catalog-association-context').textContent=`${point.provider} · ${point.status}${runTarget?` · discovered by the catalog query for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
-  for(const button of editor.querySelectorAll('.preview-catalog-association')){
-    button.dataset.detectionId=point.detection_id;
-    button.dataset.rawRowId=point.raw_row_id;
-  }
-  document.getElementById('catalog-association-preview').textContent='Choose an action, then preview.';
-  document.getElementById('apply-catalog-association').disabled=true;
-  currentCatalogAssociationPayload=null;
-  currentCatalogAssociationPreview=null;
-}
-window.addEventListener('message',event=>{
-  if(event.origin!==window.location.origin) return;
-  if(event.source!==skyReview.contentWindow) return;
-  if(event.data?.type==='sdb-review-drawer-ready'){
-    postDrawerState();
-    return;
-  }
-  if(event.data?.type==='sdb-review-drawer-toggle'){
-    setDrawerVisibility(event.data.visible);
-    return;
-  }
-  if(event.data?.type==='sdb-review-relatives'){
-    openRelativesDialog();
-    return;
-  }
-  if(event.data?.type!=='sdb-review-selection') return;
-  const point=event.data.point;
-  if(!point){clearDrawerSelection();return;}
-  const detectionId=point.raw_row_id==null?null:window.SDB_RAW_ROW_DETECTIONS[String(point.raw_row_id)];
-  if(point.kind==='catalog_association'){
-    showCatalogAssociation(point,detectionId);
-    return;
-  }
-  if(point.kind==='catalog'&&(point.status==='ambiguous'||['transient_failure','permanent_failure'].includes(point.status))){
-    showProviderReview(point);
-    return;
-  }
-  if(detectionId==null){clearDrawerSelection();return;}
-  showDetection(point,detectionId);
-});
-document.getElementById('close-drawer').addEventListener('click',closeDrawer);
-clearDrawerSelection();
-syncDrawerVisibility();
-function payloadFor(section){
-  const combinedSystem=section.querySelector('.composite-scope');
-  const scopeTarget=section.querySelector('.scope-target');
-  return {
-    detection_id:Number(section.dataset.detection),
-    scope_target:scopeTarget?.value||window.SDB_TARGET,
-    contributors:[...section.querySelectorAll('.contributor:checked')].map(x=>x.value),
-    include_composite_scope:Boolean(combinedSystem?.checked),
-    measurement_ids:[...section.querySelectorAll('.measurement:checked')].map(x=>Number(x.value)),
-    target_role:'',
-    target_state:'',
-  };
-}
-function eligibilityPayloadFor(section){
-  const changes=[...section.querySelectorAll('.eligibility-toggle')]
-    .filter(button=>button.dataset.desiredExcluded!==button.dataset.currentExcluded)
-    .map(button=>({
-      measurement_id:Number(button.dataset.measurement),
-      excluded:button.dataset.desiredExcluded==='true',
-    }));
-  return {changes};
-}
-function updateCombinedSystemControl(checkbox){
-  const field=checkbox.closest('.combined-system-control')?.querySelector('.scope-target-field');
-  if(field) field.hidden=!checkbox.checked;
-}
-function updateEligibilityControl(button){
-  const current=button.dataset.currentExcluded==='true';
-  const desired=button.dataset.desiredExcluded==='true';
-  const changed=current!==desired;
-  const state=button.closest('.band-row').querySelector('.eligibility-state');
-  state.classList.toggle('pending',changed);
-  state.textContent=changed
-    ? (desired?'Will be excluded from fit':'Will be included in fit')
-    : state.dataset.currentLabel;
-  button.textContent=changed
-    ? (current?'Keep excluded':'Keep included')
-    : (current?'Include in fit':'Exclude from fit');
-  button.setAttribute('aria-pressed',String(changed));
-}
-function resetEligibilityControls(section){
-  section.querySelectorAll('.eligibility-toggle').forEach(button=>{
-    button.dataset.desiredExcluded=button.dataset.currentExcluded;
-    updateEligibilityControl(button);
-  });
-}
-async function request(url,payload){
-  const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-  const value=await response.json();
-  if(!response.ok) throw new Error(value.detail||response.statusText);
-  return value;
-}
-function renderHumanSummary(element,value){
-  const summary=value?.human_summary;
-  if(!summary){element.textContent=typeof value==='string'?value:JSON.stringify(value,null,2);return;}
-  element.classList.remove('muted');
-  element.replaceChildren();
-  const heading=document.createElement('h3');
-  heading.textContent=summary.title;
-  element.appendChild(heading);
-  for(const [name,rows,className] of [
-    ['Context',summary.facts||[],''],
-    ['Changes',summary.changes||[],''],
-    ['Warnings',summary.warnings||[],'summary-warning'],
-  ]){
-    if(!rows.length)continue;
-    const label=document.createElement('strong');
-    label.textContent=name;
-    if(className)label.className=className;
-    element.appendChild(label);
-    const list=document.createElement('ul');
-    if(className)list.className=className;
-    for(const row of rows){const item=document.createElement('li');item.textContent=row;list.appendChild(item);}
-    element.appendChild(list);
-  }
-  const details=document.createElement('details');
-  const detailsLabel=document.createElement('summary');
-  detailsLabel.textContent='Technical details';
-  const raw=document.createElement('pre');
-  raw.textContent=JSON.stringify(value,null,2);
-  details.append(detailsLabel,raw);
-  element.appendChild(details);
-}
-function renderRequestError(element,error){element.classList.add('muted');element.textContent=error.message;}
-function prefillReason(inputId,preview){
-  const input=document.getElementById(inputId);
-  if(!input||!preview||!preview.suggested_reason)return;
-  if(!input.value||input.value===input.dataset.suggestedReason){
-    input.value=preview.suggested_reason;
-    input.dataset.suggestedReason=preview.suggested_reason;
-  }
-}
-document.querySelectorAll('.preview').forEach(button=>button.addEventListener('click',async()=>{
-  const section=button.closest('.detection');
-  currentPayload=payloadFor(section);
-  try{
-    currentPreview=await request('/api/decision/preview',currentPayload);
-    renderHumanSummary(document.getElementById('preview'),currentPreview);
-    prefillReason('reason',currentPreview);
-    document.getElementById('apply').disabled=!currentPreview.has_changes;
-  }catch(error){renderRequestError(document.getElementById('preview'),error);}
-}));
-document.querySelectorAll('.composite-scope').forEach(checkbox=>checkbox.addEventListener('change',()=>{
-  updateCombinedSystemControl(checkbox);
-}));
-document.querySelectorAll('.contributor,.measurement,.composite-scope,.scope-target').forEach(control=>control.addEventListener('change',()=>{
-  currentPayload=null;
-  currentPreview=null;
-  document.getElementById('preview').textContent='Assignment changed; preview again.';
-  document.getElementById('apply').disabled=true;
-}));
-document.querySelectorAll('.eligibility-toggle').forEach(button=>button.addEventListener('click',()=>{
-  const current=button.dataset.currentExcluded==='true';
-  const desired=button.dataset.desiredExcluded==='true';
-  button.dataset.desiredExcluded=String(desired===current?!current:current);
-  updateEligibilityControl(button);
-  currentEligibilityPayload=null;
-  currentEligibilityPreview=null;
-  document.getElementById('eligibility-preview').textContent='Include/exclude changed; preview again.';
-  document.getElementById('apply-eligibility').disabled=true;
-}));
-document.querySelectorAll('.preview-eligibility').forEach(button=>button.addEventListener('click',async()=>{
-  const section=button.closest('.detection');
-  currentEligibilityPayload=eligibilityPayloadFor(section);
-  if(!currentEligibilityPayload.changes.length){
-    currentEligibilityPreview=null;
-    document.getElementById('eligibility-preview').textContent='Use Include or Exclude for at least one band.';
-    document.getElementById('apply-eligibility').disabled=true;
-    return;
-  }
-  try{
-    currentEligibilityPreview=await request('/api/eligibility/preview',currentEligibilityPayload);
-    renderHumanSummary(document.getElementById('eligibility-preview'),currentEligibilityPreview);
-    prefillReason('reason',currentEligibilityPreview);
-    document.getElementById('apply-eligibility').disabled=!currentEligibilityPreview.has_changes;
-  }catch(error){renderRequestError(document.getElementById('eligibility-preview'),error);}
-}));
-document.querySelectorAll('.preview-provider-result').forEach(button=>button.addEventListener('click',async()=>{
-  currentProviderPayload={
-    action:button.dataset.action,
-    run_id:Number(button.dataset.runId),
-    raw_row_id:button.dataset.rawRowId===''?null:Number(button.dataset.rawRowId),
-  };
-  try{
-    currentProviderPreview=await request('/api/provider-result/preview',currentProviderPayload);
-    renderHumanSummary(document.getElementById('provider-result-preview'),currentProviderPreview);
-    prefillReason('reason',currentProviderPreview);
-    document.getElementById('apply-provider-result').disabled=!currentProviderPreview.has_changes;
-  }catch(error){
-    currentProviderPreview=null;
-    renderRequestError(document.getElementById('provider-result-preview'),error);
-    document.getElementById('apply-provider-result').disabled=true;
-  }
-}));
-document.querySelectorAll('.preview-catalog-association').forEach(button=>button.addEventListener('click',async()=>{
-  currentCatalogAssociationPayload={
-    target:window.SDB_TARGET,
-    action:button.dataset.action,
-    detection_id:Number(button.dataset.detectionId),
-    raw_row_id:Number(button.dataset.rawRowId),
-  };
-  try{
-    currentCatalogAssociationPreview=await request('/api/catalog-association/preview',currentCatalogAssociationPayload);
-    renderHumanSummary(document.getElementById('catalog-association-preview'),currentCatalogAssociationPreview);
-    prefillReason('reason',currentCatalogAssociationPreview);
-    document.getElementById('apply-catalog-association').disabled=!currentCatalogAssociationPreview.has_changes;
-  }catch(error){
-    currentCatalogAssociationPreview=null;
-    renderRequestError(document.getElementById('catalog-association-preview'),error);
-    document.getElementById('apply-catalog-association').disabled=true;
-  }
-}));
-document.getElementById('apply').addEventListener('click',async()=>{
-  if(!currentPayload||!currentPreview) return;
-  const actor=document.getElementById('actor').value;
-  const reason=document.getElementById('reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  const payload={...currentPayload,actor,reason,state_token:currentPreview.state_token};
-  if(!confirm('Apply the displayed lifecycle and assignment changes?')) return;
-  try{
-    const value=await request('/api/decision/apply',payload);
-    renderHumanSummary(document.getElementById('preview'),value);
-    document.getElementById('apply').disabled=true;
-    setTimeout(()=>location.reload(),700);
-  }catch(error){renderRequestError(document.getElementById('preview'),error);}
-});
-document.getElementById('apply-eligibility').addEventListener('click',async()=>{
-  if(!currentEligibilityPayload||!currentEligibilityPreview)return;
-  const actor=document.getElementById('actor').value;
-  const reason=document.getElementById('reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed fit include/exclude changes?'))return;
-  const payload={...currentEligibilityPayload,actor,reason,state_token:currentEligibilityPreview.state_token};
-  try{
-    const value=await request('/api/eligibility/apply',payload);
-    renderHumanSummary(document.getElementById('eligibility-preview'),value);
-    document.getElementById('apply-eligibility').disabled=true;
-    setTimeout(()=>location.reload(),700);
-  }catch(error){renderRequestError(document.getElementById('eligibility-preview'),error);}
-});
-document.getElementById('apply-provider-result').addEventListener('click',async()=>{
-  if(!currentProviderPayload||!currentProviderPreview)return;
-  const actor=document.getElementById('actor').value;
-  const reason=document.getElementById('reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed provider result action?'))return;
-  const payload={...currentProviderPayload,actor,reason,state_token:currentProviderPreview.state_token};
-  try{
-    const value=await request('/api/provider-result/apply',payload);
-    renderHumanSummary(document.getElementById('provider-result-preview'),value);
-    document.getElementById('apply-provider-result').disabled=true;
-    setTimeout(()=>location.reload(),700);
-  }catch(error){renderRequestError(document.getElementById('provider-result-preview'),error);}
-});
-document.getElementById('apply-catalog-association').addEventListener('click',async()=>{
-  if(!currentCatalogAssociationPayload||!currentCatalogAssociationPreview)return;
-  const actor=document.getElementById('actor').value;
-  const reason=document.getElementById('reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed catalog source association?'))return;
-  const payload={...currentCatalogAssociationPayload,actor,reason,state_token:currentCatalogAssociationPreview.state_token};
-  try{
-    const value=await request('/api/catalog-association/apply',payload);
-    renderHumanSummary(document.getElementById('catalog-association-preview'),value);
-    document.getElementById('apply-catalog-association').disabled=true;
-    setTimeout(()=>location.reload(),700);
-  }catch(error){renderRequestError(document.getElementById('catalog-association-preview'),error);}
-});
-const lifecycleDialog=document.getElementById('lifecycle-dialog');
-let lifecyclePreview=null;
-function selectedLifecycleRole(){return document.querySelector('input[name="lifecycle-role"]:checked').value;}
-function updateLifecycleWarning(){document.getElementById('lifecycle-warning').hidden=selectedLifecycleRole()!=='composite';}
-document.querySelectorAll('input[name="lifecycle-role"]').forEach(input=>input.addEventListener('change',()=>{
-  lifecyclePreview=null;
-  document.getElementById('apply-lifecycle').disabled=true;
-  document.getElementById('lifecycle-preview').textContent='Role changed; preview again.';
-  updateLifecycleWarning();
-}));
-document.getElementById('classify-target').addEventListener('click',()=>{
-  updateLifecycleWarning();
-  lifecycleDialog.showModal();
-});
-document.getElementById('preview-lifecycle').addEventListener('click',async()=>{
-  const role=selectedLifecycleRole();
-  const payload={target:window.SDB_TARGET,role,state:role==='composite'?'system_only':'active'};
-  try{
-    lifecyclePreview=await request('/api/lifecycle/preview',payload);
-    renderHumanSummary(document.getElementById('lifecycle-preview'),lifecyclePreview);
-    prefillReason('lifecycle-reason',lifecyclePreview);
-    document.getElementById('apply-lifecycle').disabled=!lifecyclePreview.has_changes;
-  }catch(error){renderRequestError(document.getElementById('lifecycle-preview'),error);}
-});
-document.getElementById('apply-lifecycle').addEventListener('click',async()=>{
-  if(!lifecyclePreview)return;
-  const actor=document.getElementById('lifecycle-actor').value;
-  const reason=document.getElementById('lifecycle-reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  const role=selectedLifecycleRole();
-  const payload={target:window.SDB_TARGET,role,state:role==='composite'?'system_only':'active',actor,reason,state_token:lifecyclePreview.state_token};
-  if(!confirm('Apply the displayed target modelling role?'))return;
-  try{
-    const value=await request('/api/lifecycle/apply',payload);
-    renderHumanSummary(document.getElementById('lifecycle-preview'),value);
-    document.getElementById('apply-lifecycle').disabled=true;
-    setTimeout(()=>location.reload(),700);
-  }catch(error){renderRequestError(document.getElementById('lifecycle-preview'),error);}
-});
-const relativesDialog=document.getElementById('relatives-dialog');
-let relativesPreview=null;
-async function refreshRelativesPreview(){
-  const element=document.getElementById('relatives-preview');
-  element.classList.add('muted');
-  element.textContent='Loading current SIMBAD relatives…';
-  document.getElementById('apply-relatives').disabled=true;
-  try{
-    relativesPreview=await request('/api/relatives/preview',{target:window.SDB_TARGET});
-    renderHumanSummary(element,relativesPreview);
-    prefillReason('relatives-reason',relativesPreview);
-    document.getElementById('apply-relatives').disabled=!relativesPreview.has_changes;
-  }catch(error){relativesPreview=null;renderRequestError(element,error);}
-}
-function openRelativesDialog(){
-  if(!relativesDialog.open)relativesDialog.showModal();
-  refreshRelativesPreview();
-}
-document.getElementById('preview-relatives').addEventListener('click',refreshRelativesPreview);
-document.getElementById('apply-relatives').addEventListener('click',async()=>{
-  if(!relativesPreview)return;
-  const actor=document.getElementById('relatives-actor').value;
-  const reason=document.getElementById('relatives-reason').value;
-  if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Import and reconcile the displayed immediate stellar relatives?'))return;
-  const button=document.getElementById('apply-relatives');
-  button.disabled=true;
-  button.textContent='Importing…';
-  try{
-    const value=await request('/api/relatives/apply',{target:window.SDB_TARGET,actor,reason,state_token:relativesPreview.state_token});
-    renderHumanSummary(document.getElementById('relatives-preview'),value);
-    setTimeout(()=>location.reload(),1000);
-  }catch(error){renderRequestError(document.getElementById('relatives-preview'),error);button.disabled=false;}
-  finally{button.textContent='Import and reconcile stellar relatives';}
-});
-const nearbyImportDialog=document.getElementById('nearby-import-dialog');
-let nearbyImportSearch=null;
-function updateNearbyImportButton(){
-  document.getElementById('apply-nearby-import').disabled=
-    document.querySelectorAll('#nearby-import-rows input:checked').length===0;
-}
-function renderNearbyImportRows(value){
-  const body=document.getElementById('nearby-import-rows');
-  body.innerHTML=value.candidates.map(row=>{
-    const params=new URLSearchParams({submit:'submit id',Ident:row.main_id});
-    const simbadUrl=`https://simbad.cds.unistra.fr/simbad/sim-id?${params}`;
-    const objectType=row.object_type_description||row.object_type_label||
-      row.primary_object_type||
-      (row.object_types||[]).join(', ')||'—';
-    let status='New';
-    if(row.current_target){
-      status='Current target';
-    }else if(row.existing_sdbid){
-      status=`<a href="/target/${encodeURIComponent(row.existing_sdbid)}">${escapeHtml(row.existing_sdbid)}</a>`;
-    }else if(row.blocked_reason){
-      status=`Context only · ${escapeHtml(row.blocked_reason)}`;
-    }
-    const selection=row.selectable
-      ? `<input type="checkbox" value="${escapeHtml(row.main_id)}" aria-label="Import ${escapeHtml(row.main_id)}">`
-      : '—';
-    return `<tr><td>${selection}</td>`+
-      `<td><a href="${escapeHtml(simbadUrl)}" target="_blank" rel="noopener">${escapeHtml(row.main_id)}</a></td>`+
-      `<td>${escapeHtml(objectType)}</td>`+
-      `<td>${escapeHtml(row.spectral_type||'—')}</td>`+
-      `<td>${Number(row.separation_arcsec).toFixed(2)}″</td>`+
-      `<td>${status}</td></tr>`;
-  }).join('');
-  document.getElementById('nearby-import-results').hidden=false;
-  body.querySelectorAll('input').forEach(
-    input=>input.addEventListener('change',updateNearbyImportButton)
-  );
-  updateNearbyImportButton();
-}
-async function searchNearbyImport(){
-  const radius=Number(document.getElementById('nearby-import-radius').value);
-  const status=document.getElementById('nearby-import-search-status');
-  const button=document.getElementById('search-nearby-import');
-  if(!Number.isFinite(radius)||radius<=0||radius>600){
-    alert('Radius must be between 1 and 600 arcsec.');
-    return;
-  }
-  button.disabled=true;
-  button.textContent='Searching…';
-  document.getElementById('apply-nearby-import').disabled=true;
-  document.getElementById('nearby-import-results').hidden=true;
-  document.getElementById('nearby-import-summary').textContent='';
-  document.getElementById('nearby-import-target-links').innerHTML='';
-  status.classList.add('muted');
-  status.textContent='Searching SIMBAD around the target position…';
-  try{
-    nearbyImportSearch=await request('/api/nearby-import/search',{
-      target:window.SDB_TARGET,
-      radius_arcsec:radius,
-    });
-    renderNearbyImportRows(nearbyImportSearch);
-    status.textContent=`${nearbyImportSearch.candidates.length} object(s), ${nearbyImportSearch.new_count} available to import, ${nearbyImportSearch.blocked_count} context only; sorted by distance.`;
-  }catch(error){
-    nearbyImportSearch=null;
-    renderRequestError(status,error);
-  }finally{
-    button.disabled=false;
-    button.textContent='Search SIMBAD';
-  }
-}
-document.getElementById('nearby-import').addEventListener('click',()=>{
-  if(!nearbyImportDialog.open)nearbyImportDialog.showModal();
-  if(!nearbyImportSearch)searchNearbyImport();
-});
-document.getElementById('search-nearby-import').addEventListener('click',searchNearbyImport);
-document.getElementById('apply-nearby-import').addEventListener('click',async()=>{
-  const selected=[
-    ...document.querySelectorAll('#nearby-import-rows input:checked')
-  ].map(input=>input.value);
-  if(!selected.length)return;
-  if(!confirm(`Import ${selected.length} selected SIMBAD object(s) and fill provider coverage?`))return;
-  const button=document.getElementById('apply-nearby-import');
-  const summary=document.getElementById('nearby-import-summary');
-  button.disabled=true;
-  button.textContent='Importing and updating…';
-  try{
-    const value=await request('/api/nearby-import/apply',{
-      target:window.SDB_TARGET,
-      main_ids:selected,
-    });
-    renderHumanSummary(summary,value);
-    const links=value.items.filter(item=>item.sdbid).map(item=>
-      `<a href="/target/${encodeURIComponent(item.sdbid)}">Open ${escapeHtml(item.requested_name)}</a>`
-    );
-    document.getElementById('nearby-import-target-links').innerHTML=links.join('');
-    for(const input of document.querySelectorAll('#nearby-import-rows input:checked')){
-      input.checked=false;
-      input.disabled=true;
-      input.closest('tr').lastElementChild.textContent='Imported';
-    }
-  }catch(error){
-    renderRequestError(summary,error);
-    button.disabled=false;
-  }finally{
-    button.textContent='Import selected';
-    updateNearbyImportButton();
-  }
-});
-const catalogCoverageDialog=document.getElementById('catalog-coverage-dialog');
-let catalogCoveragePreview=null;
-async function refreshCatalogCoveragePreview(){
-  const element=document.getElementById('catalog-coverage-preview');
-  const applyButton=document.getElementById('apply-catalog-coverage');
-  element.classList.add('muted');
-  element.textContent='Checking direct provider coverage…';
-  applyButton.disabled=true;
-  try{
-    catalogCoveragePreview=await request('/api/catalog-coverage/preview',{target:window.SDB_TARGET});
-    renderHumanSummary(element,catalogCoveragePreview);
-    applyButton.disabled=!catalogCoveragePreview.has_changes||!catalogCoveragePreview.action_available;
-  }catch(error){
-    catalogCoveragePreview=null;
-    renderRequestError(element,error);
-  }
-}
-document.getElementById('catalog-coverage').addEventListener('click',()=>{
-  if(!catalogCoverageDialog.open)catalogCoverageDialog.showModal();
-  refreshCatalogCoveragePreview();
-});
-document.getElementById('preview-catalog-coverage').addEventListener('click',refreshCatalogCoveragePreview);
-document.getElementById('apply-catalog-coverage').addEventListener('click',async()=>{
-  if(!catalogCoveragePreview)return;
-  if(!confirm('Complete the displayed catalog normalization and provider gaps?'))return;
-  const button=document.getElementById('apply-catalog-coverage');
-  button.disabled=true;
-  button.textContent='Updating…';
-  try{
-    const value=await request('/api/catalog-coverage/apply',{
-      target:window.SDB_TARGET,
-      state_token:catalogCoveragePreview.state_token,
-    });
-    catalogCoveragePreview=value;
-    renderHumanSummary(document.getElementById('catalog-coverage-preview'),value);
-    setTimeout(()=>location.reload(),1000);
-  }catch(error){
-    renderRequestError(document.getElementById('catalog-coverage-preview'),error);
-    button.disabled=false;
-  }finally{
-    button.textContent='Complete catalog gaps';
-  }
-});
-"""

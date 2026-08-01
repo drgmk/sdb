@@ -158,35 +158,19 @@ class AlmaSyncChunk(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class AlmaObservation(Base):
-    __tablename__ = "alma_observations"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider_id: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
-    proposal_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    target_name: Mapped[str | None] = mapped_column(String(300))
-    ra_deg: Mapped[float] = mapped_column(Float, nullable=False, index=True)
-    dec_deg: Mapped[float] = mapped_column(Float, nullable=False, index=True)
-    fov_deg: Mapped[float | None] = mapped_column(Float, index=True)
-    region: Mapped[str | None] = mapped_column(Text)
-    t_min_mjd: Mapped[float | None] = mapped_column(Float, index=True)
-    t_max_mjd: Mapped[float | None] = mapped_column(Float)
-    release_date: Mapped[str | None] = mapped_column(String(40))
-    data_rights: Mapped[str | None] = mapped_column(String(40))
-    band_list: Mapped[str | None] = mapped_column(String(100), index=True)
-    last_modified: Mapped[str | None] = mapped_column(String(40), index=True)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
-    first_seen_run_id: Mapped[int] = mapped_column(ForeignKey("alma_sync_runs.id"), nullable=False)
-    last_seen_run_id: Mapped[int] = mapped_column(ForeignKey("alma_sync_runs.id"), nullable=False, index=True)
-    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-
-
 class AlmaMember(Base):
     __tablename__ = "alma_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "proposal_id",
+            "member_ous_uid",
+            name="uq_alma_members_proposal_member_ous",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    member_ous_uid: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    member_ous_uid: Mapped[str] = mapped_column(String(200), nullable=False)
     proposal_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     target_names_json: Mapped[str] = mapped_column(Text, nullable=False)
-    positions_json: Mapped[str] = mapped_column(Text, nullable=False)
     center_ra_deg: Mapped[float | None] = mapped_column(Float)
     center_dec_deg: Mapped[float | None] = mapped_column(Float, index=True)
     bounding_radius_deg: Mapped[float | None] = mapped_column(Float)

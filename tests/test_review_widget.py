@@ -30,8 +30,8 @@ from sdb_identity.review_widget import (
     _midpoint_position,
     _offset_position,
     build_review_sky_view,
-    render_review_sky_html,
 )
+from sdb_identity.review_sky_render import render_review_sky_html
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
@@ -16,12 +15,11 @@ from .catalog_types import (
 )
 from .catalog_results import catalog_run_signature, effective_catalog_results
 from .catalog_ingestion import (
-    canonical_detection,
     shared_detection_target_ids,
     store_catalog_attributes,
 )
 from .catalog_matching import match_catalog_candidates
-from .catalog_normalization import normalize_detection
+from .detection_ingestion import DetectionIngestor
 from .dirty import mark_export_dirty
 from .models import (
     AstrometricSolution,
@@ -195,34 +193,22 @@ class CatalogAcquisitionService:
             normalized_counts: list[int] = []
             for index, scored_candidate in enumerate(scored):
                 candidate = scored_candidate.candidate
-                detection = canonical_detection(session, adapter, candidate)
-                row = RawCatalogRow(
-                    run_id=run.id,
-                    detection_id=detection.id,
-                    source_id=candidate.source_id,
-                    ra_deg=candidate.ra_deg,
-                    dec_deg=candidate.dec_deg,
-                    epoch=candidate.epoch,
-                    separation_arcsec=scored_candidate.separation_arcsec,
-                    score=scored_candidate.score,
-                    accepted=index == selected_index,
-                    payload_json=json.dumps(candidate.payload, sort_keys=True, ensure_ascii=False),
-                )
-                session.add(row)
-                session.flush()
-                raw_rows.append(row)
-                detections.append(detection)
-                item = normalize_detection(
+                ingested = DetectionIngestor.ingest(
                     session,
                     adapter=adapter,
                     candidate=candidate,
-                    detection=detection,
                     run_id=run.id,
+                    separation_arcsec=scored_candidate.separation_arcsec,
+                    score=scored_candidate.score,
+                    accepted=index == selected_index,
                     target_id=target.id,
-                    raw_row_id=row.id,
                     strict=index == selected_index,
                 )
-                normalized_counts.append(item.measurement_count)
+                raw_rows.append(ingested.raw_row)
+                detections.append(ingested.detection)
+                normalized_counts.append(
+                    ingested.normalization.measurement_count
+                )
 
             measurement_count = 0
             if not scored:

@@ -213,9 +213,6 @@ def parser() -> argparse.ArgumentParser:
     alma_sync.add_argument("--timeout", type=float, default=300)
     alma_status = _add_parser(alma_commands, "status", "Show recent ALMA sync and cache status.", "Reports recent sync runs and chunk progress so long-running archive updates can be monitored. Use --limit to control how much history is shown.")
     alma_status.add_argument("--limit", type=int, default=10)
-    _add_parser(alma_commands, "compact", "Compact raw ALMA observations into member-level rows.", "Deduplicates archive observations by member OUS and prepares the smaller lookup tables used by target searches. Run this after sync if compacted state needs rebuilding.")
-    _add_parser(alma_commands, "rebuild-bounds", "Rebuild ALMA member sky bounds.", "Recomputes cached spatial bounds used to speed project lookups. This is a maintenance command for cache repairs or schema changes.")
-    _add_parser(alma_commands, "rebuild-positions", "Rebuild ALMA pointing positions.", "Recomputes the pointings used by target-radius lookups from cached archive rows. This is useful after cache repair or changes to position extraction.")
     alma_projects = _add_parser(alma_commands, "projects", "List ALMA projects near one target.", "Searches cached ALMA pointings near the target position and reports associated project/member information. It does not contact the ALMA archive.")
     alma_projects.add_argument("target")
     alma_projects.add_argument("--radius", type=float, default=10.0)
@@ -755,7 +752,8 @@ def _write_review_page_task(
     """Render one independent review page in a worker process."""
 
     database, reference, radius_arcsec, output_path = task
-    from .review_widget import build_review_sky_view, write_review_sky_html
+    from .review_sky_render import write_review_sky_html
+    from .review_widget import build_review_sky_view
 
     sessions = make_session_factory(database)
     try:
@@ -1301,16 +1299,17 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     if args.command == "alma":
-        from .alma import AlmaArchiveService
+        from .alma import AlmaSyncService
+        from .alma_lookup import AlmaLookupService
 
         try:
             if args.alma_command == "sync":
                 if args.offline:
                     raise ValueError("ALMA sync is unavailable in offline mode")
                 with _provider_output_to_stderr():
-                    from .alma import AstroqueryAlmaArchive
+                    from .alma_transport import AstroqueryAlmaArchive
 
-                    service = AlmaArchiveService(
+                    service = AlmaSyncService(
                         sessions, AstroqueryAlmaArchive(
                             args.archive_url, timeout_seconds=args.timeout,
                         ),
@@ -1331,29 +1330,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(_format_json(args, asdict(summary), sort_keys=True))
             elif args.alma_command == "projects":
                 # Project lookup is local and deliberately requires no archive client.
-                service = AlmaArchiveService(sessions, None)
+                service = AlmaLookupService(sessions)
                 for project in service.projects(args.target, args.radius):
                     print(_format_json(args, asdict(project), sort_keys=True))
-            elif args.alma_command == "compact":
-                service = AlmaArchiveService(sessions, None)
-                # Compaction is local; the service only needs an endpoint label
-                # for durable run provenance.
-                service.provider = type(
-                    "LocalAlmaCompactor", (), {"archive_url": "local-cache"}
-                )()
-                print(_format_json(args, 
-                    asdict(service.compact_observations()), sort_keys=True
-                ))
-            elif args.alma_command == "rebuild-bounds":
-                service = AlmaArchiveService(sessions, None)
-                print(_format_json(args, {
-                    "updated": service.rebuild_member_bounds()
-                }, sort_keys=True))
-            elif args.alma_command == "rebuild-positions":
-                service = AlmaArchiveService(sessions, None)
-                print(_format_json(args, {
-                    "inserted": service.rebuild_member_positions()
-                }, sort_keys=True))
             else:
                 from .models import AlmaSyncRun
 
@@ -1982,7 +1961,8 @@ def main(argv: list[str] | None = None) -> int:
         service.override_match(args.candidate_id, actor=args.actor, reason=args.reason)
         return 0
     if args.command == "review-view":
-        from .review_widget import build_review_sky_view, write_review_sky_html
+        from .review_sky_render import write_review_sky_html
+        from .review_widget import build_review_sky_view
 
         try:
             view = build_review_sky_view(
@@ -2195,7 +2175,8 @@ def main(argv: list[str] | None = None) -> int:
                         print(_format_json(args, value, sort_keys=True))
             elif args.photometry_command == "review-html":
                 from .photometry import photometry_review_queue
-                from .review_widget import build_review_sky_view, write_review_sky_html
+                from .review_sky_render import write_review_sky_html
+                from .review_widget import build_review_sky_view
 
                 selectors = sum((
                     args.target is not None,
@@ -2473,9 +2454,9 @@ def main(argv: list[str] | None = None) -> int:
                     }, sort_keys=True))
         return 0
     if args.command == "dataset":
-        from .datasets import CuratedDatasetService
+        from .datasets import SubmmObsService
 
-        service = CuratedDatasetService(sessions)
+        service = SubmmObsService(sessions)
         try:
             if args.dataset_command == "import":
                 value = service.import_submm_obs(args.file)
