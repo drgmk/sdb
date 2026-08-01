@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .hierarchy_matching import HierarchyMatchingService
 from .hierarchy_semantics import simbad_component_relevance
 from .ingestion import TargetIngestionPlan
-from .models import ExternalIdentifier, MetadataRun, SimbadMetadata, Target
+from .models.identity import ExternalIdentifier, Target
+from .models.metadata import MetadataRun, SimbadMetadata
 from .providers import Astrometry, SimbadDiscoveryProvider
 from .identifiers import normalize_identifier
 from .service import AddRequest, IdentityService, UnresolvedTarget

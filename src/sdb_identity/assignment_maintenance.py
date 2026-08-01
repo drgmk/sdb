@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .effective_assignments import derived_measurement_assignments
-from .models import MeasurementTargetAssociation
+from .models.photometry import MeasurementTargetAssociation
 
 
 @dataclass(frozen=True)

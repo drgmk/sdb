@@ -21,7 +21,12 @@ from .catalog_types import (
     DetectionNormalizationSummary,
     MeasurementValue,
 )
-from .models import CatalogDetection, CatalogRun, NormalizedMeasurement, RawCatalogRow
+from .models.catalogs import (
+    CatalogDetection,
+    CatalogRun,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
 from .photometry_semantics import validate_photometry_semantics
 
 

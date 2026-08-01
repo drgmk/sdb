@@ -10,18 +10,19 @@ from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
 from sdb_identity.catalog_decisions import CatalogDecisionService
 from sdb_identity.catalog_normalization import CatalogNormalizationService
-from sdb_identity.models import (
+from sdb_identity.models.catalogs import (
     CatalogDetection,
     CatalogResultDecision,
     CatalogTargetAssociationAction,
-    ExternalIdentifier,
-    MeasurementEligibilityAction,
-    MeasurementTargetAssociation,
-    MetadataRun,
     NormalizedMeasurement,
     RawCatalogRow,
-    SimbadMetadata,
 )
+from sdb_identity.models.identity import ExternalIdentifier
+from sdb_identity.models.photometry import (
+    MeasurementEligibilityAction,
+    MeasurementTargetAssociation,
+)
+from sdb_identity.models.metadata import MetadataRun, SimbadMetadata
 from sdb_identity.providers import ProviderError, SimbadNeighbour
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_ui import create_review_app, serve_review_ui

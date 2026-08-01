@@ -24,17 +24,15 @@ from .measurement_eligibility import (
     EffectiveMeasurementEligibility,
     effective_measurement_eligibility,
 )
-from .models import (
+from .models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,
-    MeasurementTargetAssociation,
     NormalizedMeasurement,
     RawCatalogRow,
-    Target,
-    TargetLifecycleAction,
-    TargetSystem,
-    TargetSystemMember,
 )
+from .models.photometry import MeasurementTargetAssociation
+from .models.identity import Target
+from .models.hierarchy import TargetLifecycleAction, TargetSystem, TargetSystemMember
 from .vocabulary import TargetRole, TargetState
 
 

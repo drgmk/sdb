@@ -11,13 +11,8 @@ from .hierarchy_semantics import (
     component_label_from_identifier,
     simbad_component_relevance,
 )
-from .models import (
-    ExternalIdentifier,
-    MetadataRun,
-    SimbadMetadata,
-    SimbadRelationship,
-    Target,
-)
+from .models.identity import ExternalIdentifier, Target
+from .models.metadata import MetadataRun, SimbadMetadata, SimbadRelationship
 
 
 def target_semantic_identity(

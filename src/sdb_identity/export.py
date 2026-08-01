@@ -17,13 +17,9 @@ from .dirty import (
     mark_exported_through,
 )
 from .measurement_eligibility import EffectiveMeasurementEligibility
-from .models import (
-    ExternalIdentifier,
-    MetadataRun,
-    NormalizedMeasurement,
-    SimbadMetadata,
-    Target,
-)
+from .models.identity import ExternalIdentifier, Target
+from .models.metadata import MetadataRun, SimbadMetadata
+from .models.catalogs import NormalizedMeasurement
 from .system_photometry import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import ProviderRunStatus

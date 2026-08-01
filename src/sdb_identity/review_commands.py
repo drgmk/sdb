@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_decisions import CatalogDecisionService
-from .models import CatalogResultDecision, CatalogRun, RawCatalogRow, Target
+from .models.catalogs import CatalogResultDecision, CatalogRun, RawCatalogRow
+from .models.identity import Target
 from .review_actions import (
     review_catalog_target_association_decision,
     review_detection_decision,

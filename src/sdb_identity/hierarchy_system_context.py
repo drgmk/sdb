@@ -20,20 +20,20 @@ from .hierarchy_target_context import (
     candidate_projection,
 )
 from .identifiers import normalize_identifier
-from .models import (
+from .models.identity import (
     AstrometricSolution,
-    CatalogRun,
     ExternalIdentifier,
-    HierarchyMatchCandidate,
-    HierarchyRecord,
     MatchCandidate,
-    MetadataRun,
-    RawCatalogRow,
-    SimbadMetadata,
     Submission,
     Target,
+)
+from .models.catalogs import CatalogRun, RawCatalogRow
+from .models.hierarchy import (
+    HierarchyMatchCandidate,
+    HierarchyRecord,
     TargetSystemMember,
 )
+from .models.metadata import MetadataRun, SimbadMetadata
 from .providers import Astrometry
 from .system_photometry import SystemPhotometryState, load_system_photometry_state
 from .targets import resolve_target

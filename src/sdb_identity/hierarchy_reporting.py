@@ -4,7 +4,7 @@ from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .hierarchy_graph import GRAPH_EDGE_STATUSES
-from .models import (
+from .models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     HierarchySource,

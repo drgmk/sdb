@@ -12,7 +12,14 @@ from .astrometry import propagate_to_epoch
 from .catalog_types import CatalogQueryContext
 from .catalog_acquisition import CatalogAcquisitionService
 from .dirty import mark_export_dirty
-from .models import AstrometricSolution, CatalogRun, ExportDirtyTarget, ExternalIdentifier, ReferenceApplicationItem, ReferenceApplicationRecord, ReferenceApplicationRun, Target
+from .models.identity import AstrometricSolution, ExternalIdentifier, Target
+from .models.catalogs import CatalogRun
+from .models.exports import ExportDirtyTarget
+from .models.reference import (
+    ReferenceApplicationItem,
+    ReferenceApplicationRecord,
+    ReferenceApplicationRun,
+)
 from .providers import Astrometry
 from .adapters.reference import snapshot_adapter
 from .reference_definitions import SNAPSHOT_CATALOGS

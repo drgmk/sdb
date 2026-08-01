@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
-from .models import Target, TargetLifecycleAction
+from .models.identity import Target
+from .models.hierarchy import TargetLifecycleAction
 from .targets import resolve_target
 from .vocabulary import TargetRole, TargetState
 

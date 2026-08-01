@@ -12,12 +12,12 @@ from .catalog_measurements import (
     current_catalog_detection_target_pairs,
     current_measurement_encounters,
 )
-from .models import (
+from .models.catalogs import (
     IrasBandSelection,
     IrasDetectionFamily,
-    MeasurementEligibilityAction,
     NormalizedMeasurement,
 )
+from .models.photometry import MeasurementEligibilityAction
 
 
 @dataclass(frozen=True)

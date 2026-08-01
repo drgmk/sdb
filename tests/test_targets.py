@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from sdb_identity.identifiers import normalize_identifier
-from sdb_identity.models import ExternalIdentifier, Target
+from sdb_identity.models.identity import ExternalIdentifier, Target
 from sdb_identity.targets import (
     AmbiguousTargetReference,
     TargetRepository,

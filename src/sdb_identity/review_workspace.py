@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .assignment_readiness import assignment_readiness_report
 from .fitting_groups import fitting_group_report
 from .hierarchy_system_context import HierarchySystemContextService
-from .models import RawCatalogRow
+from .models.catalogs import RawCatalogRow
 from .review_dashboard import review_dashboard_report
 
 

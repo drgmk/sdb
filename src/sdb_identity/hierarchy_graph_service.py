@@ -19,13 +19,13 @@ from .hierarchy_graph import (
     edge_row,
     latest_overrides,
 )
-from .models import (
+from .models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     StructuralEdge,
     StructuralEdgeAction,
-    Target,
 )
+from .models.identity import Target
 from .targets import resolve_target
 
 

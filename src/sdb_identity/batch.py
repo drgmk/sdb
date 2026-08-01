@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalog_acquisition import CatalogAcquisitionService
 from .ingestion import TargetIngestionPlan
 from .metadata import MetadataService
-from .models import ImportItem, ImportJob, ImportRun
+from .models.batch import ImportItem, ImportJob, ImportRun
 from .progress import NULL_PROGRESS, ProgressReporter
 from .providers import ProviderError
 from .service import AddRequest, IdentityService, UnresolvedTarget

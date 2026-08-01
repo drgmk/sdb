@@ -11,12 +11,13 @@ from .catalog_measurements import (
     current_measurement_encounters,
     current_measurement_target_ids,
 )
-from .models import (
-    CatalogRun, MeasurementAssociationAction,
+from .models.catalogs import CatalogRun, NormalizedMeasurement, RawCatalogRow
+from .models.photometry import (
+    MeasurementAssociationAction,
     MeasurementEligibilityAction,
-    MeasurementTargetAssociation, NormalizedMeasurement,
-    RawCatalogRow, Target,
+    MeasurementTargetAssociation,
 )
+from .models.identity import Target
 from .system_photometry import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import (

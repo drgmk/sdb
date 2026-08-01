@@ -11,7 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec, propagate_to_epoch
-from .models import AlmaMember, AlmaMemberPosition, AstrometricSolution
+from .models.alma import AlmaMember, AlmaMemberPosition
+from .models.identity import AstrometricSolution
 from .providers import Astrometry
 from .targets import resolve_target
 

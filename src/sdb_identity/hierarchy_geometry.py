@@ -6,7 +6,7 @@ import json
 import math
 
 from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
-from .models import HierarchyRecord
+from .models.hierarchy import HierarchyRecord
 
 
 def hierarchy_record_positions(

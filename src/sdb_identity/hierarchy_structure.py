@@ -6,7 +6,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
-from .models import StructuralEdge, Target, TargetSystem, TargetSystemMember
+from .models.hierarchy import StructuralEdge, TargetSystem, TargetSystemMember
+from .models.identity import Target
 from .targets import resolve_target
 
 

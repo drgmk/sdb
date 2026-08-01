@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import (
+from .models.catalogs import (
     CatalogAttribute,
     CatalogDetection,
     CatalogResultDecision,

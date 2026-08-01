@@ -7,7 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .catalog_measurements import current_measurement_target_ids
-from .models import MeasurementTargetAssociation, TargetLifecycleAction
+from .models.photometry import MeasurementTargetAssociation
+from .models.hierarchy import TargetLifecycleAction
 from .vocabulary import (
     INACTIVE_TARGET_STATES,
     MeasurementTargetRole,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import (
+from .models.hierarchy import (
     HierarchySource,
     StructuralEdge,
     TargetSystem,

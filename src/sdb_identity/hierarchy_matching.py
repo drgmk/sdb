@@ -21,13 +21,12 @@ from .hierarchy_geometry import (
     wds_record_has_unusable_separation,
 )
 from .identifiers import normalize_identifier
-from .models import (
-    ExternalIdentifier,
+from .models.identity import ExternalIdentifier, Target
+from .models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
     StructuralEdge,
-    Target,
     TargetSystem,
     TargetSystemMember,
 )

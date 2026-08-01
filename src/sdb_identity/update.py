@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_acquisition import CatalogAcquisitionService
 from .metadata import MetadataService
-from .models import CatalogRun, MetadataRun, Target
+from .models.catalogs import CatalogRun
+from .models.metadata import MetadataRun
+from .models.identity import Target
 from .progress import NULL_PROGRESS, ProgressReporter
 from .reference_application import ReferenceApplicationService
 from .catalog_registry import (

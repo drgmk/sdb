@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .dirty import pending_export_targets
 from .database import make_session_factory
 from .export import export_ipac
-from .models import Sample, SampleExportItem, SampleExportRun
+from .models.samples import Sample, SampleExportItem, SampleExportRun
 from .progress import NULL_PROGRESS, ProgressReporter
 from .samples import SampleService
 

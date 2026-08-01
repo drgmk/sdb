@@ -11,7 +11,7 @@ from sdb_identity.export import (
     load_target_export_snapshot,
     serialize_ipac,
 )
-from sdb_identity.models import ExportDirtyTarget
+from sdb_identity.models.exports import ExportDirtyTarget
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 

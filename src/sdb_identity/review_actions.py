@@ -14,18 +14,20 @@ from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .effective_assignments import effective_measurement_assignments
 from .measurement_eligibility import effective_measurement_eligibility
-from .models import (
+from .models.catalogs import (
     CatalogDetection,
     CatalogRun,
     CatalogTargetAssociationAction,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
+from .models.photometry import (
     MeasurementAssociationAction,
     MeasurementEligibilityAction,
     MeasurementTargetAssociation,
-    NormalizedMeasurement,
-    RawCatalogRow,
-    Target,
-    TargetLifecycleAction,
 )
+from .models.identity import Target
+from .models.hierarchy import TargetLifecycleAction
 from .providers import Astrometry
 from .targets import resolve_target
 from .vocabulary import (

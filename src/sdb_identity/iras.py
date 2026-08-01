@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .catalog_results import effective_catalog_results
-from .models import (
+from .models.catalogs import (
     IrasBandSelection,
     IrasDetectionFamily,
     NormalizedMeasurement,

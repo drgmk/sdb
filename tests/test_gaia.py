@@ -6,7 +6,11 @@ from sqlalchemy import select
 from sdb_identity.adapters.gaia import GaiaDr3Adapter
 from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.catalog_types import CatalogQueryContext
-from sdb_identity.models import CatalogRun, NormalizedMeasurement, RawCatalogRow
+from sdb_identity.models.catalogs import (
+    CatalogRun,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
 from sdb_identity.providers import Astrometry
 from sdb_identity.service import AddRequest, IdentityService
 from tests.fakes import FakeGaia, astrometry, gaia_candidate

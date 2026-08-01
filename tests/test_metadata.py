@@ -12,8 +12,8 @@ from sdb_identity.metadata import (
     RelationshipValue,
     SimbadSnapshot,
 )
-from sdb_identity.models import (
-    ExternalIdentifier,
+from sdb_identity.models.identity import ExternalIdentifier
+from sdb_identity.models.metadata import (
     MetadataRun,
     SimbadMetadata,
     SimbadObjectType,

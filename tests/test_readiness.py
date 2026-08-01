@@ -7,11 +7,8 @@ from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.export import export_ipac
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
-from sdb_identity.models import (
-    CuratedRecord,
-    DatasetRevision,
-    ExternalIdentifier,
-)
+from sdb_identity.models.curated import CuratedRecord, DatasetRevision
+from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.readiness import ReadinessService
 from sdb_identity.samples import SampleService
 from sdb_identity.identifiers import normalize_identifier

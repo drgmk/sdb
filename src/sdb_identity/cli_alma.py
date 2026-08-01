@@ -101,7 +101,7 @@ def run_alma_command(context: CliContext) -> int:
             for project in service.projects(args.target, args.radius):
                 print(context.json(asdict(project), sort_keys=True))
         else:
-            from .models import AlmaSyncRun
+            from .models.alma import AlmaSyncRun
 
             if args.limit < 1:
                 raise ValueError("--limit must be at least 1")

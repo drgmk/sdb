@@ -26,7 +26,8 @@ from .hierarchy_photometry import (
     target_photometry_context,
     target_photometry_context_summary,
 )
-from .models import HierarchyMatchCandidate, HierarchyRecord, Target
+from .models.hierarchy import HierarchyMatchCandidate, HierarchyRecord
+from .models.identity import Target
 from .providers import Astrometry
 from .targets import resolve_target
 from .vocabulary import review_priority_rank

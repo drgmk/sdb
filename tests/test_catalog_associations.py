@@ -13,7 +13,7 @@ from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.decision_history import system_decision_history
 from sdb_identity.hierarchy import HierarchyService
-from sdb_identity.models import (
+from sdb_identity.models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,
     CatalogRun,

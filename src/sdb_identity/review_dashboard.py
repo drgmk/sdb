@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .assignment_readiness import assignment_readiness_report
 from .fitting_groups import fitting_group_report
-from .models import ExternalIdentifier
+from .models.identity import ExternalIdentifier
 from .vocabulary import INACTIVE_TARGET_STATES, ReviewPriority, review_priority_rank
 
 

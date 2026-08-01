@@ -15,7 +15,7 @@ from .hierarchy_geometry import (
     wds_record_has_unusable_separation,
 )
 from .hierarchy_wds import component_pair
-from .models import (
+from .models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     StructuralEdge,

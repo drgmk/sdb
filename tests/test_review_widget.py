@@ -13,14 +13,13 @@ from sdb_identity.catalog_types import (
     MeasurementValue,
 )
 from sdb_identity.hierarchy import HierarchyService
-from sdb_identity.models import (
+from sdb_identity.models.identity import (
     AstrometricSolution,
     ExternalIdentifier,
     MatchCandidate,
-    MetadataRun,
-    SimbadMetadata,
     Submission,
 )
+from sdb_identity.models.metadata import MetadataRun, SimbadMetadata
 from sdb_identity.review_widget import (
     ReviewSkyView,
     SkyArrow,

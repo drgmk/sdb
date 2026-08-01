@@ -15,16 +15,14 @@ from .catalog_policy import (
 from .astrometry import angular_separation_arcsec
 from .catalog_measurements import current_catalog_detection_target_pairs
 from .catalog_results import effective_catalog_results
-from .models import (
-    AstrometricSolution,
+from .models.identity import AstrometricSolution, ExternalIdentifier, Target
+from .models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,
     CatalogRun,
     CatalogTargetAssociationAction,
-    ExternalIdentifier,
     NormalizedMeasurement,
     RawCatalogRow,
-    Target,
 )
 from .providers import Astrometry
 from .vocabulary import PROVIDER_FAILURE_STATUSES

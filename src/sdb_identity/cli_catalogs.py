@@ -9,7 +9,7 @@ from sqlalchemy import select
 from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
 from .catalog_results import effective_catalog_results
 from .cli_context import CliContext
-from .models import CatalogRun, RawCatalogRow
+from .models.catalogs import CatalogRun, RawCatalogRow
 from .targets import resolve_target, resolve_targets
 from .vocabulary import ProviderRunStatus
 
@@ -167,7 +167,7 @@ def _run_refresh(context: CliContext) -> int:
 
 
 def _run_runs(context: CliContext) -> int:
-    from .models import MetadataRun
+    from .models.metadata import MetadataRun
 
     args = context.args
     sessions = context.require_sessions()
@@ -235,7 +235,8 @@ def _run_runs(context: CliContext) -> int:
 
 
 def _run_attributes(context: CliContext) -> int:
-    from .models import CatalogAttribute, MetadataRun, SimbadMetadata
+    from .models.catalogs import CatalogAttribute
+    from .models.metadata import MetadataRun, SimbadMetadata
 
     args = context.args
     sessions = context.require_sessions()

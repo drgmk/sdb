@@ -10,7 +10,7 @@ from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
-from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateSummary
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, simbad_result
@@ -665,7 +665,7 @@ def test_cli_reviews_and_overrides_ambiguous_catalog_match(tmp_path, capsys):
 
 
 def _add_alias(sessions, sdbid, value):
-    from sdb_identity.models import ExternalIdentifier, Target
+    from sdb_identity.models.identity import ExternalIdentifier, Target
     from sdb_identity.identifiers import normalize_identifier
 
     with sessions() as session:
@@ -747,7 +747,7 @@ def test_cli_review_matches_lists_only_ambiguous_submissions(tmp_path, capsys):
     main(["--database", str(database), "init"])
     capsys.readouterr()
     sessions = make_session_factory(database)
-    from sdb_identity.models import MatchCandidate, MatchDecision, Submission
+    from sdb_identity.models.identity import MatchCandidate, MatchDecision, Submission
 
     with sessions() as session:
         ambiguous = Submission(input_name="AMBIG NAME", status="ambiguous")

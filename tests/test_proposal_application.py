@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sdb_identity.models import MeasurementTargetAssociation
+from sdb_identity.models.photometry import MeasurementTargetAssociation
 from sdb_identity.proposal_application import (
     apply_measurement_assignment_proposals,
 )

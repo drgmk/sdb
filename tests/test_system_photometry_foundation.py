@@ -13,13 +13,15 @@ from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.export import export_ipac
 from sdb_identity.hierarchy import HierarchyService
-from sdb_identity.models import (
+from sdb_identity.models.catalogs import (
     CatalogDetection,
-    ExternalIdentifier,
-    MeasurementAssociationAction,
-    MeasurementTargetAssociation,
     NormalizedMeasurement,
     RawCatalogRow,
+)
+from sdb_identity.models.identity import ExternalIdentifier
+from sdb_identity.models.photometry import (
+    MeasurementAssociationAction,
+    MeasurementTargetAssociation,
 )
 from sdb_identity.photometry import (
     assign_measurement_target,

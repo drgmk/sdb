@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from .catalog_provenance import CatalogProvenance, provenance_from_payload
 from .catalog_types import CatalogAdapter, CatalogCandidate
-from .models import CatalogAttribute, CatalogDetection, CatalogDetectionProvenance
+from .models.catalogs import (
+    CatalogAttribute,
+    CatalogDetection,
+    CatalogDetectionProvenance,
+)
 
 
 def canonical_detection(

@@ -213,7 +213,7 @@ def _run_add(context: CliContext) -> int:
 
 def _run_status(context: CliContext) -> int:
     from .hierarchy_target_context import HierarchyTargetContextService
-    from .models import AstrometricSolution
+    from .models.identity import AstrometricSolution
     from .target_lifecycle import target_lifecycle_status
     from .targets import resolve_targets
 

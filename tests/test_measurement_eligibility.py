@@ -6,7 +6,7 @@ from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.measurement_eligibility import (
     effective_measurement_eligibility,
 )
-from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.photometry import set_measurement_eligibility
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement

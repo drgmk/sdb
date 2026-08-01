@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .identifiers import normalize_identifier
-from .models import ExternalIdentifier, Target
+from .models.identity import ExternalIdentifier, Target
 
 
 @dataclass(frozen=True)

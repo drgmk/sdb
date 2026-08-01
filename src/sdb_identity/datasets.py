@@ -16,18 +16,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from .catalog_provenance import CatalogProvenance
 from .catalog_types import CatalogCandidate, MeasurementValue
 from .detection_ingestion import DetectionIngestor
-from .models import (
-    CatalogRun,
-    CuratedAssociationAction,
-    CuratedRecord,
-    DatasetRevision,
-    ExportDirtyTarget,
-    ExternalIdentifier,
-    MeasurementEligibilityAction,
-    NormalizedMeasurement,
-    RawCatalogRow,
-    Target,
-)
+from .models.catalogs import CatalogRun, NormalizedMeasurement, RawCatalogRow
+from .models.curated import CuratedAssociationAction, CuratedRecord, DatasetRevision
+from .models.exports import ExportDirtyTarget
+from .models.identity import ExternalIdentifier, Target
+from .models.photometry import MeasurementEligibilityAction
 from .decisions import DecisionContext
 from .dirty import clear_export_dirty, mark_export_dirty
 from .identifiers import normalize_identifier

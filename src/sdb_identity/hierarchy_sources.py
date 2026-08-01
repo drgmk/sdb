@@ -16,15 +16,15 @@ from .cache_store import SnapshotCache
 from .hierarchy_parsing import parse_cached_snapshot, parse_snapshot, parse_tables
 from .hierarchy_records import ParsedHierarchyRecord
 from .hierarchy_registry import hierarchy_source
-from .models import (
+from .models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
     HierarchySource,
     StructuralEdge,
     StructuralEdgeAction,
-    utcnow,
 )
+from .models.base import utcnow
 from .providers import ProviderError
 from .snapshots import SnapshotClient, VizierSnapshotClient
 

@@ -11,13 +11,8 @@ from .catalog_policy import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
-from .models import (
-    AstrometricSolution,
-    ExternalIdentifier,
-    NormalizedMeasurement,
-    RawCatalogRow,
-    Target,
-)
+from .models.identity import AstrometricSolution, ExternalIdentifier, Target
+from .models.catalogs import NormalizedMeasurement, RawCatalogRow
 from .providers import Astrometry
 from .system_photometry import (
     SystemPhotometryState,

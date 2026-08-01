@@ -8,7 +8,11 @@ from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.export import export_ipac
-from sdb_identity.models import IrasBandSelection, IrasDetectionFamily, NormalizedMeasurement
+from sdb_identity.models.catalogs import (
+    IrasBandSelection,
+    IrasDetectionFamily,
+    NormalizedMeasurement,
+)
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog
 

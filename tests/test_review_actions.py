@@ -5,13 +5,13 @@ from sqlalchemy import select
 
 from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.catalog_types import MeasurementValue
-from sdb_identity.models import (
+from sdb_identity.models.photometry import (
     MeasurementAssociationAction,
     MeasurementEligibilityAction,
     MeasurementTargetAssociation,
-    NormalizedMeasurement,
-    TargetLifecycleAction,
 )
+from sdb_identity.models.catalogs import NormalizedMeasurement
+from sdb_identity.models.hierarchy import TargetLifecycleAction
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_actions import (
     review_detection_decision,

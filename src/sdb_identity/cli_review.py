@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from .catalog_results import effective_catalog_results
 from .cli_context import CliContext
-from .models import CatalogRun, MatchCandidate, RawCatalogRow, Target
+from .models.catalogs import CatalogRun, RawCatalogRow
+from .models.identity import MatchCandidate, Target
 from .service import IdentityService
 from .vocabulary import ProviderRunStatus
 
@@ -178,7 +179,7 @@ def _run_review_queue(context: CliContext) -> int:
 
 
 def _write_iras_families(context: CliContext, session) -> None:
-    from .models import IrasBandSelection, IrasDetectionFamily
+    from .models.catalogs import IrasBandSelection, IrasDetectionFamily
 
     args = context.args
     query = (
@@ -255,7 +256,7 @@ def _write_catalog_matches(context: CliContext, session) -> None:
 
 def _write_identity_matches(context: CliContext, session) -> None:
     from .identity_results import effective_identity_candidate_ids
-    from .models import Submission
+    from .models.identity import Submission
 
     submissions = list(session.scalars(
         select(Submission)

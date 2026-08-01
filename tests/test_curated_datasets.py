@@ -6,7 +6,9 @@ from sqlalchemy import select
 from sdb_identity.datasets import SubmmObsService
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.export import export_ipac
-from sdb_identity.models import CatalogRun, ExportDirtyTarget, ExternalIdentifier
+from sdb_identity.models.catalogs import CatalogRun
+from sdb_identity.models.exports import ExportDirtyTarget
+from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 

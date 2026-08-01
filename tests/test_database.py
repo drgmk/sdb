@@ -5,7 +5,7 @@ import sqlite3
 from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database
 from sdb_identity.database import make_session_factory
-from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 

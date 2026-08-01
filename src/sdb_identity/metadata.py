@@ -9,14 +9,12 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
-from .models import (
-    AstrometricSolution,
-    ExternalIdentifier,
+from .models.identity import AstrometricSolution, ExternalIdentifier, Target
+from .models.metadata import (
     MetadataRun,
     SimbadMetadata,
     SimbadObjectType,
     SimbadRelationship,
-    Target,
     UserNote,
 )
 from .providers import Astrometry, ProviderError

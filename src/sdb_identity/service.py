@@ -11,17 +11,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec, make_sdbid, propagate_to_epoch, validate_position
-from .models import (
+from .models.identity import (
     AstrometricSolution,
     ExternalIdentifier,
     MatchCandidate,
     MatchDecision,
     ProviderOutcome,
-    MetadataRun,
-    SimbadMetadata,
     Submission,
     Target,
 )
+from .models.metadata import MetadataRun, SimbadMetadata
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .identifiers import normalize_identifier

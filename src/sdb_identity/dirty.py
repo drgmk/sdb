@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import (
-    ExportDirtyTarget, Sample, SampleMembershipAction, Target,
-)
+from .models.exports import ExportDirtyTarget
+from .models.samples import Sample, SampleMembershipAction
+from .models.identity import Target
 
 
 def mark_export_dirty(

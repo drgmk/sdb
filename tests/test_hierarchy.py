@@ -13,24 +13,28 @@ from sdb_identity.database import make_engine
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.hierarchy import HierarchyService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService, RelationshipValue
-from sdb_identity.models import (
+from sdb_identity.models.identity import (
     AstrometricSolution,
+    ExternalIdentifier,
+    MatchCandidate,
+    Submission,
+)
+from sdb_identity.models.catalogs import (
     CatalogDetection,
     CatalogRun,
-    ExternalIdentifier,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
+from sdb_identity.models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
     HierarchySource,
-    MatchCandidate,
-    NormalizedMeasurement,
-    RawCatalogRow,
     StructuralEdge,
     StructuralEdgeAction,
-    Submission,
     TargetSystem,
-    utcnow,
 )
+from sdb_identity.models.base import utcnow
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.samples import SampleService

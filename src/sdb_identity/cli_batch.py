@@ -189,7 +189,7 @@ def _run_status(context: CliContext) -> int:
 
 
 def _run_resume(context: CliContext) -> int:
-    from .models import ImportRun
+    from .models.batch import ImportRun
 
     args = context.args
     sessions = context.require_sessions()

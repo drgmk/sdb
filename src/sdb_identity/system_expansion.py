@@ -15,13 +15,10 @@ from .hierarchy_semantics import (
     component_label_from_identifier,
     simbad_component_relevance,
 )
-from .models import (
-    ExternalIdentifier,
-    MetadataRun,
-    SimbadMetadata,
-    SimbadRelationship,
+from .models.identity import ExternalIdentifier, Target
+from .models.metadata import MetadataRun, SimbadMetadata, SimbadRelationship
+from .models.hierarchy import (
     StructuralEdge,
-    Target,
     TargetLifecycleAction,
     TargetSystem,
     TargetSystemMember,

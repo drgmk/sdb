@@ -8,11 +8,9 @@ from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.decision_history import system_decision_history
 from sdb_identity.hierarchy import HierarchyService
-from sdb_identity.models import (
-    CuratedAssociationAction,
-    MeasurementEligibilityAction,
-    NormalizedMeasurement,
-)
+from sdb_identity.models.curated import CuratedAssociationAction
+from sdb_identity.models.photometry import MeasurementEligibilityAction
+from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService

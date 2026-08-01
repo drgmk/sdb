@@ -9,7 +9,7 @@ import sys
 from sqlalchemy import select
 
 from .cli_context import CliContext
-from .models import Target
+from .models.identity import Target
 from .service import IdentityService
 from .vocabulary import ReviewPriority, TargetRole, TargetState
 

@@ -11,7 +11,7 @@ from .catalog_results import (
     effective_catalog_results,
     effective_catalog_selected_rows,
 )
-from .models import (
+from .models.catalogs import (
     CatalogDetection,
     CatalogRun,
     CatalogTargetAssociationAction,

@@ -7,13 +7,13 @@ from sqlalchemy import select
 
 from sdb_identity.hierarchy import HierarchyService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService, RelationshipValue
-from sdb_identity.models import (
+from sdb_identity.models.hierarchy import (
     StructuralEdge,
-    Target,
     TargetLifecycleAction,
     TargetSystem,
     TargetSystemMember,
 )
+from sdb_identity.models.identity import Target
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.system_expansion import (
     import_immediate_relatives,

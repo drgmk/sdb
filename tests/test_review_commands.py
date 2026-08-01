@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sdb_identity.models import MeasurementEligibilityAction
+from sdb_identity.models.photometry import MeasurementEligibilityAction
 from sdb_identity.photometry import assign_measurement_target
 from sdb_identity.review_commands import (
     review_detection_command,

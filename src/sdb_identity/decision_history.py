@@ -10,28 +10,28 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_measurements import current_measurement_target_ids
-from .models import (
+from .models.catalogs import (
     CatalogResultDecision,
     CatalogRetryAction,
     CatalogTargetAssociationAction,
     CatalogDetection,
-    CuratedAssociationAction,
+    NormalizedMeasurement,
+)
+from .models.curated import CuratedAssociationAction
+from .models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
-    MatchCandidate,
-    MatchDecision,
-    MeasurementAssociationAction,
-    MeasurementEligibilityAction,
-    NormalizedMeasurement,
-    Sample,
-    SampleMembershipAction,
     StructuralEdge,
     StructuralEdgeAction,
-    Submission,
-    Target,
     TargetLifecycleAction,
     TargetSystemMember,
 )
+from .models.identity import MatchCandidate, MatchDecision, Submission, Target
+from .models.photometry import (
+    MeasurementAssociationAction,
+    MeasurementEligibilityAction,
+)
+from .models.samples import Sample, SampleMembershipAction
 from .targets import resolve_target
 
 

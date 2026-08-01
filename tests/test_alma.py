@@ -9,10 +9,13 @@ from sdb_identity.alma import AlmaSyncService
 from sdb_identity.alma_lookup import AlmaLookupService
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
-from sdb_identity.models import (
-    AlmaMember, AlmaMemberPosition, AlmaSyncChunk, AlmaSyncRun,
-    AstrometricSolution,
+from sdb_identity.models.alma import (
+    AlmaMember,
+    AlmaMemberPosition,
+    AlmaSyncChunk,
+    AlmaSyncRun,
 )
+from sdb_identity.models.identity import AstrometricSolution
 from sdb_identity.providers import ProviderError
 from sdb_identity.providers import Astrometry
 from sdb_identity.service import AddRequest, IdentityService

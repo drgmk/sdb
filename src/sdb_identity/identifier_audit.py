@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_results import effective_catalog_results
-from .models import ExternalIdentifier, Target
+from .models.identity import ExternalIdentifier, Target
 from .reference_definitions import SNAPSHOT_CATALOGS
 from .identifiers import normalize_identifier
 from .vocabulary import ProviderRunStatus

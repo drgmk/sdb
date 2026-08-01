@@ -11,7 +11,8 @@ from sdb_identity.catalog_types import CatalogCandidate, CatalogQueryContext
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.export import export_ipac
-from sdb_identity.models import CatalogAttribute, CatalogRun, ExternalIdentifier, RawCatalogRow
+from sdb_identity.models.catalogs import CatalogAttribute, CatalogRun, RawCatalogRow
+from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.providers import Astrometry
 from sdb_identity.reference import (
     GASPAR_CATALOG,
@@ -641,7 +642,8 @@ def test_bulk_application_is_idempotent_and_refreshes_changed_rows(session_facto
     changed = service.apply_gaspar()
     assert (changed.refreshed, changed.matched) == (1, 1)
     with session_factory() as session:
-        from sdb_identity.models import ExportDirtyTarget, NormalizedMeasurement
+        from sdb_identity.models.exports import ExportDirtyTarget
+        from sdb_identity.models.catalogs import NormalizedMeasurement
         current = session.scalar(
             select(NormalizedMeasurement)
             .join(CatalogRun, CatalogRun.id == NormalizedMeasurement.run_id)

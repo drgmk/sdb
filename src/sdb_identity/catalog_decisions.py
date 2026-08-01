@@ -13,7 +13,7 @@ from .catalog_types import CatalogAdapter, CatalogRefreshResult
 from .catalog_ingestion import store_catalog_attributes
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
-from .models import (
+from .models.catalogs import (
     CatalogDetection,
     CatalogResultDecision,
     CatalogRetryAction,

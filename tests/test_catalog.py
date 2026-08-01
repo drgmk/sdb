@@ -18,7 +18,18 @@ from sdb_identity.catalog_provenance import (
     CatalogProvenance,
     vizier_entry_url,
 )
-from sdb_identity.models import CatalogBatchRequest, CatalogDetection, CatalogDetectionProvenance, CatalogResultDecision, CatalogRetryAction, CatalogRun, ExportDirtyTarget, ExternalIdentifier, NormalizedMeasurement, RawCatalogRow
+from sdb_identity.models.catalogs import (
+    CatalogBatchRequest,
+    CatalogDetection,
+    CatalogDetectionProvenance,
+    CatalogResultDecision,
+    CatalogRetryAction,
+    CatalogRun,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
+from sdb_identity.models.exports import ExportDirtyTarget
+from sdb_identity.models.identity import AstrometricSolution, ExternalIdentifier
 from sdb_identity.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import AddRequest, IdentityService
@@ -346,7 +357,7 @@ def test_query_coordinates_are_propagated_to_catalog_epoch(session_factory):
     target = add_target(session_factory, ra_deg=10, dec_deg=20)
     # Replace the target solution PM to isolate catalog query propagation.
     with session_factory.begin() as session:
-        solution = session.get(__import__("sdb_identity.models", fromlist=["AstrometricSolution"]).AstrometricSolution, 1)
+        solution = session.get(AstrometricSolution, 1)
         solution.epoch = 2016.0
         solution.ra_deg = 10.0
         solution.dec_deg = 20.0

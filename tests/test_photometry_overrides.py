@@ -10,7 +10,7 @@ from sdb_identity.photometry import (
     review_photometry_associations,
     set_measurement_eligibility,
 )
-from sdb_identity.models import NormalizedMeasurement
+from sdb_identity.models.catalogs import NormalizedMeasurement
 from sqlalchemy import select
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement

@@ -21,14 +21,12 @@ from .catalog_ingestion import (
 from .catalog_matching import match_catalog_candidates
 from .detection_ingestion import DetectionIngestor
 from .dirty import mark_export_dirty
-from .models import (
-    AstrometricSolution,
+from .models.identity import AstrometricSolution, ExternalIdentifier, Target
+from .models.catalogs import (
     CatalogBatchRequest,
     CatalogDetection,
     CatalogRun,
-    ExternalIdentifier,
     RawCatalogRow,
-    Target,
 )
 from .providers import Astrometry, ProviderError
 from .targets import resolve_target

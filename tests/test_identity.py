@@ -8,7 +8,14 @@ from sqlalchemy import select
 
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.identity_results import effective_identity_candidate_ids
-from sdb_identity.models import AstrometricSolution, ExternalIdentifier, MatchCandidate, ProviderOutcome, Submission, Target
+from sdb_identity.models.identity import (
+    AstrometricSolution,
+    ExternalIdentifier,
+    MatchCandidate,
+    ProviderOutcome,
+    Submission,
+    Target,
+)
 from sdb_identity.service import AddRequest, IdentityService, UnresolvedTarget
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, gaia_candidate, simbad_result
 

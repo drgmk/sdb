@@ -25,21 +25,16 @@ from .hierarchy_graph import (
 )
 from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
 from .identity_results import effective_identity_candidate_ids
-from .models import (
-    AstrometricSolution,
+from .models.identity import AstrometricSolution, MatchCandidate, Submission, Target
+from .models.catalogs import (
     CatalogAttribute,
     CatalogDetectionProvenance,
     CatalogRun,
-    HierarchyMatchCandidate,
-    HierarchyRecord,
-    MatchCandidate,
     NormalizedMeasurement,
     RawCatalogRow,
-    SimbadMetadata,
-    StructuralEdge,
-    Submission,
-    Target,
 )
+from .models.hierarchy import HierarchyMatchCandidate, HierarchyRecord, StructuralEdge
+from .models.metadata import SimbadMetadata
 from .providers import Astrometry
 from .targets import resolve_target
 from .ubv_components import decode_ubv_component

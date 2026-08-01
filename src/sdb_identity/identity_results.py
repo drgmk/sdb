@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import MatchCandidate, MatchDecision, Submission
+from .models.identity import MatchCandidate, MatchDecision, Submission
 
 
 def effective_identity_candidate_ids(

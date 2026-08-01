@@ -14,7 +14,7 @@ from .catalog_types import (
     CatalogCandidate,
     DetectionNormalizationItem,
 )
-from .models import CatalogDetection, RawCatalogRow
+from .models.catalogs import CatalogDetection, RawCatalogRow
 
 
 @dataclass(frozen=True)

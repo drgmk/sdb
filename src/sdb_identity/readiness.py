@@ -8,15 +8,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_results import effective_catalog_results
 from .dirty import pending_export_targets
-from .models import (
-    CuratedRecord,
-    DatasetRevision,
-    ExternalIdentifier,
-    IrasDetectionFamily,
-    MetadataRun,
-    Sample,
-    SampleExportRun,
-)
+from .models.curated import CuratedRecord, DatasetRevision
+from .models.identity import ExternalIdentifier
+from .models.catalogs import IrasDetectionFamily
+from .models.metadata import MetadataRun
+from .models.samples import Sample, SampleExportRun
 from .samples import SampleService
 from .identifiers import normalize_identifier
 from .system_photometry import load_system_photometry_state

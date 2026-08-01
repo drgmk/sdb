@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from sdb_identity.catalog_acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
-from sdb_identity.models import ExternalIdentifier
+from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.reference import ReferenceStore
 from sdb_identity.samples import SampleService
 from sdb_identity.service import AddRequest, IdentityService
