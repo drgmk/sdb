@@ -2681,7 +2681,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"target not found: {args.target}", file=sys.stderr)
                 return 1
             from .target_lifecycle import target_lifecycle_status
-            from .hierarchy import HierarchyService
+            from .hierarchy_target_context import HierarchyTargetContextService
             for target in targets:
                 solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
                 status_payload = {
@@ -2702,7 +2702,9 @@ def main(argv: list[str] | None = None) -> int:
                 status_payload["lifecycle"] = asdict(
                     target_lifecycle_status(sessions, target.sdbid)
                 )
-                status_payload["hierarchy"] = HierarchyService(sessions).target_context_summary(target.sdbid)
+                status_payload["hierarchy"] = HierarchyTargetContextService(
+                    sessions,
+                ).target_context_summary(target.sdbid)
                 print(_format_json(args, status_payload, sort_keys=True))
             return 0
         if args.command == "runs":

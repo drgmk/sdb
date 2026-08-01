@@ -448,9 +448,9 @@ def photometry_review_queue(
     provider: str | None = None,
 ) -> list[dict[str, object]]:
     provider_value = None if provider is None else provider.strip().lower()
-    from .hierarchy import HierarchyService
+    from .hierarchy_target_context import HierarchyTargetContextService
 
-    hierarchy_rows = HierarchyService(session_factory).photometry_review(
+    hierarchy_rows = HierarchyTargetContextService(session_factory).photometry_review(
         target_references, provider=provider_value
     )
     hierarchy_by_sdbid = {str(row["sdbid"]): row for row in hierarchy_rows}

@@ -6,7 +6,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hierarchy import HierarchyService
+from .hierarchy_matching import HierarchyMatchingService
 from .hierarchy_semantics import simbad_component_relevance
 from .ingestion import TargetIngestionPlan
 from .models import ExternalIdentifier, MetadataRun, SimbadMetadata, Target
@@ -196,12 +196,12 @@ class TargetImportService:
         *,
         identity_service: IdentityService,
         update_service: UpdateService,
-        hierarchy_service: HierarchyService | None = None,
+        hierarchy_service: HierarchyMatchingService | None = None,
     ):
         self.sessions = session_factory
         self.identity = identity_service
         self.update = update_service
-        self.hierarchy = hierarchy_service or HierarchyService(session_factory)
+        self.hierarchy = hierarchy_service or HierarchyMatchingService(session_factory)
         self.plan = TargetIngestionPlan(
             identity=self.identity,
             update=self.update,

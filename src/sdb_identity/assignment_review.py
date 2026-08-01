@@ -133,9 +133,9 @@ def build_measurement_assignment_review(
 ) -> MeasurementAssignmentReview:
     """Build proposal and matrix state for an interactive assignment review."""
     if system_context is None:
-        from .hierarchy import HierarchyService
+        from .hierarchy_system_context import HierarchySystemContextService
 
-        system_context = HierarchyService(session_factory).system_context(
+        system_context = HierarchySystemContextService(session_factory).system_context(
             target_reference
         )
     proposals = measurement_assignment_proposals(

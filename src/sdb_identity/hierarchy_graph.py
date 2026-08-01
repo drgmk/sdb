@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .hierarchy_geometry import (
@@ -15,7 +15,12 @@ from .hierarchy_geometry import (
     wds_record_has_unusable_separation,
 )
 from .hierarchy_wds import component_pair
-from .models import HierarchyRecord, StructuralEdge, StructuralEdgeAction
+from .models import (
+    HierarchyMatchCandidate,
+    HierarchyRecord,
+    StructuralEdge,
+    StructuralEdgeAction,
+)
 
 
 GRAPH_EDGE_STATUSES = ("derived", "stale", "rejected")
@@ -257,6 +262,39 @@ def edges_for_system(
     ))
     overrides = latest_overrides(session, list(edges))
     return tuple(edge_row(edge, overrides.get(edge.id)) for edge in edges)
+
+
+def diagnostics_for_system(
+    session: Session,
+    *,
+    provider: str,
+    native_id: str,
+    source_id: int,
+) -> tuple[HierarchyGraphDiagnosticRow, ...]:
+    """Return diagnostics for one native system without opening another session."""
+    rows = list(edges_for_system(
+        session,
+        provider=provider,
+        native_id=native_id,
+        source_id=source_id,
+    ))
+    matched_count = session.scalar(
+        select(func.count(HierarchyMatchCandidate.id))
+        .join(
+            HierarchyRecord,
+            HierarchyRecord.id == HierarchyMatchCandidate.record_id,
+        )
+        .where(
+            HierarchyRecord.provider == provider,
+            HierarchyRecord.source_id == source_id,
+            HierarchyRecord.native_id == native_id,
+        )
+    ) or 0
+    return build_diagnostics(
+        rows,
+        {(provider, source_id, native_id): int(matched_count)},
+        limit=0,
+    )
 
 
 def edge_row(

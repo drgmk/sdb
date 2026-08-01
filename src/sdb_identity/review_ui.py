@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .assignment_readiness import assignment_readiness_report
 from .decisions import DecisionContext
 from .fitting_groups import fitting_group_report
-from .hierarchy import HierarchyService
+from .hierarchy_system_context import HierarchySystemContextService
 from .models import CatalogResultDecision, CatalogRun, RawCatalogRow, Target
 from .review_actions import (
     review_catalog_target_association_decision,
@@ -108,7 +108,9 @@ def create_review_app(
             graph = fitting_group_report(
                 session_factory, target_reference=sdbid,
             )
-            system_context = HierarchyService(session_factory).system_context(
+            system_context = HierarchySystemContextService(
+                session_factory,
+            ).system_context(
                 sdbid,
                 catalog_providers=catalog_coverage_providers,
             )
@@ -1297,7 +1299,7 @@ def _catalog_coverage_preview_payload(
     update_available: bool,
     normalization_available: bool,
 ) -> dict[str, object]:
-    context = HierarchyService(session_factory).system_context(
+    context = HierarchySystemContextService(session_factory).system_context(
         target_reference,
         catalog_providers=providers,
     )

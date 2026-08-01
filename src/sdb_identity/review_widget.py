@@ -19,7 +19,7 @@ from .catalog_results import (
 )
 
 from .astrometry import propagate_to_epoch
-from .hierarchy import HierarchyService
+from .hierarchy_system_context import HierarchySystemContextService
 from .hierarchy_geometry import hierarchy_record_positions
 from .hierarchy_graph import (
     GRAPH_EDGE_STATUSES,
@@ -223,7 +223,7 @@ def build_review_sky_view(
         if motion_solution is not None:
             arrows.extend(_proper_motion_arrows(target, motion_solution))
         segments = list(hierarchy_segments)
-        hierarchy_service = HierarchyService(session_factory)
+        hierarchy_service = HierarchySystemContextService(session_factory)
         system_context = hierarchy_service.system_context(
             target.sdbid,
             radius_arcsec=radius_arcsec,

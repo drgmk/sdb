@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Iterable
 
-from .hierarchy import HierarchyService
+from .hierarchy_matching import HierarchyMatchingService
 from .service import AddRequest, AddResult, IdentityService
 from .update import UpdateService, UpdateSummary
 
@@ -24,7 +24,7 @@ class TargetIngestionPlan:
         *,
         identity: IdentityService,
         update: UpdateService | None = None,
-        hierarchy: HierarchyService | None = None,
+        hierarchy: HierarchyMatchingService | None = None,
     ):
         self.identity = identity
         self.update = update

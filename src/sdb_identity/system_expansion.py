@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .astrometry import angular_separation_arcsec
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
-from .hierarchy import HierarchyService
+from .hierarchy_structure import HierarchyStructureService
+from .hierarchy_target_context import HierarchyTargetContextService
 from .hierarchy_semantics import (
     component_label_from_identifier,
     simbad_component_relevance,
@@ -217,13 +218,13 @@ def import_immediate_relatives(
         ),
     )
 
-    hierarchy = HierarchyService(session_factory)
+    structure = HierarchyStructureService(session_factory)
     system = _find_or_create_expansion_system(
-        session_factory, hierarchy, requested_sdbid,
+        session_factory, structure, requested_sdbid,
     )
     _apply_inferred_lifecycle(
         session_factory,
-        hierarchy,
+        HierarchyTargetContextService(session_factory),
         requested_sdbid,
         system_id=system.id,
         actor=decision.actor,
@@ -272,7 +273,7 @@ def import_immediate_relatives(
         applied_action = (
             "imported" if row["action"] == "imported" else "reconciled"
         )
-        hierarchy.add_member(
+        structure.add_member(
             system.name,
             target_sdbid,
             component_label=relative.get("component_label"),
@@ -505,7 +506,7 @@ def _group_component(component: str | None) -> bool:
 
 def _find_or_create_expansion_system(
     session_factory: sessionmaker[Session],
-    hierarchy: HierarchyService,
+    structure: HierarchyStructureService,
     requested_sdbid: str,
 ) -> TargetSystem:
     with session_factory() as session:
@@ -528,7 +529,7 @@ def _find_or_create_expansion_system(
         while session.scalar(select(TargetSystem.id).where(TargetSystem.name == name)) is not None:
             name = f"{base_name} {index}"
             index += 1
-    return hierarchy.create_system(
+    return structure.create_system(
         name,
         primary=requested_sdbid,
         source="simbad",
@@ -538,14 +539,14 @@ def _find_or_create_expansion_system(
 
 def _apply_inferred_lifecycle(
     session_factory: sessionmaker[Session],
-    hierarchy: HierarchyService,
+    context_service: HierarchyTargetContextService,
     target_sdbid: str,
     *,
     system_id: int,
     actor: str,
     reason: str,
 ) -> None:
-    context = hierarchy.target_context(target_sdbid)
+    context = context_service.target_context(target_sdbid)
     kind = str(context["semantic_identity"].get("kind") or "unknown")
     component = context["component_assignment"].get("semantic_component")
     if component:
