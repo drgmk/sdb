@@ -112,7 +112,7 @@ def _batch_service(
     reporter=None,
 ):
     from .batch import BatchService
-    from .catalog_acquisition import CatalogAcquisitionService
+    from .catalogs.acquisition import CatalogAcquisitionService
     from .metadata import MetadataService
 
     if offline:
@@ -120,7 +120,7 @@ def _batch_service(
         metadata_factory = lambda: MetadataService(sessions, None)
         catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
-        from .catalog_registry import (
+        from .catalogs.registry import (
             REMOTE_CATALOG_PROVIDERS,
             build_catalog_adapters,
         )

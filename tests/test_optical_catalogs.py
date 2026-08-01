@@ -3,14 +3,14 @@ from __future__ import annotations
 import astropy.units as u
 from astropy.table import Table
 
-from sdb_identity.catalog_policy import catalog_source_display_name
-from sdb_identity.adapters.reference import (
+from sdb_identity.catalogs.policy import catalog_source_display_name
+from sdb_identity.catalogs.adapters.reference import (
     Hip2SnapshotAdapter,
     Paunzen15SnapshotAdapter,
     TdscSnapshotAdapter,
 )
-from sdb_identity.adapters.tycho2 import Tycho2Adapter
-from sdb_identity.catalog_types import CatalogQueryContext
+from sdb_identity.catalogs.adapters.tycho2 import Tycho2Adapter
+from sdb_identity.catalogs.types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 from sdb_identity.reference import (
     HIP2_CATALOG,

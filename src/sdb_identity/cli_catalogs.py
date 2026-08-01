@@ -6,8 +6,8 @@ import sys
 
 from sqlalchemy import select
 
-from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
-from .catalog_results import effective_catalog_results
+from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
+from .catalogs.results import effective_catalog_results
 from .cli_context import CliContext
 from .models.catalogs import CatalogRun, RawCatalogRow
 from .targets import resolve_target, resolve_targets
@@ -93,8 +93,8 @@ def run_catalog_command(context: CliContext) -> int:
 
 
 def _run_override(context: CliContext) -> int:
-    from .catalog_decisions import CatalogDecisionService
-    from .catalog_registry import build_catalog_adapter
+    from .catalogs.decisions import CatalogDecisionService
+    from .catalogs.registry import build_catalog_adapter
     from .reference import ReferenceStore
 
     args = context.args
@@ -136,11 +136,11 @@ def _run_refresh(context: CliContext) -> int:
         return 2
     try:
         with context.provider_output():
-            from .catalog_registry import CATALOG_PROVIDERS
+            from .catalogs.registry import CATALOG_PROVIDERS
 
             if args.provider in CATALOG_PROVIDERS:
-                from .catalog_acquisition import CatalogAcquisitionService
-                from .catalog_registry import build_catalog_adapter
+                from .catalogs.acquisition import CatalogAcquisitionService
+                from .catalogs.registry import build_catalog_adapter
                 from .reference import ReferenceStore
 
                 adapters = {args.provider: build_catalog_adapter(

@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 import sys
 
-from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
+from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
 from .cli_context import CliContext
 
 

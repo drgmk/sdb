@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
-from .catalog_policy import (
+from .catalogs.policy import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
@@ -18,8 +18,8 @@ from .system_photometry import (
     SystemPhotometryState,
     load_system_photometry_state,
 )
-from .ubv_components import decode_ubv_component
-from .tdsc_components import decode_tdsc_component
+from .catalogs.ubv_components import decode_ubv_component
+from .catalogs.tdsc_components import decode_tdsc_component
 from .targets import resolve_target
 from .vocabulary import INACTIVE_TARGET_STATES, TargetRole, TargetState
 _AMBIGUOUS_SCOPES = {"ambiguous", "neighbour_context", "reject"}

@@ -8,14 +8,14 @@ from astropy.coordinates import SkyCoord
 from astroquery.ipac.irsa.core import IrsaClass
 import requests
 
-from ..catalog_registry import catalog_provider
-from ..catalog_types import (
+from ..registry import catalog_provider
+from ..types import (
     CatalogAttributeValue,
     CatalogCandidate,
     CatalogQueryContext,
     MeasurementValue,
 )
-from ..providers import ProviderError
+from ...providers import ProviderError
 from .vizier import (
     BandDefinition,
     VizierConeAdapter,

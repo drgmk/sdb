@@ -9,7 +9,7 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_measurements import current_measurement_target_ids
+from .catalogs.measurements import current_measurement_target_ids
 from .models.catalogs import (
     CatalogResultDecision,
     CatalogRetryAction,

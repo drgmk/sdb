@@ -9,11 +9,11 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_types import CatalogAdapter, CatalogRefreshResult
-from .catalog_ingestion import store_catalog_attributes
-from .decisions import DecisionContext
-from .dirty import mark_export_dirty
-from .models.catalogs import (
+from .types import CatalogAdapter, CatalogRefreshResult
+from .ingestion import store_catalog_attributes
+from ..decisions import DecisionContext
+from ..dirty import mark_export_dirty
+from ..models.catalogs import (
     CatalogDetection,
     CatalogResultDecision,
     CatalogRetryAction,
@@ -21,7 +21,7 @@ from .models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .vocabulary import PROVIDER_FAILURE_STATUSES, ProviderRunStatus
+from ..vocabulary import PROVIDER_FAILURE_STATUSES, ProviderRunStatus
 
 
 class CatalogAcquisition(Protocol):

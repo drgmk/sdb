@@ -4,7 +4,7 @@ import pytest
 from astropy.table import Table
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.dirty import mark_export_dirty, pending_export_targets
 from sdb_identity.export import (
     export_ipac,

@@ -8,14 +8,14 @@ from astropy.coordinates import SkyCoord
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .catalog_results import effective_catalog_results
-from .models.catalogs import (
+from .results import effective_catalog_results
+from ..models.catalogs import (
     IrasBandSelection,
     IrasDetectionFamily,
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .vocabulary import ProviderRunStatus
+from ..vocabulary import ProviderRunStatus
 
 
 IRAS_PROVIDERS = ("iras_psc", "iras_fsc")

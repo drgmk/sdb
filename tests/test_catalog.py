@@ -6,15 +6,15 @@ import json
 import pytest
 from sqlalchemy import delete, select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import (
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import (
     CatalogCandidate,
     CatalogQueryContext,
     MeasurementValue,
 )
-from sdb_identity.catalog_decisions import CatalogDecisionService
-from sdb_identity.catalog_normalization import CatalogNormalizationService
-from sdb_identity.catalog_provenance import (
+from sdb_identity.catalogs.decisions import CatalogDecisionService
+from sdb_identity.catalogs.normalization import CatalogNormalizationService
+from sdb_identity.catalogs.provenance import (
     CatalogProvenance,
     vizier_entry_url,
 )
@@ -30,7 +30,7 @@ from sdb_identity.models.catalogs import (
 )
 from sdb_identity.models.exports import ExportDirtyTarget
 from sdb_identity.models.identity import AstrometricSolution, ExternalIdentifier
-from sdb_identity.adapters.allwise import AllWiseAdapter
+from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import AddRequest, IdentityService
 
@@ -344,7 +344,7 @@ def test_refresh_keeps_history_and_replaces_current_measurements(session_factory
     with session_factory() as session:
         runs = session.scalars(select(CatalogRun).order_by(CatalogRun.id)).all()
         assert [run.is_current for run in runs] == [False, True]
-        from sdb_identity.catalog_measurements import current_measurements_for_target
+        from sdb_identity.catalogs.measurements import current_measurements_for_target
 
         current = current_measurements_for_target(session, runs[-1].target_id)[0]
         assert current.value == 7.2
@@ -470,7 +470,7 @@ def test_allwise_review_only_source_can_match_nearby_target_independently(sessio
         primary.target_id,
     ]
     with session_factory() as session:
-        from sdb_identity.catalog_measurements import current_measurements_for_target
+        from sdb_identity.catalogs.measurements import current_measurements_for_target
 
         assert current_measurements_for_target(
             session, primary.target_id,
@@ -515,7 +515,7 @@ def test_manual_catalog_candidate_override_is_append_only(session_factory):
     )
     assert (replacement.status, replacement.measurement_count) == ("match", 1)
     with session_factory() as session:
-        from sdb_identity.catalog_measurements import (
+        from sdb_identity.catalogs.measurements import (
             current_measurements_for_target,
         )
 

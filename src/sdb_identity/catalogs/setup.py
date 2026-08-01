@@ -6,13 +6,13 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_registry import (
+from .registry import (
     REMOTE_CATALOG_PROVIDERS,
     build_catalog_adapter,
 )
-from .catalog_acquisition import CatalogAcquisitionService
-from .catalog_decisions import CatalogDecisionService
-from .catalog_normalization import CatalogNormalizationService
+from .acquisition import CatalogAcquisitionService
+from .decisions import CatalogDecisionService
+from .normalization import CatalogNormalizationService
 
 
 def catalog_operator_service_for_provider(

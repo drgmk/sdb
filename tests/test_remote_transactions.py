@@ -5,7 +5,7 @@ from threading import Barrier
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models.catalogs import CatalogRun
 from sdb_identity.models.metadata import MetadataRun

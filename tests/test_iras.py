@@ -4,8 +4,8 @@ from astropy.table import Table
 import pytest
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import CatalogCandidate, MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.export import export_ipac
 from sdb_identity.models.catalogs import (

@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 import re
 
-from .catalog_registry import REMOTE_CATALOG_PROVIDERS
-from .identifiers import normalize_identifier
+from .registry import REMOTE_CATALOG_PROVIDERS
+from ..identifiers import normalize_identifier
 from .reference_definitions import SNAPSHOT_CATALOGS
 
 

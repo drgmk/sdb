@@ -6,8 +6,8 @@ import astropy.units as u
 from astropy.table import Column, Table
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import CatalogCandidate, CatalogQueryContext
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import CatalogCandidate, CatalogQueryContext
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.export import export_ipac
@@ -37,13 +37,13 @@ from sdb_identity.reference import (
     UBVMEANS_MAIN_TABLE,
     UbvMeansSnapshotAdapter,
 )
-from sdb_identity.adapters.reference import TdscSnapshotAdapter
-from sdb_identity.reference_definitions import V70A_DEFINITION
-from sdb_identity.reference_definitions import UBVMEANS_DEFINITION
+from sdb_identity.catalogs.adapters.reference import TdscSnapshotAdapter
+from sdb_identity.catalogs.reference_definitions import V70A_DEFINITION
+from sdb_identity.catalogs.reference_definitions import UBVMEANS_DEFINITION
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
-from sdb_identity.ubv_components import decode_ubv_component
-from sdb_identity.v70a_components import decode_v70a_component
+from sdb_identity.catalogs.ubv_components import decode_ubv_component
+from sdb_identity.catalogs.v70a_components import decode_v70a_component
 
 
 class FakeSnapshotClient:

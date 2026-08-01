@@ -7,16 +7,16 @@ from collections.abc import Iterable
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .catalog_policy import (
+from .policy import (
     catalog_position_matches_components,
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
-from .astrometry import angular_separation_arcsec
-from .catalog_measurements import current_catalog_detection_target_pairs
-from .catalog_results import effective_catalog_results
-from .models.identity import AstrometricSolution, ExternalIdentifier, Target
-from .models.catalogs import (
+from ..astrometry import angular_separation_arcsec
+from .measurements import current_catalog_detection_target_pairs
+from .results import effective_catalog_results
+from ..models.identity import AstrometricSolution, ExternalIdentifier, Target
+from ..models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,
     CatalogRun,
@@ -24,8 +24,8 @@ from .models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .providers import Astrometry
-from .vocabulary import PROVIDER_FAILURE_STATUSES
+from ..providers import Astrometry
+from ..vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 DEFAULT_CATALOG_MATCH_RADIUS_ARCSEC = 2.0

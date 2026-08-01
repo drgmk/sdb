@@ -3,9 +3,9 @@ from __future__ import annotations
 from astropy.table import Table
 from sqlalchemy import select
 
-from sdb_identity.adapters.gaia import GaiaDr3Adapter
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import CatalogQueryContext
+from sdb_identity.catalogs.adapters.gaia import GaiaDr3Adapter
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import CatalogQueryContext
 from sdb_identity.models.catalogs import (
     CatalogRun,
     NormalizedMeasurement,

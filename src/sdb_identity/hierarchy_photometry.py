@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from .catalog_measurements import current_measurements_for_target
+from .catalogs.measurements import current_measurements_for_target
 from .hierarchy_semantics import normalize_component_label
 from .models.identity import Target
 from .vocabulary import ReviewPriority

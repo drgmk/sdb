@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database
 from sdb_identity.database import make_session_factory
 from sdb_identity.models.catalogs import NormalizedMeasurement

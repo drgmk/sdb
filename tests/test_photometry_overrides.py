@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astropy.table import Table
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.export import export_ipac
 from sdb_identity.photometry import (
     list_measurement_eligibility_actions,

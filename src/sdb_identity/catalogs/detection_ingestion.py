@@ -7,14 +7,14 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from .catalog_ingestion import canonical_detection
-from .catalog_normalization import normalize_detection
-from .catalog_types import (
+from .ingestion import canonical_detection
+from .normalization import normalize_detection
+from .types import (
     CatalogAdapter,
     CatalogCandidate,
     DetectionNormalizationItem,
 )
-from .models.catalogs import CatalogDetection, RawCatalogRow
+from ..models.catalogs import CatalogDetection, RawCatalogRow
 
 
 @dataclass(frozen=True)

@@ -7,10 +7,10 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astroquery.ipac.irsa import Irsa
 
-from ..astrometry import angular_separation_arcsec
-from ..catalog_registry import catalog_provider
-from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
-from ..providers import ProviderError
+from ...astrometry import angular_separation_arcsec
+from ..registry import catalog_provider
+from ..types import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ...providers import ProviderError
 from .vizier import (
     BandDefinition,
     VizierConeAdapter,

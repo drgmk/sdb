@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_results import effective_catalog_results
+from .catalogs.results import effective_catalog_results
 from .dirty import pending_export_targets
 from .models.curated import CuratedRecord, DatasetRevision
 from .models.identity import ExternalIdentifier

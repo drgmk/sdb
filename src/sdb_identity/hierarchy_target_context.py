@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .astrometry import angular_separation_arcsec
-from .catalog_measurements import current_measurements_for_target
+from .catalogs.measurements import current_measurements_for_target
 from .hierarchy_graph import (
     HierarchyGraphEdgeRow,
     diagnostics_for_system,

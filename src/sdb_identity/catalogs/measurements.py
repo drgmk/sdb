@@ -7,18 +7,18 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .catalog_results import (
+from .results import (
     effective_catalog_results,
     effective_catalog_selected_rows,
 )
-from .models.catalogs import (
+from ..models.catalogs import (
     CatalogDetection,
     CatalogRun,
     CatalogTargetAssociationAction,
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .vocabulary import ProviderRunStatus
+from ..vocabulary import ProviderRunStatus
 
 
 @dataclass(frozen=True)

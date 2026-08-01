@@ -5,11 +5,11 @@ from urllib.parse import quote
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
-from sdb_identity.adapters.allwise import AllWiseAdapter
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import CatalogCandidate, MeasurementValue
-from sdb_identity.catalog_decisions import CatalogDecisionService
-from sdb_identity.catalog_normalization import CatalogNormalizationService
+from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import CatalogCandidate, MeasurementValue
+from sdb_identity.catalogs.decisions import CatalogDecisionService
+from sdb_identity.catalogs.normalization import CatalogNormalizationService
 from sdb_identity.models.catalogs import (
     CatalogDetection,
     CatalogResultDecision,

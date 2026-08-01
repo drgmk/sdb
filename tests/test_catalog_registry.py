@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from astropy.table import Table
 
-from sdb_identity.catalog_overview import catalog_overview
-from sdb_identity.catalog_registry import (
+from sdb_identity.catalogs.overview import catalog_overview
+from sdb_identity.catalogs.registry import (
     CATALOG_PROVIDERS,
     REMOTE_CATALOG_PROVIDERS,
     SNAPSHOT_CATALOG_PROVIDERS,

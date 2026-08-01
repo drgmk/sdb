@@ -1,6 +1,6 @@
 """Catalog adapter implementations.
 
-Display, identifier, and component policy lives in :mod:`catalog_policy` so
+Display, identifier, and component policy lives in :mod:`catalogs.policy` so
 using those small helpers does not import every adapter implementation.
 """
 

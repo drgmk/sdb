@@ -5,8 +5,8 @@ import time
 import pytest
 from astropy.table import Table
 
-from sdb_identity.adapters.vizier import VizierConeAdapter
-from sdb_identity.catalog_types import CatalogCandidate, CatalogQueryContext
+from sdb_identity.catalogs.adapters.vizier import VizierConeAdapter
+from sdb_identity.catalogs.types import CatalogCandidate, CatalogQueryContext
 from sdb_identity.providers import Astrometry, ProviderError
 
 

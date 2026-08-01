@@ -6,7 +6,7 @@ import csv
 import math
 import re
 
-from .adapters.vizier import row_payload
+from .catalogs.adapters.vizier import row_payload
 from .cache_store import CachedSnapshotData
 from .hierarchy_records import (
     ParsedHierarchyRecord,

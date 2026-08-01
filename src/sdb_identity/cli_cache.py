@@ -122,7 +122,7 @@ def _add_reference_comparisons(
     value: dict[str, object],
 ) -> None:
     from .reference import ReferenceStore
-    from .reference_definitions import SNAPSHOT_CATALOGS
+    from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
 
     reference = ReferenceStore(context.reference_database_path)
     comparisons = []

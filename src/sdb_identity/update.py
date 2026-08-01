@@ -7,14 +7,14 @@ from typing import Callable, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_acquisition import CatalogAcquisitionService
+from .catalogs.acquisition import CatalogAcquisitionService
 from .metadata import MetadataService
 from .models.catalogs import CatalogRun
 from .models.metadata import MetadataRun
 from .models.identity import Target
 from .progress import NULL_PROGRESS, ProgressReporter
 from .reference_application import ReferenceApplicationService
-from .catalog_registry import (
+from .catalogs.registry import (
     REMOTE_CATALOG_PROVIDERS,
     SNAPSHOT_CATALOG_PROVIDERS,
 )
@@ -445,7 +445,7 @@ class UpdateService:
                         target_id, sdbid, provider, "missing", "missing",
                         f"run 'sdb reference fetch {provider}'",
                     )
-                from .adapters.reference import snapshot_adapter
+                from .catalogs.adapters.reference import snapshot_adapter
                 adapter = snapshot_adapter(provider, self.reference_store)
                 if not force and self._has_catalog(
                     target_id, provider, release=adapter.release

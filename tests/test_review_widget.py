@@ -5,9 +5,9 @@ import math
 
 import pytest
 
-from sdb_identity.catalog_policy import catalog_source_display_name
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import (
+from sdb_identity.catalogs.policy import catalog_source_display_name
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import (
     CatalogAttributeValue,
     CatalogCandidate,
     MeasurementValue,

@@ -7,10 +7,10 @@ from dataclasses import dataclass, replace
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_policy import catalog_source_display_name
-from .adapters.review_metadata import normalize_review_payload
+from .catalogs.policy import catalog_source_display_name
+from .catalogs.adapters.review_metadata import normalize_review_payload
 from .assignment_review import build_measurement_assignment_review
-from .catalog_results import (
+from .catalogs.results import (
     effective_catalog_results,
     effective_catalog_selected_rows,
 )
@@ -37,9 +37,9 @@ from .models.hierarchy import HierarchyMatchCandidate, HierarchyRecord, Structur
 from .models.metadata import SimbadMetadata
 from .providers import Astrometry
 from .targets import resolve_target
-from .ubv_components import decode_ubv_component
-from .tdsc_components import decode_tdsc_component
-from .v70a_components import decode_v70a_component
+from .catalogs.ubv_components import decode_ubv_component
+from .catalogs.tdsc_components import decode_tdsc_component
+from .catalogs.v70a_components import decode_v70a_component
 from .vocabulary import PROVIDER_FAILURE_STATUSES
 
 

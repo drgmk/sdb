@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .catalog_registry import CATALOG_PROVIDERS
-from .catalog_provenance import vizier_access_url
-from .reference_store import ReferenceStore
+from .registry import CATALOG_PROVIDERS
+from .provenance import vizier_access_url
+from ..reference_store import ReferenceStore
 
 
 def catalog_overview(reference_store: ReferenceStore | None = None) -> dict[str, object]:

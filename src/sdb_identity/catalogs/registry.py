@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Callable
 from .reference_definitions import SNAPSHOT_CATALOGS
 
 if TYPE_CHECKING:
-    from .catalog_types import CatalogAdapter
-    from .reference_store import ReferenceStore
+    from .types import CatalogAdapter
+    from ..reference_store import ReferenceStore
 
 
 @dataclass(frozen=True)

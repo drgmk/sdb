@@ -8,7 +8,7 @@ import math
 from dataclasses import asdict
 from pathlib import Path
 
-from .catalog_provenance import vizier_entry_url
+from .catalogs.provenance import vizier_entry_url
 from .review_widget import ReviewSkyView
 
 

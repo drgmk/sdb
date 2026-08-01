@@ -4,8 +4,8 @@ import json
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import MeasurementValue
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.assignment_readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report

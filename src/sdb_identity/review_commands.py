@@ -10,7 +10,7 @@ from collections.abc import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_decisions import CatalogDecisionService
+from .catalogs.decisions import CatalogDecisionService
 from .models.catalogs import CatalogResultDecision, CatalogRun, RawCatalogRow
 from .models.identity import Target
 from .review_actions import (

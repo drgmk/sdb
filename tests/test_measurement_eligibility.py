@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.measurement_eligibility import (
     effective_measurement_eligibility,
 )

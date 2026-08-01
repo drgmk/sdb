@@ -10,7 +10,7 @@ from astropy.time import Time
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters.vizier import row_float, row_text
+from .catalogs.adapters.vizier import row_float, row_text
 from .alma_transport import AlmaArchiveProvider
 from .models.alma import AlmaMember, AlmaMemberPosition, AlmaSyncChunk, AlmaSyncRun
 

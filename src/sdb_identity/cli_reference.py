@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 
-from .catalog_registry import SNAPSHOT_CATALOG_PROVIDERS
+from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
 from .cli_context import CliContext
 from .database import make_session_factory
 from .providers import ProviderError

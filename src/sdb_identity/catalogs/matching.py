@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from .astrometry import angular_separation_arcsec
-from .catalog_types import CatalogAdapter, CatalogCandidate, CatalogQueryContext
+from ..astrometry import angular_separation_arcsec
+from .types import CatalogAdapter, CatalogCandidate, CatalogQueryContext
 
 
 @dataclass(frozen=True)

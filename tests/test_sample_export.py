@@ -5,8 +5,8 @@ import json
 from astropy.table import Table
 from sqlalchemy import select, text
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import MeasurementValue
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.models.samples import SampleExportItem, SampleExportRun
 from sdb_identity.sample_export import SampleExportService

@@ -5,16 +5,16 @@ import re
 from astropy.table import Table
 from astroquery.vizier import Vizier
 
-from ..astroquery_config import configure_vizier_class
-from ..catalog_registry import catalog_provider
-from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
-from ..catalog_provenance import (
+from ...astroquery_config import configure_vizier_class
+from ..registry import catalog_provider
+from ..types import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..provenance import (
     CatalogProvenance,
     vizier_entry_url,
     vizier_readme_url,
     with_payload_provenance,
 )
-from ..providers import ProviderError
+from ...providers import ProviderError
 from .vizier import row_float, row_payload, row_text
 from .review_metadata import add_review_metadata, PositionUncertainty, ReviewField
 

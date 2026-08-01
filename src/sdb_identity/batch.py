@@ -14,7 +14,7 @@ from typing import Callable, Iterable
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_acquisition import CatalogAcquisitionService
+from .catalogs.acquisition import CatalogAcquisitionService
 from .ingestion import TargetIngestionPlan
 from .metadata import MetadataService
 from .models.batch import ImportItem, ImportJob, ImportRun

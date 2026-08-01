@@ -7,8 +7,8 @@ import re
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from .identifiers import normalize_identifier
-from .serialization import row_float, row_payload, row_text
+from ..identifiers import normalize_identifier
+from ..serialization import row_float, row_payload, row_text
 from .ubv_components import ubv_component_identifiers
 from .tdsc_components import tdsc_component_identifiers
 from .v70a_components import v70a_component_identifiers

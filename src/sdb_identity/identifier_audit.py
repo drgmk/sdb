@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_results import effective_catalog_results
+from .catalogs.results import effective_catalog_results
 from .models.identity import ExternalIdentifier, Target
-from .reference_definitions import SNAPSHOT_CATALOGS
+from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
 from .identifiers import normalize_identifier
 from .vocabulary import ProviderRunStatus
 

@@ -11,7 +11,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uni
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .serialization import row_payload as _row_payload, safe_json as _safe_json
-from .catalog_provenance import materialize_catalog_documentation
+from .catalogs.provenance import materialize_catalog_documentation
 
 
 def utcnow():

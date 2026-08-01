@@ -6,7 +6,7 @@ import sys
 
 from sqlalchemy import select
 
-from .catalog_results import effective_catalog_results
+from .catalogs.results import effective_catalog_results
 from .cli_context import CliContext
 from .models.catalogs import CatalogRun, RawCatalogRow
 from .models.identity import MatchCandidate, Target
@@ -105,7 +105,7 @@ def _run_review_view(context: CliContext) -> int:
 
 
 def _run_review_server(context: CliContext) -> int:
-    from .catalog_setup import catalog_operator_service_for_provider
+    from .catalogs.setup import catalog_operator_service_for_provider
     from .cli_services import build_update_service
     from .reference import ReferenceStore
     from .review_ui import serve_review_ui

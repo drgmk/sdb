@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.export import export_ipac

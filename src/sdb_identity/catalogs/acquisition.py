@@ -6,31 +6,31 @@ from typing import Iterable, Mapping
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .astrometry import propagate_to_epoch
-from .catalog_types import (
+from ..astrometry import propagate_to_epoch
+from .types import (
     CatalogAdapter,
     CatalogCandidate,
     CatalogQueryContext,
     CatalogRefreshResult,
 )
-from .catalog_results import catalog_run_signature, effective_catalog_results
-from .catalog_ingestion import (
+from .results import catalog_run_signature, effective_catalog_results
+from .ingestion import (
     shared_detection_target_ids,
     store_catalog_attributes,
 )
-from .catalog_matching import match_catalog_candidates
+from .matching import match_catalog_candidates
 from .detection_ingestion import DetectionIngestor
-from .dirty import mark_export_dirty
-from .models.identity import AstrometricSolution, ExternalIdentifier, Target
-from .models.catalogs import (
+from ..dirty import mark_export_dirty
+from ..models.identity import AstrometricSolution, ExternalIdentifier, Target
+from ..models.catalogs import (
     CatalogBatchRequest,
     CatalogDetection,
     CatalogRun,
     RawCatalogRow,
 )
-from .providers import Astrometry, ProviderError
-from .targets import resolve_target
-from .vocabulary import ProviderRunStatus
+from ..providers import Astrometry, ProviderError
+from ..targets import resolve_target
+from ..vocabulary import ProviderRunStatus
 
 
 class CatalogAcquisitionService:

@@ -13,9 +13,9 @@ from astropy.table import Table
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_provenance import CatalogProvenance
-from .catalog_types import CatalogCandidate, MeasurementValue
-from .detection_ingestion import DetectionIngestor
+from .catalogs.provenance import CatalogProvenance
+from .catalogs.types import CatalogCandidate, MeasurementValue
+from .catalogs.detection_ingestion import DetectionIngestor
 from .models.catalogs import CatalogRun, NormalizedMeasurement, RawCatalogRow
 from .models.curated import CuratedAssociationAction, CuratedRecord, DatasetRevision
 from .models.exports import ExportDirtyTarget

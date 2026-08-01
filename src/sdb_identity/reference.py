@@ -1,6 +1,6 @@
 """Public API for snapshot reference-catalog infrastructure."""
 
-from .adapters.reference import (
+from .catalogs.adapters.reference import (
     GasparSnapshotAdapter,
     Hip2SnapshotAdapter,
     SnapshotCatalogAdapter,
@@ -17,7 +17,7 @@ from .reference_application import (
     ReferenceApplicationResult,
     ReferenceApplicationService,
 )
-from .reference_definitions import (
+from .catalogs.reference_definitions import (
     GASPAR_BIBCODE,
     GASPAR_CATALOG,
     GASPAR_DEFINITION,

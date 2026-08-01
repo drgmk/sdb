@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .adapters.review_metadata import normalize_review_payload
+from .catalogs.adapters.review_metadata import normalize_review_payload
 from .astrometry import angular_separation_arcsec
 from .hierarchy_identity_context import (
     target_semantic_identity,
@@ -118,7 +118,7 @@ class HierarchySystemContextService:
             )
             catalog_neighbourhood = _system_catalog_neighbourhood(session, target_ids)
 
-            from .catalog_associations import (
+            from .catalogs.associations import (
                 catalog_coverage_by_target,
                 catalog_target_candidates,
             )
@@ -758,7 +758,7 @@ def _system_catalog_neighbourhood(
         sdbid: [] for sdbid in targets.values()
     }
 
-    from .catalog_results import (
+    from .catalogs.results import (
         effective_catalog_results,
         effective_catalog_selected_rows,
     )

@@ -10,18 +10,18 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astroquery.vizier import Vizier
 
-from ..astroquery_config import configure_vizier_class
-from ..astrometry import angular_separation_arcsec
-from ..catalog_types import CatalogCandidate, CatalogQueryContext, MeasurementValue
-from ..catalog_provenance import (
+from ...astroquery_config import configure_vizier_class
+from ...astrometry import angular_separation_arcsec
+from ..types import CatalogCandidate, CatalogQueryContext, MeasurementValue
+from ..provenance import (
     CatalogProvenance,
     vizier_access_url,
     vizier_entry_url,
     vizier_readme_url,
     with_payload_provenance,
 )
-from ..providers import ProviderError
-from ..serialization import (  # noqa: F401
+from ...providers import ProviderError
+from ...serialization import (  # noqa: F401
     json_value as _json_value,
     row_float,
     row_payload,

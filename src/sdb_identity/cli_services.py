@@ -12,7 +12,7 @@ def build_update_service(
     offline=False,
     reporter=None,
 ):
-    from .catalog_acquisition import CatalogAcquisitionService
+    from .catalogs.acquisition import CatalogAcquisitionService
     from .metadata import MetadataService
     from .reference import ReferenceStore
     from .update import UpdateService
@@ -21,7 +21,7 @@ def build_update_service(
         metadata_factory = lambda: MetadataService(sessions, None)
         catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
-        from .catalog_registry import (
+        from .catalogs.registry import (
             REMOTE_CATALOG_PROVIDERS,
             build_catalog_adapters,
         )

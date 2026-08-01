@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .dirty import mark_export_dirty
 from .decisions import DecisionContext
-from .catalog_measurements import (
+from .catalogs.measurements import (
     current_measurement_encounters,
     current_measurement_target_ids,
 )

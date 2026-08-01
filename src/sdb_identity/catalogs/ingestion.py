@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from .catalog_provenance import CatalogProvenance, provenance_from_payload
-from .catalog_types import CatalogAdapter, CatalogCandidate
-from .models.catalogs import (
+from .provenance import CatalogProvenance, provenance_from_payload
+from .types import CatalogAdapter, CatalogCandidate
+from ..models.catalogs import (
     CatalogAttribute,
     CatalogDetection,
     CatalogDetectionProvenance,
@@ -144,7 +144,7 @@ def store_catalog_attributes(
 def shared_detection_target_ids(
     session: Session, target_id: int, detection_id: int,
 ) -> set[int]:
-    from .catalog_measurements import current_catalog_detection_target_pairs
+    from .measurements import current_catalog_detection_target_pairs
 
     target_ids = {
         current_target_id

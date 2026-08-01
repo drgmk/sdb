@@ -6,7 +6,7 @@ from typing import Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .catalog_measurements import current_measurement_target_ids
+from .catalogs.measurements import current_measurement_target_ids
 from .models.photometry import MeasurementTargetAssociation
 from .models.hierarchy import TargetLifecycleAction
 from .vocabulary import (

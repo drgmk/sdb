@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from sqlalchemy import Integer, cast, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_results import effective_catalog_results
+from .catalogs.results import effective_catalog_results
 from .astrometry import propagate_to_epoch
-from .catalog_types import CatalogQueryContext
-from .catalog_acquisition import CatalogAcquisitionService
+from .catalogs.types import CatalogQueryContext
+from .catalogs.acquisition import CatalogAcquisitionService
 from .dirty import mark_export_dirty
 from .models.identity import AstrometricSolution, ExternalIdentifier, Target
 from .models.catalogs import CatalogRun
@@ -21,8 +21,8 @@ from .models.reference import (
     ReferenceApplicationRun,
 )
 from .providers import Astrometry
-from .adapters.reference import snapshot_adapter
-from .reference_definitions import SNAPSHOT_CATALOGS
+from .catalogs.adapters.reference import snapshot_adapter
+from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
 from .reference_store import ReferenceStore, utcnow
 from .vocabulary import ProviderRunStatus
 

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.catalog_types import CatalogCandidate
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.types import CatalogCandidate
 from sdb_identity.cli import main
 from sdb_identity.identifier_audit import audit_catalog_identifiers
 from sdb_identity.models.identity import ExternalIdentifier

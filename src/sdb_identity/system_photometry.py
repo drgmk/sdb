@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .catalog_measurements import (
+from .catalogs.measurements import (
     CurrentMeasurementEncounter,
     current_catalog_detection_target_pairs,
     current_measurement_encounters,

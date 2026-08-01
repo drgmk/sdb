@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models.catalogs import (
+from ..models.catalogs import (
     CatalogAttribute,
     CatalogDetection,
     CatalogResultDecision,
@@ -16,7 +16,7 @@ from .models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .vocabulary import ProviderRunStatus
+from ..vocabulary import ProviderRunStatus
 
 
 @dataclass(frozen=True)

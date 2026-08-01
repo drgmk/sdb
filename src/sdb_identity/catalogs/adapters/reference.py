@@ -8,14 +8,14 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from sqlalchemy import or_, select
 
-from ..astrometry import angular_separation_arcsec
-from ..catalog_types import (
+from ...astrometry import angular_separation_arcsec
+from ..types import (
     CatalogAttributeValue,
     CatalogCandidate,
     CatalogQueryContext,
     MeasurementValue,
 )
-from ..catalog_provenance import (
+from ..provenance import (
     CatalogProvenance,
     provenance_from_payload,
     vizier_access_url,
@@ -23,7 +23,7 @@ from ..catalog_provenance import (
     vizier_readme_url,
     with_payload_provenance,
 )
-from ..providers import Astrometry, ProviderError
+from ...providers import Astrometry, ProviderError
 from ..reference_definitions import (
     GASPAR_BIBCODE, GASPAR_DEFINITION, IRAS_FSC_BIBCODE,
     IRAS_FSC_DEFINITION, IRAS_PSC_BIBCODE, IRAS_PSC_DEFINITION,
@@ -37,7 +37,7 @@ from ..reference_definitions import (
 from ..ubv_components import decode_ubv_component, ubv_photometry_scope
 from ..tdsc_components import decode_tdsc_component
 from ..v70a_components import decode_v70a_component
-from ..reference_store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
+from ...reference_store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
 from .vizier import row_float, row_text
 
 class SnapshotCatalogAdapter:

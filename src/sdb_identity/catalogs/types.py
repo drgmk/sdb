@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
-from .catalog_provenance import CatalogProvenance
-from .providers import Astrometry
-from .vocabulary import ProviderRunStatus
+from .provenance import CatalogProvenance
+from ..providers import Astrometry
+from ..vocabulary import ProviderRunStatus
 
 
 @dataclass(frozen=True)

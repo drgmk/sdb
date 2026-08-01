@@ -8,7 +8,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .catalog_measurements import (
+from .catalogs.measurements import (
     current_catalog_detection_target_pairs,
     current_measurement_encounters,
 )

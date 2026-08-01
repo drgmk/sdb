@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from sdb_identity.batch import BatchService
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models.batch import ImportItem, ImportJob, ImportRun
 from sdb_identity.models.identity import Target

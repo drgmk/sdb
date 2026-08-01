@@ -16,9 +16,9 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .cache_store import CachedSnapshotData, SnapshotCache
-from .catalog_provenance import materialize_catalog_documentation
+from .catalogs.provenance import materialize_catalog_documentation
 from .providers import ProviderError
-from .reference_definitions import SNAPSHOT_CATALOGS
+from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
 from .serialization import safe_json as _safe_json
 from .identifiers import normalize_identifier
 from .snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient

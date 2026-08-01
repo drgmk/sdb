@@ -5,17 +5,17 @@ import math
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from ..astrometry import propagate_to_epoch
-from ..catalog_registry import catalog_provider
-from ..catalog_types import CatalogCandidate, MeasurementValue
-from ..catalog_provenance import (
+from ...astrometry import propagate_to_epoch
+from ..registry import catalog_provider
+from ..types import CatalogCandidate, MeasurementValue
+from ..provenance import (
     CatalogProvenance,
     vizier_access_url,
     vizier_readme_url,
     with_payload_provenance,
 )
-from ..catalog_types import CatalogQueryContext
-from ..providers import Astrometry, ProviderError
+from ..types import CatalogQueryContext
+from ...providers import Astrometry, ProviderError
 from .vizier import VizierConeAdapter, row_float, row_payload, row_text, row_value
 from .review_metadata import add_review_metadata, PositionUncertainty, ReviewField
 

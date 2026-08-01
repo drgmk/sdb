@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_results import effective_catalog_results
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.results import effective_catalog_results
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.models.catalogs import (
     CatalogResultDecision,
     CatalogRun,

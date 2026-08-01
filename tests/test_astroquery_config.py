@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from astroquery.vizier import Vizier
 
-from sdb_identity.adapters.gaia import GaiaDr3Adapter
+from sdb_identity.catalogs.adapters.gaia import GaiaDr3Adapter
 from sdb_identity.astroquery_config import (
     SIMBAD_SERVER_ENV,
     VIZIER_SERVER_ENV,

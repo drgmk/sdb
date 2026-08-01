@@ -6,10 +6,10 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_policy import catalog_source_display_name
+from .catalogs.policy import catalog_source_display_name
 from .astrometry import angular_separation_arcsec
-from .catalog_associations import catalog_target_candidates
-from .catalog_measurements import current_measurement_target_ids
+from .catalogs.associations import catalog_target_candidates
+from .catalogs.measurements import current_measurement_target_ids
 from .decisions import DecisionContext
 from .dirty import mark_export_dirty
 from .effective_assignments import effective_measurement_assignments

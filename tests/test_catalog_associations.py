@@ -4,12 +4,12 @@ import json
 import pytest
 from sqlalchemy import delete, select
 
-from sdb_identity.catalog_associations import (
+from sdb_identity.catalogs.associations import (
     catalog_coverage_by_target,
     catalog_target_candidates,
 )
-from sdb_identity.catalog_measurements import current_measurements_for_target
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.measurements import current_measurements_for_target
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.decision_history import system_decision_history
 from sdb_identity.hierarchy import HierarchyService

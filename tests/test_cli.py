@@ -5,8 +5,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
-from sdb_identity.adapters.allwise import AllWiseAdapter
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
 from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.metadata import MetadataQueryResult, MetadataService

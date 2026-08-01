@@ -4,10 +4,10 @@ import pytest
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from sdb_identity.adapters import allwise
-from sdb_identity.adapters.allwise import AllWiseAdapter
+from sdb_identity.catalogs.adapters import allwise
+from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
 from sdb_identity.providers import ProviderError
-from sdb_identity.catalog_types import CatalogQueryContext
+from sdb_identity.catalogs.types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
 
 
@@ -111,7 +111,7 @@ def test_allwise_irsa_client_is_per_query_and_has_bounded_timeout(monkeypatch):
         return []
 
     monkeypatch.setattr(
-        "sdb_identity.adapters.allwise.IrsaClass.query_region", fake_query
+        "sdb_identity.catalogs.adapters.allwise.IrsaClass.query_region", fake_query
     )
     adapter._query_region(SkyCoord(10 * u.deg, -20 * u.deg), 3.5)
 

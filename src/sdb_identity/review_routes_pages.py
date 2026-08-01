@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .catalog_overview import catalog_overview
+from .catalogs.overview import catalog_overview
 from .review_dashboard import review_dashboard_report
 from .review_pages import (
     render_catalogs_page,

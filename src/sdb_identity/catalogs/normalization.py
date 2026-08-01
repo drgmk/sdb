@@ -11,23 +11,23 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_ingestion import store_detection_provenance
-from .catalog_provenance import provenance_from_payload
-from .catalog_resolution import default_resolution
-from .catalog_types import (
+from .ingestion import store_detection_provenance
+from .provenance import provenance_from_payload
+from .resolution import default_resolution
+from .types import (
     CatalogAdapter,
     CatalogCandidate,
     DetectionNormalizationItem,
     DetectionNormalizationSummary,
     MeasurementValue,
 )
-from .models.catalogs import (
+from ..models.catalogs import (
     CatalogDetection,
     CatalogRun,
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .photometry_semantics import validate_photometry_semantics
+from ..photometry_semantics import validate_photometry_semantics
 
 
 LOGGER = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from sdb_identity.catalog_acquisition import CatalogAcquisitionService
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.reference import ReferenceStore
