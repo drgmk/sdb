@@ -46,7 +46,6 @@ class SnapshotCatalogAdapter:
     def __init__(self, store: ReferenceStore, definition: SnapshotCatalogDefinition):
         self.store = store
         self.definition = definition
-        store.backfill_positions(definition.adapter)
         self.name = definition.adapter
         self.query_epoch = definition.query_epoch
         self.radius_arcsec = definition.radius_arcsec

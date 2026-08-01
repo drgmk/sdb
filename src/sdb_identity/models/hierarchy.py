@@ -59,7 +59,10 @@ class HierarchyMatchCandidate(Base):
     separation_arcsec: Mapped[float | None] = mapped_column(Float)
     identifier: Mapped[str | None] = mapped_column(String(200))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="candidate", index=True)
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="candidate",
+        server_default="candidate", index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -79,7 +82,9 @@ class TargetSystem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     primary_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id"))
-    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    source: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual", server_default="manual",
+    )
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -100,7 +105,9 @@ class TargetSystemMember(Base):
     system_id: Mapped[int] = mapped_column(ForeignKey("target_systems.id"), nullable=False, index=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)
     component_label: Mapped[str | None] = mapped_column(String(40))
-    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    source: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual", server_default="manual",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -133,11 +140,21 @@ class StructuralEdge(Base):
     component_label: Mapped[str | None] = mapped_column(String(80), index=True)   # endpoint B label
     source_component: Mapped[str | None] = mapped_column(String(80), index=True)  # raw provider component
     # semantics
-    direction: Mapped[str] = mapped_column(String(20), nullable=False, default="pair")  # pair|a_parent_b|b_parent_a
+    direction: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pair", server_default="pair",
+    )  # pair|a_parent_b|b_parent_a
     relation_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    structural_role: Mapped[str] = mapped_column(String(40), nullable=False, default="non_structural", index=True)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="derived", index=True)  # derived|accepted|rejected|stale
-    confidence: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    structural_role: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="non_structural",
+        server_default="non_structural", index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="derived",
+        server_default="derived", index=True,
+    )  # derived|accepted|rejected|stale
+    confidence: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="unknown", server_default="unknown",
+    )
     # geometry (provider-derived, nullable)
     geometry_status: Mapped[str | None] = mapped_column(String(30), index=True)
     start_ra_deg: Mapped[float | None] = mapped_column(Float)
@@ -147,9 +164,13 @@ class StructuralEdge(Base):
     separation_arcsec: Mapped[float | None] = mapped_column(Float)
     pa_deg: Mapped[float | None] = mapped_column(Float)
     relation_epoch: Mapped[float | None] = mapped_column(Float)
-    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    note: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default="",
+    )
     actor: Mapped[str | None] = mapped_column(String(100))
-    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reason: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default="",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 

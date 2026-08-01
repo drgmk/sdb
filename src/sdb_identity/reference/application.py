@@ -86,7 +86,7 @@ class ReferenceApplicationService:
 
         candidates = adapter.query_many(contexts)
         current_hashes = self.store.row_hashes(
-            snapshot.id, definition.tables_for_matching, definition.key_columns
+            snapshot.id, definition.tables_for_matching
         )
 
         if force or previous is None:
@@ -100,7 +100,6 @@ class ReferenceApplicationService:
                 self.store.row_hashes(
                     previous_snapshot.id,
                     definition.tables_for_matching,
-                    definition.key_columns,
                 )
                 if previous_snapshot is not None else {}
             )

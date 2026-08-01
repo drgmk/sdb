@@ -58,7 +58,8 @@ class CatalogDetection(Base):
     epoch: Mapped[float] = mapped_column(Float, nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     normalization_status: Mapped[str] = mapped_column(
-        String(30), default="pending", nullable=False, index=True,
+        String(30), default="pending", server_default="pending",
+        nullable=False, index=True,
     )
     normalization_error: Mapped[str | None] = mapped_column(Text)
     normalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -115,7 +116,14 @@ class NormalizedMeasurement(Base):
     """
 
     __tablename__ = "normalized_measurements"
-    __table_args__ = (UniqueConstraint("detection_id", "measurement_key"),)
+    __table_args__ = (
+        UniqueConstraint("detection_id", "measurement_key"),
+        Index(
+            "ix_normalized_measurements_provider_source",
+            "provider",
+            "source_id",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("catalog_runs.id"), nullable=False, index=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id"), nullable=False, index=True)

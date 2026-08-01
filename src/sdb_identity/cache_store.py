@@ -145,31 +145,6 @@ class SnapshotCache:
         self.engine = create_engine(f"sqlite:///{self.path}", future=True)
         CacheBase.metadata.create_all(self.engine)
         self.sessions = sessionmaker(self.engine, expire_on_commit=False, future=True)
-        self._materialize_current_documentation()
-
-    def _materialize_current_documentation(self) -> None:
-        """Restore companion ReadMes for caches created before sidecars."""
-
-        with self.sessions() as session:
-            sources = list(session.scalars(
-                select(CachedSource).where(CachedSource.is_current.is_(True))
-            ))
-            for source in sources:
-                tables = list(session.execute(
-                    select(CachedTable.name, CachedTable.row_count)
-                    .where(CachedTable.source_id == source.id)
-                    .order_by(CachedTable.id)
-                ))
-                materialize_catalog_documentation(
-                    self.path,
-                    provider=source.provider,
-                    catalog_id=source.catalog_id,
-                    release=source.release,
-                    content_sha256=source.content_sha256,
-                    source_url=source.source_url,
-                    readme=source.readme,
-                    tables=tables,
-                )
 
     def current_snapshot(
         self, provider: str, catalog_id: str

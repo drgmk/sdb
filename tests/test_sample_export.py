@@ -41,7 +41,7 @@ def test_sample_export_writes_manifest_and_sdf_readable_file(
 
     assert (result.target_count, result.exported, result.failed) == (1, 1, 0)
     manifest = json.loads((tmp_path / f"sample-{result.run_id}-manifest.json").read_text())
-    assert manifest["database_revision"] == "0053_alma_member_canonical"
+    assert manifest["database_revision"] == "0001_current_schema"
     assert manifest["items"][0]["sdbid"] == target.sdbid
     assert len(manifest["items"][0]["sha256"]) == 64
     assert manifest["started_at"] and manifest["completed_at"]

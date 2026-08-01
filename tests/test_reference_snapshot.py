@@ -4,7 +4,7 @@ import json
 
 import astropy.units as u
 from astropy.table import Column, Table
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import CatalogCandidate, CatalogQueryContext
@@ -19,6 +19,7 @@ from sdb_identity.catalogs.adapters.reference import (
     IrasPscSnapshotAdapter,
     Koen10SnapshotAdapter,
     Paunzen15SnapshotAdapter,
+    TdscSnapshotAdapter,
     UbvMeansSnapshotAdapter,
     V70ASnapshotAdapter,
 )
@@ -33,19 +34,51 @@ from sdb_identity.catalogs.reference_definitions import (
     PAUNZEN15_CATALOG,
     PAUNZEN15_MAIN_TABLE,
     UBVMEANS_CATALOG,
+    UBVMEANS_DEFINITION,
     UBVMEANS_MAIN_TABLE,
     V70A_CATALOG,
+    V70A_DEFINITION,
     V70A_MAIN_TABLE,
 )
-from sdb_identity.reference.application import ReferenceApplicationService
-from sdb_identity.reference.store import ReferenceStore
-from sdb_identity.catalogs.adapters.reference import TdscSnapshotAdapter
-from sdb_identity.catalogs.reference_definitions import V70A_DEFINITION
-from sdb_identity.catalogs.reference_definitions import UBVMEANS_DEFINITION
-from sdb_identity.identifiers import normalize_identifier
-from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.catalogs.ubv_components import decode_ubv_component
 from sdb_identity.catalogs.v70a_components import decode_v70a_component
+from sdb_identity.identifiers import normalize_identifier
+from sdb_identity.reference.application import ReferenceApplicationService
+from sdb_identity.reference.store import ReferenceStore
+from sdb_identity.service import AddRequest, IdentityService
+
+
+def test_reference_schema_declares_derived_row_indexes(tmp_path):
+    store = ReferenceStore(tmp_path / "reference.sqlite")
+    inspector = inspect(store.engine)
+    row_indexes = {
+        index["name"]: tuple(index["column_names"])
+        for index in inspector.get_indexes("reference_rows")
+    }
+    alias_indexes = {
+        index["name"]: tuple(index["column_names"])
+        for index in inspector.get_indexes("reference_aliases")
+    }
+    row_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("reference_rows")
+    }
+
+    assert row_indexes["ix_reference_rows_spatial"] == (
+        "table_id",
+        "dec_deg",
+        "ra_deg",
+    )
+    assert row_indexes["ix_reference_rows_stable_key"] == (
+        "table_id",
+        "stable_key",
+    )
+    assert alias_indexes["ix_reference_alias_lookup"] == (
+        "normalized_identifier",
+        "row_id",
+    )
+    assert row_columns["stable_key"]["nullable"] is False
+    assert row_columns["row_sha256"]["nullable"] is False
 
 
 class FakeSnapshotClient:

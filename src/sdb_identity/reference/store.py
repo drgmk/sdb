@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from astropy.table import Table
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, bindparam, create_engine, or_, select, update
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, or_, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from ..cache_store import CachedSnapshotData, SnapshotCache
@@ -72,7 +72,11 @@ class ReferenceColumn(ReferenceBase):
 
 class ReferenceRow(ReferenceBase):
     __tablename__ = "reference_rows"
-    __table_args__ = (UniqueConstraint("table_id", "row_number"),)
+    __table_args__ = (
+        UniqueConstraint("table_id", "row_number"),
+        Index("ix_reference_rows_spatial", "table_id", "dec_deg", "ra_deg"),
+        Index("ix_reference_rows_stable_key", "table_id", "stable_key"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     table_id: Mapped[int] = mapped_column(ForeignKey("reference_tables.id"), nullable=False, index=True)
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -81,13 +85,16 @@ class ReferenceRow(ReferenceBase):
     ra_deg: Mapped[float | None] = mapped_column(Float, index=True)
     dec_deg: Mapped[float | None] = mapped_column(Float, index=True)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
-    stable_key: Mapped[str | None] = mapped_column(String(300), index=True)
-    row_sha256: Mapped[str | None] = mapped_column(String(64))
+    stable_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    row_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 class ReferenceAlias(ReferenceBase):
     __tablename__ = "reference_aliases"
-    __table_args__ = (UniqueConstraint("row_id", "normalized_identifier"),)
+    __table_args__ = (
+        UniqueConstraint("row_id", "normalized_identifier"),
+        Index("ix_reference_alias_lookup", "normalized_identifier", "row_id"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     row_id: Mapped[int] = mapped_column(ForeignKey("reference_rows.id"), nullable=False, index=True)
     normalized_identifier: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
@@ -258,98 +265,7 @@ class ReferenceStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{self.path}", future=True)
         ReferenceBase.metadata.create_all(self.engine)
-        with self.engine.begin() as connection:
-            columns = {
-                row[1] for row in connection.exec_driver_sql(
-                    "PRAGMA table_info(reference_rows)"
-                )
-            }
-            if "stable_key" not in columns:
-                connection.exec_driver_sql(
-                    "ALTER TABLE reference_rows ADD COLUMN stable_key VARCHAR(300)"
-                )
-            if "row_sha256" not in columns:
-                connection.exec_driver_sql(
-                    "ALTER TABLE reference_rows ADD COLUMN row_sha256 VARCHAR(64)"
-                )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_reference_rows_spatial "
-                "ON reference_rows(table_id, dec_deg, ra_deg)"
-            )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_reference_rows_stable_key "
-                "ON reference_rows(table_id, stable_key)"
-            )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_reference_alias_lookup "
-                "ON reference_aliases(normalized_identifier, row_id)"
-            )
         self.sessions = sessionmaker(self.engine, expire_on_commit=False, future=True)
-        self._backfill_aliases()
-        self._materialize_current_documentation()
-
-    def _materialize_current_documentation(self) -> None:
-        """Restore companion ReadMes for reference DBs created before sidecars."""
-
-        with self.sessions() as session:
-            snapshots = list(session.scalars(
-                select(ReferenceSnapshot).where(
-                    ReferenceSnapshot.is_current.is_(True)
-                )
-            ))
-            for snapshot in snapshots:
-                tables = list(session.execute(
-                    select(ReferenceTable.name, ReferenceTable.row_count)
-                    .where(ReferenceTable.snapshot_id == snapshot.id)
-                    .order_by(ReferenceTable.id)
-                ))
-                provider = (
-                    "cds" if "/ftp/" in snapshot.source_url else "vizier"
-                )
-                materialize_catalog_documentation(
-                    self.path,
-                    provider=provider,
-                    catalog_id=snapshot.catalog,
-                    release=snapshot.catalog,
-                    content_sha256=snapshot.content_sha256,
-                    source_url=snapshot.source_url,
-                    readme=snapshot.readme,
-                    tables=tables,
-                )
-
-    def _backfill_aliases(self) -> None:
-        """Populate the alias index for snapshots created before it existed."""
-        with self.sessions() as session, session.begin():
-            snapshots = list(session.scalars(select(ReferenceSnapshot)))
-            for snapshot in snapshots:
-                definition = SNAPSHOT_CATALOGS.get(snapshot.adapter)
-                if definition is None:
-                    continue
-                tables = list(session.scalars(select(ReferenceTable).where(
-                    ReferenceTable.snapshot_id == snapshot.id,
-                    ReferenceTable.name.in_(definition.tables_for_matching),
-                )))
-                if not tables:
-                    continue
-                rows = session.scalars(
-                    select(ReferenceRow)
-                    .outerjoin(ReferenceAlias, ReferenceAlias.row_id == ReferenceRow.id)
-                    .where(
-                        ReferenceRow.table_id.in_([table.id for table in tables]),
-                        ReferenceAlias.id.is_(None),
-                    )
-                )
-                for row in rows:
-                    payload = json.loads(row.payload_json)
-                    aliases = {
-                        _star_identifier(value)
-                        for value in definition.lookup_identifiers(payload)
-                    }
-                    for alias in sorted(value for value in aliases if value):
-                        session.add(ReferenceAlias(
-                            row_id=row.id,
-                            normalized_identifier=alias,
-                        ))
 
     def fetch(
         self,
@@ -574,54 +490,6 @@ class ReferenceStore:
                 ReferenceSnapshot.is_current.is_(True),
             ))
 
-    def backfill_positions(self, adapter: str) -> int:
-        definition = SNAPSHOT_CATALOGS[adapter]
-        with self.sessions() as session:
-            snapshot = session.scalar(select(ReferenceSnapshot).where(
-                ReferenceSnapshot.adapter == adapter,
-                ReferenceSnapshot.is_current.is_(True),
-            ))
-            if snapshot is None:
-                return 0
-            tables = list(session.scalars(select(ReferenceTable).where(
-                ReferenceTable.snapshot_id == snapshot.id,
-                ReferenceTable.name.in_(definition.tables_for_matching),
-            )))
-            if not tables:
-                return 0
-            rows = session.execute(select(
-                ReferenceRow.id, ReferenceRow.payload_json
-            ).where(
-                ReferenceRow.table_id.in_([table.id for table in tables]),
-                or_(ReferenceRow.ra_deg.is_(None), ReferenceRow.dec_deg.is_(None)),
-            )).yield_per(1000)
-            statement = update(ReferenceRow).where(
-                ReferenceRow.id == bindparam("row_id")
-            ).values(
-                ra_deg=bindparam("new_ra_deg"),
-                dec_deg=bindparam("new_dec_deg"),
-            )
-            updates = []
-            count = 0
-            for row_id, payload_json in rows:
-                ra_deg, dec_deg = definition.position(json.loads(payload_json))
-                if ra_deg is None or dec_deg is None:
-                    continue
-                updates.append({
-                    "row_id": row_id,
-                    "new_ra_deg": ra_deg,
-                    "new_dec_deg": dec_deg,
-                })
-                if len(updates) >= 1000:
-                    session.connection().execute(statement, updates)
-                    count += len(updates)
-                    updates.clear()
-            if updates:
-                session.connection().execute(statement, updates)
-                count += len(updates)
-            session.commit()
-            return count
-
     def describe(
         self, snapshot_id: int | None = None, *, adapter: str = "gaspar13"
     ) -> list[dict[str, object]]:
@@ -713,7 +581,6 @@ class ReferenceStore:
         self,
         snapshot_id: int,
         table_name: str | tuple[str, ...] = "table2",
-        key_columns: tuple[str, ...] = ("Name",),
     ) -> dict[str, str]:
         with self.sessions() as session:
             table_names = (table_name,) if isinstance(table_name, str) else table_name
@@ -728,43 +595,6 @@ class ReferenceStore:
             if not tables:
                 return {}
             table_ids = [table.id for table in tables]
-            missing = session.execute(select(
-                ReferenceRow.id,
-                ReferenceRow.row_number,
-                ReferenceRow.payload_json,
-            ).where(
-                ReferenceRow.table_id.in_(table_ids),
-                or_(
-                    ReferenceRow.stable_key.is_(None),
-                    ReferenceRow.row_sha256.is_(None),
-                ),
-            )).yield_per(1000)
-            updates = []
-            statement = update(ReferenceRow).where(
-                ReferenceRow.id == bindparam("row_id")
-            ).values(
-                stable_key=bindparam("new_stable_key"),
-                row_sha256=bindparam("new_row_sha256"),
-            )
-            for row_id, row_number, payload_json in missing:
-                payload = json.loads(payload_json)
-                first = row_text(payload, key_columns[0]) if key_columns else None
-                key = first or f"row:{row_number}"
-                for column in key_columns[1:]:
-                    value = row_text(payload, column)
-                    if value:
-                        key += f"|{column}={value}"
-                updates.append({
-                    "row_id": row_id,
-                    "new_stable_key": key,
-                    "new_row_sha256": hashlib.sha256(payload_json.encode()).hexdigest(),
-                })
-                if len(updates) >= 1000:
-                    session.connection().execute(statement, updates)
-                    updates.clear()
-            if updates:
-                session.connection().execute(statement, updates)
-            session.commit()
             return dict(session.execute(select(
                 ReferenceRow.stable_key, ReferenceRow.row_sha256
             ).where(ReferenceRow.table_id.in_(table_ids))).tuples().all())

@@ -74,7 +74,16 @@ class AlmaMember(Base):
 
 class AlmaMemberPosition(Base):
     __tablename__ = "alma_member_positions"
-    __table_args__ = (UniqueConstraint("member_id", "position_key"),)
+    __table_args__ = (
+        UniqueConstraint("member_id", "position_key"),
+        Index("ix_alma_member_positions_dec_ra", "dec_deg", "ra_deg"),
+        Index(
+            "ix_alma_member_positions_fov_dec_ra",
+            "fov_deg",
+            "dec_deg",
+            "ra_deg",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     member_id: Mapped[int] = mapped_column(ForeignKey("alma_members.id"), nullable=False, index=True)
     position_key: Mapped[str] = mapped_column(String(64), nullable=False)
