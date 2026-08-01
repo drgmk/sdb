@@ -297,7 +297,7 @@ def test_cli_add_ensure_uses_configured_providers(
         FakeGaia,
     )
     monkeypatch.setattr(
-        "sdb_identity.cli._update_service",
+        "sdb_identity.cli_services.build_update_service",
         lambda *args, **kwargs: FakeUpdateService(),
     )
 
@@ -474,7 +474,7 @@ def test_cli_update_routes_provider_chatter_to_stderr(
             )
 
     monkeypatch.setattr(
-        "sdb_identity.cli._update_service",
+        "sdb_identity.cli_services.build_update_service",
         lambda *args, **kwargs: NoisyUpdateService(),
     )
     assert main([
