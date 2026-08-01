@@ -12,20 +12,20 @@ def build_update_service(
     offline=False,
     reporter=None,
 ):
-    from .catalogs.acquisition import CatalogAcquisitionService
-    from .metadata import MetadataService
-    from .reference import ReferenceStore
-    from .update import UpdateService
+    from ..catalogs.acquisition import CatalogAcquisitionService
+    from ..metadata import MetadataService
+    from ..reference.store import ReferenceStore
+    from ..update import UpdateService
 
     if offline:
         metadata_factory = lambda: MetadataService(sessions, None)
         catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
-        from .catalogs.registry import (
+        from ..catalogs.registry import (
             REMOTE_CATALOG_PROVIDERS,
             build_catalog_adapters,
         )
-        from .simbad_metadata import AstroquerySimbadMetadata
+        from ..simbad_metadata import AstroquerySimbadMetadata
 
         metadata_factory = lambda: MetadataService(
             sessions, AstroquerySimbadMetadata()

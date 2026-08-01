@@ -17,7 +17,7 @@ from sdb_identity.photometry.assignments import (
     set_measurement_eligibility,
 )
 from sdb_identity.review.actions import review_catalog_target_association_decision
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.service import SampleService
 from tests.test_catalog import FakeCatalog, candidate
 from tests.test_system_photometry_foundation import _configured_system
 from tests.test_system_expansion import _root_with_metadata

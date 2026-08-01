@@ -13,12 +13,12 @@ from .models.catalogs import CatalogRun
 from .models.metadata import MetadataRun
 from .models.identity import Target
 from .progress import NULL_PROGRESS, ProgressReporter
-from .reference_application import ReferenceApplicationService
+from .reference.application import ReferenceApplicationService
 from .catalogs.registry import (
     REMOTE_CATALOG_PROVIDERS,
     SNAPSHOT_CATALOG_PROVIDERS,
 )
-from .reference_store import ReferenceStore
+from .reference.store import ReferenceStore
 from .targets import resolve_target
 from .vocabulary import PROVIDER_FAILURE_STATUSES
 

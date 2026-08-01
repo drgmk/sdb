@@ -9,7 +9,7 @@ from sdb_identity.catalogs.registry import (
     SNAPSHOT_CATALOG_PROVIDERS,
     build_catalog_adapter,
 )
-from sdb_identity.reference_store import ReferenceStore
+from sdb_identity.reference.store import ReferenceStore
 
 
 def test_registry_covers_remote_and_snapshot_catalogs():

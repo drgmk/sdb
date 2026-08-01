@@ -8,10 +8,10 @@ import sys
 
 from sqlalchemy import select
 
-from .cli_context import CliContext
-from .models.identity import Target
-from .service import IdentityService
-from .vocabulary import ReviewPriority, TargetRole, TargetState
+from .context import CliContext
+from ..models.identity import Target
+from ..service import IdentityService
+from ..vocabulary import ReviewPriority, TargetRole, TargetState
 
 
 def register_hierarchy_parser(
@@ -347,7 +347,7 @@ def _register_matching_commands(
 
 
 def run_hierarchy_command(context: CliContext) -> int:
-    from .hierarchy.service import HierarchyService
+    from ..hierarchy.service import HierarchyService
 
     args = context.args
     sessions = context.require_sessions()
@@ -499,7 +499,7 @@ def _run_review_queue(context: CliContext, service) -> None:
                 session.scalars(select(Target.sdbid).order_by(Target.sdbid))
             )
     elif args.sample is not None:
-        from .samples import SampleService
+        from ..samples.service import SampleService
 
         references = [
             target.sdbid
@@ -631,7 +631,7 @@ def _run_target_state(context: CliContext, service) -> None:
         )
         print(context.json(_relationship_payload(value)))
     elif args.hierarchy_command == "relatives":
-        from .hierarchy.expansion import preview_immediate_relatives
+        from ..hierarchy.expansion import preview_immediate_relatives
 
         print(context.json(preview_immediate_relatives(sessions, args.target)))
     elif args.hierarchy_command == "import-relatives":
@@ -640,8 +640,8 @@ def _run_target_state(context: CliContext, service) -> None:
                 "hierarchy import-relatives is unavailable in offline mode"
             )
         with context.provider_output():
-            from .live_providers import AstroqueryGaia, AstroquerySimbad
-            from .hierarchy.expansion import import_immediate_relatives
+            from ..live_providers import AstroqueryGaia, AstroquerySimbad
+            from ..hierarchy.expansion import import_immediate_relatives
 
             identity = IdentityService(
                 sessions,
@@ -657,11 +657,11 @@ def _run_target_state(context: CliContext, service) -> None:
             )
         print(context.json(value.as_dict()))
     elif args.hierarchy_command == "target-state":
-        from .target_lifecycle import target_lifecycle_status
+        from ..target_lifecycle import target_lifecycle_status
 
         print(context.json(asdict(target_lifecycle_status(sessions, args.target))))
     elif args.hierarchy_command == "set-target-state":
-        from .target_lifecycle import (
+        from ..target_lifecycle import (
             set_target_lifecycle,
             target_lifecycle_status,
         )

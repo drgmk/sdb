@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import sys
 
-from .cli_context import CliContext
+from .context import CliContext
 
 
 EXPORT_COMMANDS = {"export", "dirty", "export-dirty", "export-sample"}
@@ -83,8 +83,8 @@ def run_export_command(context: CliContext) -> int:
 
 
 def _run_target_export(context: CliContext) -> int:
-    from .export import export_ipac
-    from .joint_fit_manifest import target_manifest_path, write_joint_fit_manifest
+    from ..export import export_ipac
+    from ..joint_fit_manifest import target_manifest_path, write_joint_fit_manifest
 
     args = context.args
     sessions = context.require_sessions()
@@ -107,7 +107,7 @@ def _run_target_export(context: CliContext) -> int:
 
 
 def _run_dirty_list(context: CliContext) -> int:
-    from .dirty import pending_export_targets
+    from ..dirty import pending_export_targets
 
     for target, event_count, dirty_since in pending_export_targets(
         context.require_sessions()
@@ -122,8 +122,8 @@ def _run_dirty_list(context: CliContext) -> int:
 
 
 def _run_dirty_export(context: CliContext) -> int:
-    from .dirty import pending_export_targets
-    from .sample_export import _export_target_task
+    from ..dirty import pending_export_targets
+    from ..samples.export import _export_target_task
 
     args = context.args
     sessions = context.require_sessions()
@@ -170,7 +170,7 @@ def _run_dirty_export(context: CliContext) -> int:
 
 
 def _run_sample_export(context: CliContext) -> int:
-    from .sample_export import SampleExportService
+    from ..samples.export import SampleExportService
 
     args = context.args
     try:

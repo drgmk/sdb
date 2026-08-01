@@ -4,25 +4,25 @@ import argparse
 import os
 import sys
 
-from .cli_alma import register_alma_parser, run_alma_command
-from .cli_batch import BATCH_COMMANDS, register_batch_parsers, run_batch_command
-from .cli_cache import register_cache_parser, run_cache_command
-from .cli_catalogs import (
+from .commands.alma import register_alma_parser, run_alma_command
+from .commands.batch import BATCH_COMMANDS, register_batch_parsers, run_batch_command
+from .commands.cache import register_cache_parser, run_cache_command
+from .commands.catalogs import (
     CATALOG_COMMANDS,
     register_catalog_parsers,
     run_catalog_command,
 )
-from .cli_context import CliContext
-from .cli_datasets import register_dataset_parser, run_dataset_command
-from .cli_exports import EXPORT_COMMANDS, register_export_parsers, run_export_command
-from .cli_hierarchy import register_hierarchy_parser, run_hierarchy_command
-from .cli_maintenance import register_maintenance_parser, run_maintenance_command
-from .cli_photometry import register_photometry_parser, run_photometry_command
-from .cli_reference import register_reference_parser, run_reference_command
-from .cli_review import REVIEW_COMMANDS, register_review_parsers, run_review_command
-from .cli_samples import register_sample_parser, run_sample_command
-from .cli_targets import TARGET_COMMANDS, register_target_parsers, run_target_command
-from .cli_update import register_update_parser, run_update_command
+from .commands.context import CliContext
+from .commands.datasets import register_dataset_parser, run_dataset_command
+from .commands.exports import EXPORT_COMMANDS, register_export_parsers, run_export_command
+from .commands.hierarchy import register_hierarchy_parser, run_hierarchy_command
+from .commands.maintenance import register_maintenance_parser, run_maintenance_command
+from .commands.photometry import register_photometry_parser, run_photometry_command
+from .commands.reference import register_reference_parser, run_reference_command
+from .commands.review import REVIEW_COMMANDS, register_review_parsers, run_review_command
+from .commands.samples import register_sample_parser, run_sample_command
+from .commands.targets import TARGET_COMMANDS, register_target_parsers, run_target_command
+from .commands.update import register_update_parser, run_update_command
 from .database import init_database, make_session_factory
 from .decisions import configured_actor
 

@@ -6,12 +6,12 @@ import sys
 
 from sqlalchemy import select
 
-from .catalogs.results import effective_catalog_results
-from .cli_context import CliContext
-from .models.catalogs import CatalogRun, RawCatalogRow
-from .models.identity import MatchCandidate, Target
-from .service import IdentityService
-from .vocabulary import ProviderRunStatus
+from ..catalogs.results import effective_catalog_results
+from .context import CliContext
+from ..models.catalogs import CatalogRun, RawCatalogRow
+from ..models.identity import MatchCandidate, Target
+from ..service import IdentityService
+from ..vocabulary import ProviderRunStatus
 
 
 REVIEW_COMMANDS = {"review", "review-view"}
@@ -77,8 +77,8 @@ def run_review_command(context: CliContext) -> int:
 
 
 def _run_review_view(context: CliContext) -> int:
-    from .review.sky_render import write_review_sky_html
-    from .review.sky_view import build_review_sky_view
+    from ..review.sky_render import write_review_sky_html
+    from ..review.sky_view import build_review_sky_view
 
     args = context.args
     try:
@@ -105,18 +105,18 @@ def _run_review_view(context: CliContext) -> int:
 
 
 def _run_review_server(context: CliContext) -> int:
-    from .catalogs.setup import catalog_operator_service_for_provider
-    from .cli_services import build_update_service
-    from .reference import ReferenceStore
-    from .review.app import serve_review_ui
-    from .update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
+    from ..catalogs.setup import catalog_operator_service_for_provider
+    from .services import build_update_service
+    from ..reference.store import ReferenceStore
+    from ..review.app import serve_review_ui
+    from ..update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
 
     args = context.args
     sessions = context.require_sessions()
     try:
         identity_service_factory = None
         if not args.offline:
-            from .live_providers import AstroqueryGaia, AstroquerySimbad
+            from ..live_providers import AstroqueryGaia, AstroquerySimbad
 
             identity_service_factory = lambda: IdentityService(
                 sessions,
@@ -179,7 +179,7 @@ def _run_review_queue(context: CliContext) -> int:
 
 
 def _write_iras_families(context: CliContext, session) -> None:
-    from .models.catalogs import IrasBandSelection, IrasDetectionFamily
+    from ..models.catalogs import IrasBandSelection, IrasDetectionFamily
 
     args = context.args
     query = (
@@ -255,8 +255,8 @@ def _write_catalog_matches(context: CliContext, session) -> None:
 
 
 def _write_identity_matches(context: CliContext, session) -> None:
-    from .identity_results import effective_identity_candidate_ids
-    from .models.identity import Submission
+    from ..identity_results import effective_identity_candidate_ids
+    from ..models.identity import Submission
 
     submissions = list(session.scalars(
         select(Submission)

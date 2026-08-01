@@ -6,7 +6,7 @@ from collections import defaultdict
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalogs.policy import catalog_source_display_name
-from .samples import SampleService
+from .samples.service import SampleService
 from .photometry.state import load_system_photometry_state
 from .targets import resolve_target
 from .vocabulary import (

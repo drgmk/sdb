@@ -6,8 +6,8 @@ from dataclasses import asdict
 from pathlib import Path
 import sys
 
-from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
-from .cli_context import CliContext
+from ..catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
+from .context import CliContext
 
 
 def register_update_parser(commands, add_parser) -> None:
@@ -31,10 +31,10 @@ def register_update_parser(commands, add_parser) -> None:
 
 
 def run_update_command(context: CliContext) -> int:
-    from .cli_services import build_update_service
-    from .dirty import pending_export_targets
-    from .export import export_ipac
-    from .update import DEFAULT_PROVIDERS
+    from .services import build_update_service
+    from ..dirty import pending_export_targets
+    from ..export import export_ipac
+    from ..update import DEFAULT_PROVIDERS
 
     args = context.args
     sessions = context.require_sessions()
@@ -78,7 +78,7 @@ def run_update_command(context: CliContext) -> int:
                     force=args.force, providers=providers,
                 )
             elif args.sample is not None:
-                from .samples import SampleService
+                from ..samples.service import SampleService
 
                 members = SampleService(sessions).members(args.sample)
                 summary = service.update_targets(
@@ -125,7 +125,7 @@ def _export_updated_targets(
             for value in pending_export_targets(sessions, sample=args.sample)
         ]
     else:
-        from .targets import resolve_target
+        from ..targets import resolve_target
 
         with sessions() as session:
             target = resolve_target(session, args.target)

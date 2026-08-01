@@ -4,7 +4,7 @@ import argparse
 
 import pytest
 
-from sdb_identity.cli_context import CliContext
+from sdb_identity.commands.context import CliContext
 from sdb_identity.config import SdbConfig
 from sdb_identity.database import make_session_factory
 from sdb_identity.progress import ProgressReporter

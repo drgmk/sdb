@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 import sys
 
-from .cli_context import CliContext
-from .service import AddRequest, IdentityService, UnresolvedTarget
+from .context import CliContext
+from ..service import AddRequest, IdentityService, UnresolvedTarget
 
 
 TARGET_COMMANDS = {"add", "status", "history", "override-match", "note"}
@@ -137,10 +137,10 @@ def _run_add(context: CliContext) -> int:
                 raise ValueError("--ensure is unavailable in offline mode")
             if args.name is None or args.ra is not None or args.dec is not None:
                 raise ValueError("--ensure requires one target name without --ra/--dec")
-            from .cli_services import build_update_service
-            from .live_providers import AstroqueryGaia, AstroquerySimbad
-            from .target_import import TargetImportService
-            from .update import DEFAULT_PROVIDERS
+            from .services import build_update_service
+            from ..live_providers import AstroqueryGaia, AstroquerySimbad
+            from ..target_import import TargetImportService
+            from ..update import DEFAULT_PROVIDERS
 
             configured = tuple(
                 value.strip() for value in args.providers.split(",") if value.strip()
@@ -185,12 +185,12 @@ def _run_add(context: CliContext) -> int:
 
     try:
         with context.provider_output():
-            from .ingestion import TargetIngestionPlan
+            from ..ingestion import TargetIngestionPlan
 
             if args.offline:
                 service = IdentityService(sessions)
             else:
-                from .live_providers import AstroqueryGaia, AstroquerySimbad
+                from ..live_providers import AstroqueryGaia, AstroquerySimbad
 
                 service = IdentityService(
                     sessions,
@@ -212,10 +212,10 @@ def _run_add(context: CliContext) -> int:
 
 
 def _run_status(context: CliContext) -> int:
-    from .hierarchy.target_context import HierarchyTargetContextService
-    from .models.identity import AstrometricSolution
-    from .target_lifecycle import target_lifecycle_status
-    from .targets import resolve_targets
+    from ..hierarchy.target_context import HierarchyTargetContextService
+    from ..models.identity import AstrometricSolution
+    from ..target_lifecycle import target_lifecycle_status
+    from ..targets import resolve_targets
 
     args = context.args
     sessions = context.require_sessions()
@@ -254,7 +254,7 @@ def _run_status(context: CliContext) -> int:
 
 
 def _run_history(context: CliContext) -> int:
-    from .decision_history import system_decision_history
+    from ..decision_history import system_decision_history
 
     args = context.args
     try:
@@ -271,7 +271,7 @@ def _run_history(context: CliContext) -> int:
 
 
 def _run_note(context: CliContext) -> int:
-    from .metadata import MetadataService
+    from ..metadata import MetadataService
 
     args = context.args
     service = MetadataService(context.require_sessions(), None)

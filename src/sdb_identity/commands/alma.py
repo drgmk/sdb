@@ -6,8 +6,8 @@ from dataclasses import asdict
 
 from sqlalchemy import select
 
-from .cli_context import CliContext
-from .providers import ProviderError
+from .context import CliContext
+from ..providers import ProviderError
 
 
 def register_alma_parser(commands, add_parser) -> None:
@@ -61,8 +61,8 @@ def register_alma_parser(commands, add_parser) -> None:
 
 
 def run_alma_command(context: CliContext) -> int:
-    from .alma import AlmaSyncService
-    from .alma_lookup import AlmaLookupService
+    from ..alma.service import AlmaSyncService
+    from ..alma.lookup import AlmaLookupService
 
     args = context.args
     sessions = context.require_sessions()
@@ -71,7 +71,7 @@ def run_alma_command(context: CliContext) -> int:
             if context.offline:
                 raise ValueError("ALMA sync is unavailable in offline mode")
             with context.provider_output():
-                from .alma_transport import AstroqueryAlmaArchive
+                from ..alma.transport import AstroqueryAlmaArchive
 
                 service = AlmaSyncService(
                     sessions,
@@ -101,7 +101,7 @@ def run_alma_command(context: CliContext) -> int:
             for project in service.projects(args.target, args.radius):
                 print(context.json(asdict(project), sort_keys=True))
         else:
-            from .models.alma import AlmaSyncRun
+            from ..models.alma import AlmaSyncRun
 
             if args.limit < 1:
                 raise ValueError("--limit must be at least 1")

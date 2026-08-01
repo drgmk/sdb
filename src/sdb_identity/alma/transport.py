@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .providers import ProviderError
+from ..providers import ProviderError
 
 
 ALMA_COLUMNS = (

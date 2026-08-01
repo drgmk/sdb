@@ -12,7 +12,7 @@ from sdb_identity.models.curated import CuratedAssociationAction
 from sdb_identity.models.photometry import MeasurementEligibilityAction
 from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.service import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.target_lifecycle import set_target_lifecycle
 from tests.test_catalog import FakeCatalog, candidate, measurement

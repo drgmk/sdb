@@ -14,7 +14,7 @@ from .reference_definitions import SNAPSHOT_CATALOGS
 
 if TYPE_CHECKING:
     from .types import CatalogAdapter
-    from ..reference_store import ReferenceStore
+    from ..reference.store import ReferenceStore
 
 
 @dataclass(frozen=True)

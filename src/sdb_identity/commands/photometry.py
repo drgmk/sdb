@@ -10,9 +10,9 @@ import sys
 
 from sqlalchemy import select
 
-from .cli_context import CliContext
-from .models.identity import Target
-from .vocabulary import MeasurementTargetRole, review_priority_rank
+from .context import CliContext
+from ..models.identity import Target
+from ..vocabulary import MeasurementTargetRole, review_priority_rank
 
 
 def register_photometry_parser(
@@ -270,7 +270,7 @@ def run_photometry_command(context: CliContext) -> int:
 
 
 def _run_eligibility_command(context: CliContext) -> None:
-    from .photometry.assignments import (
+    from ..photometry.assignments import (
         list_measurement_eligibility_actions,
         set_measurement_eligibility,
     )
@@ -306,7 +306,7 @@ def _run_eligibility_command(context: CliContext) -> None:
 
 
 def _run_review_command(context: CliContext) -> None:
-    from .photometry.assignments import photometry_review_queue, review_photometry_associations
+    from ..photometry.assignments import photometry_review_queue, review_photometry_associations
 
     args = context.args
     sessions = context.require_sessions()
@@ -353,7 +353,7 @@ def _selected_review_references(context: CliContext) -> list[str]:
                 select(Target.sdbid).order_by(Target.sdbid)
             ))
     if args.sample is not None:
-        from .samples import SampleService
+        from ..samples.service import SampleService
 
         return [
             target.sdbid
@@ -363,7 +363,7 @@ def _selected_review_references(context: CliContext) -> list[str]:
 
 
 def _write_review_bundle(context: CliContext, references: list[str]) -> None:
-    from .photometry.assignments import photometry_review_queue
+    from ..photometry.assignments import photometry_review_queue
 
     args = context.args
     sessions = context.require_sessions()
@@ -420,7 +420,7 @@ def _write_review_bundle(context: CliContext, references: list[str]) -> None:
 
 
 def _run_assignment_command(context: CliContext) -> None:
-    from .photometry.assignments import (
+    from ..photometry.assignments import (
         assign_measurement_target,
         list_measurement_assignment_history,
         unassign_measurement_target,
@@ -488,8 +488,8 @@ def _run_proposal_command(context: CliContext) -> None:
     args = context.args
     sessions = context.require_sessions()
     if args.photometry_command == "proposals":
-        from .photometry.proposals import measurement_assignment_proposals
-        from .photometry.reporting import proposal_summary_report
+        from ..photometry.proposals import measurement_assignment_proposals
+        from ..photometry.reporting import proposal_summary_report
 
         value = proposal_summary_report(
             measurement_assignment_proposals(sessions, args.target),
@@ -497,8 +497,8 @@ def _run_proposal_command(context: CliContext) -> None:
             include_details=args.details,
         )
     else:
-        from .photometry.application import apply_measurement_assignment_proposals
-        from .photometry.reporting import without_proposal_items
+        from ..photometry.application import apply_measurement_assignment_proposals
+        from ..photometry.reporting import without_proposal_items
 
         value = without_proposal_items(
             apply_measurement_assignment_proposals(
@@ -516,7 +516,7 @@ def _run_proposal_command(context: CliContext) -> None:
 
 
 def _run_fitting_command(context: CliContext) -> None:
-    from .photometry.assignments import list_measurement_target_assignments
+    from ..photometry.assignments import list_measurement_target_assignments
 
     args = context.args
     sessions = context.require_sessions()
@@ -526,7 +526,7 @@ def _run_fitting_command(context: CliContext) -> None:
             sort_keys=True,
         ))
     elif args.view == "readiness":
-        from .photometry.readiness import assignment_readiness_report
+        from ..photometry.readiness import assignment_readiness_report
 
         report = assignment_readiness_report(
             sessions,
@@ -541,7 +541,7 @@ def _run_fitting_command(context: CliContext) -> None:
         else:
             print(context.json(report, sort_keys=True))
     else:
-        from .fitting_groups import fitting_group_report
+        from ..fitting_groups import fitting_group_report
 
         print(context.json(
             fitting_group_report(
@@ -567,9 +567,9 @@ def _write_review_page_task(
     """Render one independent review page in a worker process."""
 
     database, reference, radius_arcsec, output_path = task
-    from .database import make_session_factory
-    from .review.sky_render import write_review_sky_html
-    from .review.sky_view import build_review_sky_view
+    from ..database import make_session_factory
+    from ..review.sky_render import write_review_sky_html
+    from ..review.sky_view import build_review_sky_view
 
     sessions = make_session_factory(database)
     try:

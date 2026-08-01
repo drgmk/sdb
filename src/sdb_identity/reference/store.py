@@ -15,14 +15,14 @@ from astropy.table import Table
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, bindparam, create_engine, or_, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from .cache_store import CachedSnapshotData, SnapshotCache
-from .catalogs.provenance import materialize_catalog_documentation
-from .providers import ProviderError
-from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
-from .serialization import safe_json as _safe_json
-from .identifiers import normalize_identifier
-from .snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
-from .serialization import row_float, row_payload, row_text
+from ..cache_store import CachedSnapshotData, SnapshotCache
+from ..catalogs.provenance import materialize_catalog_documentation
+from ..providers import ProviderError
+from ..catalogs.reference_definitions import SNAPSHOT_CATALOGS
+from ..serialization import safe_json as _safe_json
+from ..identifiers import normalize_identifier
+from ..snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
+from ..serialization import row_float, row_payload, row_text
 
 def utcnow():
     return datetime.now(timezone.utc)

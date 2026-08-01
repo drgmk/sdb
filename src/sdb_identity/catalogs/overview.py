@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from .registry import CATALOG_PROVIDERS
 from .provenance import vizier_access_url
-from ..reference_store import ReferenceStore
+from ..reference.store import ReferenceStore
 
 
 def catalog_overview(reference_store: ReferenceStore | None = None) -> dict[str, object]:

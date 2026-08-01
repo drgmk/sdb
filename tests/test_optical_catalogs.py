@@ -12,7 +12,7 @@ from sdb_identity.catalogs.adapters.reference import (
 from sdb_identity.catalogs.adapters.tycho2 import Tycho2Adapter
 from sdb_identity.catalogs.types import CatalogQueryContext
 from sdb_identity.providers import Astrometry
-from sdb_identity.reference import (
+from sdb_identity.catalogs.reference_definitions import (
     HIP2_CATALOG,
     HIP2_MAIN_TABLE,
     PAUNZEN15_DEFINITION,
@@ -20,8 +20,8 @@ from sdb_identity.reference import (
     TDSC_MAIN_TABLE,
     TDSC_SUPPLEMENT_TABLE,
     TDSC_DEFINITION,
-    ReferenceStore,
 )
+from sdb_identity.reference.store import ReferenceStore
 
 
 class FakeHip2Client:

@@ -14,29 +14,31 @@ from sdb_identity.export import export_ipac
 from sdb_identity.models.catalogs import CatalogAttribute, CatalogRun, RawCatalogRow
 from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.providers import Astrometry
-from sdb_identity.reference import (
+from sdb_identity.catalogs.adapters.reference import (
+    GasparSnapshotAdapter,
+    IrasPscSnapshotAdapter,
+    Koen10SnapshotAdapter,
+    Paunzen15SnapshotAdapter,
+    UbvMeansSnapshotAdapter,
+    V70ASnapshotAdapter,
+)
+from sdb_identity.catalogs.reference_definitions import (
     GASPAR_CATALOG,
     GASPAR_MAIN_TABLE,
     GASPAR_REFS_TABLE,
-    GasparSnapshotAdapter,
-    ReferenceApplicationService,
-    ReferenceStore,
-    V70A_CATALOG,
-    V70A_MAIN_TABLE,
-    V70ASnapshotAdapter,
     IRAS_PSC_CATALOG,
     IRAS_PSC_MAIN_TABLE,
-    IrasPscSnapshotAdapter,
     KOEN10_CATALOG,
     KOEN10_MAIN_TABLE,
-    Koen10SnapshotAdapter,
     PAUNZEN15_CATALOG,
     PAUNZEN15_MAIN_TABLE,
-    Paunzen15SnapshotAdapter,
     UBVMEANS_CATALOG,
     UBVMEANS_MAIN_TABLE,
-    UbvMeansSnapshotAdapter,
+    V70A_CATALOG,
+    V70A_MAIN_TABLE,
 )
+from sdb_identity.reference.application import ReferenceApplicationService
+from sdb_identity.reference.store import ReferenceStore
 from sdb_identity.catalogs.adapters.reference import TdscSnapshotAdapter
 from sdb_identity.catalogs.reference_definitions import V70A_DEFINITION
 from sdb_identity.catalogs.reference_definitions import UBVMEANS_DEFINITION

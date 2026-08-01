@@ -27,7 +27,7 @@ def catalog_operator_service_for_provider(
         raise ValueError(
             f"{provider} retry is unavailable while the review server is offline"
         )
-    from .reference import ReferenceStore
+    from ..reference.store import ReferenceStore
 
     adapter = build_catalog_adapter(
         provider, reference_store=ReferenceStore(reference_database),

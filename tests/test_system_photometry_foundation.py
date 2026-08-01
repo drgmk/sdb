@@ -34,7 +34,7 @@ from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.photometry.application import apply_measurement_assignment_proposals
 from sdb_identity.review.actions import review_catalog_target_association_decision
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.service import SampleService
 from sdb_identity.target_lifecycle import (
     set_target_lifecycle,
     target_lifecycle_history,

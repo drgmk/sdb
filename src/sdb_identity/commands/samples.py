@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import sys
 
-from .cli_context import CliContext
+from .context import CliContext
 
 
 def register_sample_parser(
@@ -102,7 +102,7 @@ def register_sample_parser(
 
 
 def run_sample_command(context: CliContext) -> int:
-    from .samples import SampleService
+    from ..samples.service import SampleService
 
     args = context.args
     sessions = context.require_sessions()
@@ -154,7 +154,7 @@ def run_sample_command(context: CliContext) -> int:
                     )
                 )
         elif args.sample_command == "readiness":
-            from .readiness import ReadinessService
+            from ..samples.readiness import ReadinessService
 
             providers = tuple(
                 value.strip()

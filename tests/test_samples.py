@@ -9,7 +9,7 @@ from sdb_identity.cli import main
 from sdb_identity.database import make_session_factory
 from sdb_identity.dirty import pending_export_targets
 from sdb_identity.models.samples import SampleMembershipAction
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.service import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 
 

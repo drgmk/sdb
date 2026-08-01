@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import sys
 
-from .cli_context import CliContext
+from .context import CliContext
 
 
 def register_cache_parser(commands, add_parser) -> None:
@@ -65,7 +65,7 @@ def register_cache_parser(commands, add_parser) -> None:
 
 
 def run_cache_command(context: CliContext) -> int:
-    from .cache_store import SnapshotCache
+    from ..cache_store import SnapshotCache
 
     args = context.args
     cache = SnapshotCache(context.cache_database_path)
@@ -121,8 +121,8 @@ def _add_reference_comparisons(
     context: CliContext,
     value: dict[str, object],
 ) -> None:
-    from .reference import ReferenceStore
-    from .catalogs.reference_definitions import SNAPSHOT_CATALOGS
+    from ..reference.store import ReferenceStore
+    from ..catalogs.reference_definitions import SNAPSHOT_CATALOGS
 
     reference = ReferenceStore(context.reference_database_path)
     comparisons = []

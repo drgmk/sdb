@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import sys
 
-from .cli_context import CliContext
-from .service import IdentityService
+from .context import CliContext
+from ..service import IdentityService
 
 
 BATCH_COMMANDS = {"import", "import-status", "resume", "retry"}
@@ -111,21 +111,21 @@ def _batch_service(
     offline=False,
     reporter=None,
 ):
-    from .batch import BatchService
-    from .catalogs.acquisition import CatalogAcquisitionService
-    from .metadata import MetadataService
+    from ..batch import BatchService
+    from ..catalogs.acquisition import CatalogAcquisitionService
+    from ..metadata import MetadataService
 
     if offline:
         identity_factory = lambda: IdentityService(sessions)
         metadata_factory = lambda: MetadataService(sessions, None)
         catalog_factory = lambda: CatalogAcquisitionService(sessions, {})
     else:
-        from .catalogs.registry import (
+        from ..catalogs.registry import (
             REMOTE_CATALOG_PROVIDERS,
             build_catalog_adapters,
         )
-        from .live_providers import AstroqueryGaia, AstroquerySimbad
-        from .simbad_metadata import AstroquerySimbadMetadata
+        from ..live_providers import AstroqueryGaia, AstroquerySimbad
+        from ..simbad_metadata import AstroquerySimbadMetadata
 
         identity_factory = lambda: IdentityService(
             sessions,
@@ -189,7 +189,7 @@ def _run_status(context: CliContext) -> int:
 
 
 def _run_resume(context: CliContext) -> int:
-    from .models.batch import ImportRun
+    from ..models.batch import ImportRun
 
     args = context.args
     sessions = context.require_sessions()

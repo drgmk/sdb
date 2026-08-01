@@ -6,7 +6,7 @@ import json
 
 from sdb_identity.cli import main
 from sdb_identity.config import load_config
-from sdb_identity.reference_ensure import ensure_reference_snapshots
+from sdb_identity.reference.ensure import ensure_reference_snapshots
 
 
 def test_config_layers_reference_defaults_and_mirrors(tmp_path, monkeypatch):

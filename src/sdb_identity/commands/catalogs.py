@@ -6,12 +6,12 @@ import sys
 
 from sqlalchemy import select
 
-from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
-from .catalogs.results import effective_catalog_results
-from .cli_context import CliContext
-from .models.catalogs import CatalogRun, RawCatalogRow
-from .targets import resolve_target, resolve_targets
-from .vocabulary import ProviderRunStatus
+from ..catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
+from ..catalogs.results import effective_catalog_results
+from .context import CliContext
+from ..models.catalogs import CatalogRun, RawCatalogRow
+from ..targets import resolve_target, resolve_targets
+from ..vocabulary import ProviderRunStatus
 
 
 CATALOG_COMMANDS = {"override-catalog-match", "refresh", "runs", "attributes"}
@@ -93,9 +93,9 @@ def run_catalog_command(context: CliContext) -> int:
 
 
 def _run_override(context: CliContext) -> int:
-    from .catalogs.decisions import CatalogDecisionService
-    from .catalogs.registry import build_catalog_adapter
-    from .reference import ReferenceStore
+    from ..catalogs.decisions import CatalogDecisionService
+    from ..catalogs.registry import build_catalog_adapter
+    from ..reference.store import ReferenceStore
 
     args = context.args
     sessions = context.require_sessions()
@@ -136,12 +136,12 @@ def _run_refresh(context: CliContext) -> int:
         return 2
     try:
         with context.provider_output():
-            from .catalogs.registry import CATALOG_PROVIDERS
+            from ..catalogs.registry import CATALOG_PROVIDERS
 
             if args.provider in CATALOG_PROVIDERS:
-                from .catalogs.acquisition import CatalogAcquisitionService
-                from .catalogs.registry import build_catalog_adapter
-                from .reference import ReferenceStore
+                from ..catalogs.acquisition import CatalogAcquisitionService
+                from ..catalogs.registry import build_catalog_adapter
+                from ..reference.store import ReferenceStore
 
                 adapters = {args.provider: build_catalog_adapter(
                     args.provider,
@@ -153,8 +153,8 @@ def _run_refresh(context: CliContext) -> int:
                     sessions, adapters,
                 ).refresh(args.target, args.provider)
             else:
-                from .metadata import MetadataService
-                from .simbad_metadata import AstroquerySimbadMetadata
+                from ..metadata import MetadataService
+                from ..simbad_metadata import AstroquerySimbadMetadata
 
                 refreshed = MetadataService(
                     sessions, AstroquerySimbadMetadata(),
@@ -167,7 +167,7 @@ def _run_refresh(context: CliContext) -> int:
 
 
 def _run_runs(context: CliContext) -> int:
-    from .models.metadata import MetadataRun
+    from ..models.metadata import MetadataRun
 
     args = context.args
     sessions = context.require_sessions()
@@ -235,8 +235,8 @@ def _run_runs(context: CliContext) -> int:
 
 
 def _run_attributes(context: CliContext) -> int:
-    from .models.catalogs import CatalogAttribute
-    from .models.metadata import MetadataRun, SimbadMetadata
+    from ..models.catalogs import CatalogAttribute
+    from ..models.metadata import MetadataRun, SimbadMetadata
 
     args = context.args
     sessions = context.require_sessions()

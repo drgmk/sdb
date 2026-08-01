@@ -37,7 +37,7 @@ from sdb_identity.models.hierarchy import (
 from sdb_identity.models.base import utcnow
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.service import SampleService
 from tests.test_metadata import FakeMetadataProvider, snapshot
 
 

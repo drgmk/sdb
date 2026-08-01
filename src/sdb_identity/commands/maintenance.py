@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from .cli_context import CliContext
+from .context import CliContext
 
 
 def register_maintenance_parser(commands, add_parser) -> None:
@@ -31,7 +31,7 @@ def register_maintenance_parser(commands, add_parser) -> None:
 
 
 def run_maintenance_command(context: CliContext) -> int:
-    from .parity import compare_exports
+    from ..parity import compare_exports
 
     args = context.args
     try:

@@ -8,7 +8,7 @@ from .proposals import measurement_assignment_proposals
 from ..decisions import configured_actor, resolve_reason
 from .assignments import assign_measurement_target
 from ..progress import NULL_PROGRESS, ProgressReporter
-from ..samples import SampleService
+from ..samples.service import SampleService
 from ..targets import resolve_target
 
 

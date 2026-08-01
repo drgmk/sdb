@@ -5,8 +5,8 @@ import json
 from astropy.time import Time
 from sqlalchemy import func, select
 
-from sdb_identity.alma import AlmaSyncService
-from sdb_identity.alma_lookup import AlmaLookupService
+from sdb_identity.alma.service import AlmaSyncService
+from sdb_identity.alma.lookup import AlmaLookupService
 from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
 from sdb_identity.models.alma import (

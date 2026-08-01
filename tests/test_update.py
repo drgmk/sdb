@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models.identity import ExternalIdentifier
-from sdb_identity.reference import ReferenceStore
-from sdb_identity.samples import SampleService
+from sdb_identity.reference.store import ReferenceStore
+from sdb_identity.samples.service import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.update import UpdateService
 from tests.test_catalog import FakeBulkCatalog, FakeCatalog

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from .cli_context import CliContext
+from .context import CliContext
 
 
 DATASETS = ("submm_obs",)
@@ -115,7 +115,7 @@ def register_dataset_parser(
 
 
 def run_dataset_command(context: CliContext) -> int:
-    from .datasets import SubmmObsService
+    from ..datasets import SubmmObsService
 
     args = context.args
     service = SubmmObsService(context.require_sessions())

@@ -37,7 +37,7 @@ from ..reference_definitions import (
 from ..ubv_components import decode_ubv_component, ubv_photometry_scope
 from ..tdsc_components import decode_tdsc_component
 from ..v70a_components import decode_v70a_component
-from ...reference_store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
+from ...reference.store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
 from .vizier import row_float, row_text
 
 class SnapshotCatalogAdapter:

@@ -9,8 +9,8 @@ from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.models.samples import SampleExportItem, SampleExportRun
-from sdb_identity.sample_export import SampleExportService
-from sdb_identity.samples import SampleService
+from sdb_identity.samples.export import SampleExportService
+from sdb_identity.samples.service import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate
 
@@ -134,7 +134,7 @@ def test_sample_export_records_partial_failure(session_factory, tmp_path, monkey
     def fail_export(*_args, **_kwargs):
         raise RuntimeError("synthetic export failure")
 
-    monkeypatch.setattr("sdb_identity.sample_export.export_ipac", fail_export)
+    monkeypatch.setattr("sdb_identity.samples.export.export_ipac", fail_export)
     result = SampleExportService(session_factory).export("science", tmp_path)
     manifest = json.loads((tmp_path / f"sample-{result.run_id}-manifest.json").read_text())
 

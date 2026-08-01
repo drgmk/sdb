@@ -10,12 +10,12 @@ from pathlib import Path
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from .dirty import pending_export_targets
-from .database import make_session_factory
-from .export import export_ipac
-from .models.samples import Sample, SampleExportItem, SampleExportRun
-from .progress import NULL_PROGRESS, ProgressReporter
-from .samples import SampleService
+from ..dirty import pending_export_targets
+from ..database import make_session_factory
+from ..export import export_ipac
+from ..models.samples import Sample, SampleExportItem, SampleExportRun
+from ..progress import NULL_PROGRESS, ProgressReporter
+from .service import SampleService
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ class SampleExportService:
         manifest_path = output_dir / f"sample-{run_id}-manifest.json"
         joint_fit_path = output_dir / f"sample-{run_id}-joint-fit.json"
         completed_at = datetime.now(timezone.utc)
-        from .joint_fit_manifest import write_joint_fit_manifest
+        from ..joint_fit_manifest import write_joint_fit_manifest
 
         write_joint_fit_manifest(
             self.sessions,

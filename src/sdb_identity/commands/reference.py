@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import sys
 
-from .catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
-from .cli_context import CliContext
-from .database import make_session_factory
-from .providers import ProviderError
+from ..catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
+from .context import CliContext
+from ..database import make_session_factory
+from ..providers import ProviderError
 
 
 REFERENCE_ADAPTERS = SNAPSHOT_CATALOG_PROVIDERS
@@ -121,7 +121,8 @@ def register_reference_parser(commands, add_parser) -> None:
 
 
 def run_reference_command(context: CliContext) -> int:
-    from .reference import ReferenceApplicationService, ReferenceStore
+    from ..reference.application import ReferenceApplicationService
+    from ..reference.store import ReferenceStore
 
     args = context.args
     store = ReferenceStore(context.reference_database_path)
@@ -137,7 +138,7 @@ def run_reference_command(context: CliContext) -> int:
                 )
             print(context.json(value.__dict__, sort_keys=True))
         elif args.reference_command == "ensure":
-            from .reference_ensure import ensure_reference_snapshots
+            from ..reference.ensure import ensure_reference_snapshots
 
             providers = (
                 tuple(args.providers)
@@ -222,7 +223,7 @@ def _snapshot(store, adapter: str):
 
 
 def _run_application_command(context: CliContext, store) -> None:
-    from .reference import ReferenceApplicationService
+    from ..reference.application import ReferenceApplicationService
 
     args = context.args
     path = context.database_path
@@ -256,7 +257,7 @@ def _run_application_command(context: CliContext, store) -> None:
                 )
             )
     elif args.reference_command == "audit-identifiers":
-        from .identifier_audit import audit_catalog_identifiers
+        from ..identifier_audit import audit_catalog_identifiers
 
         for value in audit_catalog_identifiers(
             sessions,
