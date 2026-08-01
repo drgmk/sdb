@@ -6,7 +6,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .service import IdentityService
+from ..service import IdentityService
 
 
 def create_review_app(
@@ -24,10 +24,10 @@ def create_review_app(
             "review UI dependencies are missing; install with pip install -e '.[review]'"
         ) from error
 
-    from .review_routes_decisions import register_decision_routes
-    from .review_routes_imports import register_import_routes
-    from .review_routes_pages import register_page_routes
-    from .review_web_context import ReviewWebContext
+    from .routes.decisions import register_decision_routes
+    from .routes.imports import register_import_routes
+    from .routes.pages import register_page_routes
+    from .context import ReviewWebContext
 
     app = FastAPI(title="SDB review", docs_url=None, redoc_url=None)
     context = ReviewWebContext(

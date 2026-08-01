@@ -8,11 +8,11 @@ from urllib.parse import quote, urlencode
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .photometry.readiness import assignment_readiness_report
-from .fitting_groups import fitting_group_report
-from .hierarchy.system_context import HierarchySystemContextService
-from .models.catalogs import RawCatalogRow
-from .review_dashboard import review_dashboard_report
+from ..photometry.readiness import assignment_readiness_report
+from ..fitting_groups import fitting_group_report
+from ..hierarchy.system_context import HierarchySystemContextService
+from ..models.catalogs import RawCatalogRow
+from .dashboard import review_dashboard_report
 
 
 @dataclass(frozen=True)

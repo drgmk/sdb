@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .service import IdentityService
+from ..service import IdentityService
 
 
 @dataclass(frozen=True)

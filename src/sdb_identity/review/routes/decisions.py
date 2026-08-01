@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from .review_commands import (
+from ..commands import (
     review_catalog_association_command,
     review_detection_command,
     review_eligibility_command,
     review_lifecycle_command,
     review_provider_result_command,
 )
-from .review_web_context import ReviewWebContext
+from ..context import ReviewWebContext
 
 
 def register_decision_routes(app: object, context: ReviewWebContext) -> None:

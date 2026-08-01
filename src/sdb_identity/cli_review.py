@@ -77,8 +77,8 @@ def run_review_command(context: CliContext) -> int:
 
 
 def _run_review_view(context: CliContext) -> int:
-    from .review_sky_render import write_review_sky_html
-    from .review_widget import build_review_sky_view
+    from .review.sky_render import write_review_sky_html
+    from .review.sky_view import build_review_sky_view
 
     args = context.args
     try:
@@ -108,7 +108,7 @@ def _run_review_server(context: CliContext) -> int:
     from .catalogs.setup import catalog_operator_service_for_provider
     from .cli_services import build_update_service
     from .reference import ReferenceStore
-    from .review_ui import serve_review_ui
+    from .review.app import serve_review_ui
     from .update import DEFAULT_PROVIDERS, REMOTE_CATALOGS
 
     args = context.args

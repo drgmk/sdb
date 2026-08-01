@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from .review_import_commands import (
+from ..import_commands import (
     apply_nearby_import_command,
     review_catalog_coverage_command,
     review_relatives_command,
     search_nearby_import_command,
 )
-from .review_web_context import ReviewWebContext
+from ..context import ReviewWebContext
 
 
 def register_import_routes(app: object, context: ReviewWebContext) -> None:

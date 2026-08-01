@@ -568,8 +568,8 @@ def _write_review_page_task(
 
     database, reference, radius_arcsec, output_path = task
     from .database import make_session_factory
-    from .review_sky_render import write_review_sky_html
-    from .review_widget import build_review_sky_view
+    from .review.sky_render import write_review_sky_html
+    from .review.sky_view import build_review_sky_view
 
     sessions = make_session_factory(database)
     try:

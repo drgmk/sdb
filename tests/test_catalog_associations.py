@@ -21,7 +21,7 @@ from sdb_identity.models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from sdb_identity.review_actions import (
+from sdb_identity.review.actions import (
     review_catalog_target_association_decision,
 )
 from sdb_identity.service import AddRequest, IdentityService

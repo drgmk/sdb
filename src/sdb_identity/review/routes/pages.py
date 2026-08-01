@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from .catalogs.overview import catalog_overview
-from .review_dashboard import review_dashboard_report
-from .review_pages import (
+from ...catalogs.overview import catalog_overview
+from ..dashboard import review_dashboard_report
+from ..pages import (
     render_catalogs_page,
     render_page,
     render_queue_page,
     render_target_page,
 )
-from .review_sky_render import render_review_sky_html
-from .review_web_context import ReviewWebContext
-from .review_widget import build_review_sky_view
-from .review_workspace import build_target_workspace, queue_filters
+from ..sky_render import render_review_sky_html
+from ..context import ReviewWebContext
+from ..sky_view import build_review_sky_view
+from ..workspace import build_target_workspace, queue_filters
 
 
 def register_page_routes(app: object, context: ReviewWebContext) -> None:

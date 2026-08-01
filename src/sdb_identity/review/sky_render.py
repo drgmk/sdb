@@ -8,8 +8,8 @@ import math
 from dataclasses import asdict
 from pathlib import Path
 
-from .catalogs.provenance import vizier_entry_url
-from .review_widget import ReviewSkyView
+from ..catalogs.provenance import vizier_entry_url
+from .sky_view import ReviewSkyView
 
 
 _HIERARCHY_VIZIER_LOCATORS = {

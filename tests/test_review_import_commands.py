@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sdb_identity.review_import_commands import (
+from sdb_identity.review.import_commands import (
     review_catalog_coverage_command,
     review_relatives_command,
 )

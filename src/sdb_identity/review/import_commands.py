@@ -8,14 +8,14 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .decisions import DecisionContext
-from .hierarchy.system_context import HierarchySystemContextService
-from .service import IdentityService
-from .hierarchy.expansion import (
+from ..decisions import DecisionContext
+from ..hierarchy.system_context import HierarchySystemContextService
+from ..service import IdentityService
+from ..hierarchy.expansion import (
     import_immediate_relatives,
     preview_immediate_relatives,
 )
-from .target_import import TargetImportService, search_nearby_simbad
+from ..target_import import TargetImportService, search_nearby_simbad
 
 
 def _with_human_summary(

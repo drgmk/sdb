@@ -10,16 +10,16 @@ from collections.abc import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs.decisions import CatalogDecisionService
-from .models.catalogs import CatalogResultDecision, CatalogRun, RawCatalogRow
-from .models.identity import Target
-from .review_actions import (
+from ..catalogs.decisions import CatalogDecisionService
+from ..models.catalogs import CatalogResultDecision, CatalogRun, RawCatalogRow
+from ..models.identity import Target
+from .actions import (
     review_catalog_target_association_decision,
     review_detection_decision,
     review_photometry_eligibility_decision,
     review_target_lifecycle_decision,
 )
-from .vocabulary import PROVIDER_FAILURE_STATUSES
+from ..vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 def review_detection_command(

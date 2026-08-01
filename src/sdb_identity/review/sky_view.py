@@ -7,40 +7,40 @@ from dataclasses import dataclass, replace
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs.policy import catalog_source_display_name
-from .catalogs.adapters.review_metadata import normalize_review_payload
-from .photometry.review import build_measurement_assignment_review
-from .catalogs.results import (
+from ..catalogs.policy import catalog_source_display_name
+from ..catalogs.adapters.review_metadata import normalize_review_payload
+from ..photometry.review import build_measurement_assignment_review
+from ..catalogs.results import (
     effective_catalog_results,
     effective_catalog_selected_rows,
 )
 
-from .astrometry import propagate_to_epoch
-from .hierarchy.system_context import HierarchySystemContextService
-from .hierarchy.geometry import hierarchy_record_positions
-from .hierarchy.graph import (
+from ..astrometry import propagate_to_epoch
+from ..hierarchy.system_context import HierarchySystemContextService
+from ..hierarchy.geometry import hierarchy_record_positions
+from ..hierarchy.graph import (
     GRAPH_EDGE_STATUSES,
     edge_row,
     latest_overrides,
 )
-from .hierarchy.wds import UNUSABLE_SEPARATION_ARCSEC
-from .identity_results import effective_identity_candidate_ids
-from .models.identity import AstrometricSolution, MatchCandidate, Submission, Target
-from .models.catalogs import (
+from ..hierarchy.wds import UNUSABLE_SEPARATION_ARCSEC
+from ..identity_results import effective_identity_candidate_ids
+from ..models.identity import AstrometricSolution, MatchCandidate, Submission, Target
+from ..models.catalogs import (
     CatalogAttribute,
     CatalogDetectionProvenance,
     CatalogRun,
     NormalizedMeasurement,
     RawCatalogRow,
 )
-from .models.hierarchy import HierarchyMatchCandidate, HierarchyRecord, StructuralEdge
-from .models.metadata import SimbadMetadata
-from .providers import Astrometry
-from .targets import resolve_target
-from .catalogs.ubv_components import decode_ubv_component
-from .catalogs.tdsc_components import decode_tdsc_component
-from .catalogs.v70a_components import decode_v70a_component
-from .vocabulary import PROVIDER_FAILURE_STATUSES
+from ..models.hierarchy import HierarchyMatchCandidate, HierarchyRecord, StructuralEdge
+from ..models.metadata import SimbadMetadata
+from ..providers import Astrometry
+from ..targets import resolve_target
+from ..catalogs.ubv_components import decode_ubv_component
+from ..catalogs.tdsc_components import decode_tdsc_component
+from ..catalogs.v70a_components import decode_v70a_component
+from ..vocabulary import PROVIDER_FAILURE_STATUSES
 
 
 @dataclass(frozen=True)

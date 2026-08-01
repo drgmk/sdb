@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from sdb_identity.review_ui import create_review_app
-from sdb_identity.review_workspace import (
+from sdb_identity.review.app import create_review_app
+from sdb_identity.review.workspace import (
     TargetWorkspace,
     build_target_workspace,
 )

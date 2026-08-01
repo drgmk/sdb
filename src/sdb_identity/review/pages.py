@@ -11,7 +11,7 @@ from importlib.resources import files
 from string import Template
 from urllib.parse import quote, urlencode
 
-from .review_workspace import (
+from .workspace import (
     TargetWorkspace,
     filtered_queue_rows,
     queue_query,
@@ -19,7 +19,7 @@ from .review_workspace import (
 
 
 def _review_asset(name: str) -> str:
-    return files("sdb_identity.review_assets").joinpath(name).read_text(
+    return files("sdb_identity.review.assets").joinpath(name).read_text(
         encoding="utf-8"
     )
 

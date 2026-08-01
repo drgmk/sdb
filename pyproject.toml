@@ -29,10 +29,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 sdb_identity = [
   "migrations/script.py.mako",
-  "review_assets/*.css",
-  "review_assets/*.html",
-  "review_assets/*.js",
 ]
+"sdb_identity.review.assets" = ["*.css", "*.html", "*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
