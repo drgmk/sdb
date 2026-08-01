@@ -6,16 +6,16 @@ import csv
 import math
 import re
 
-from .catalogs.adapters.vizier import row_payload
-from .cache_store import CachedSnapshotData
-from .hierarchy_records import (
+from ..catalogs.adapters.vizier import row_payload
+from ..cache_store import CachedSnapshotData
+from .records import (
     ParsedHierarchyRecord,
     coords_from_hierarchy_id,
     delta_mag,
     float_value,
 )
-from .hierarchy_registry import hierarchy_source
-from .hierarchy_wds import component_pair, dubious_notes, separation_usable
+from .registry import hierarchy_source
+from .wds import component_pair, dubious_notes, separation_usable
 
 
 def parse_snapshot(

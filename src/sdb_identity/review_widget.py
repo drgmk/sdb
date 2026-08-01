@@ -16,14 +16,14 @@ from .catalogs.results import (
 )
 
 from .astrometry import propagate_to_epoch
-from .hierarchy_system_context import HierarchySystemContextService
-from .hierarchy_geometry import hierarchy_record_positions
-from .hierarchy_graph import (
+from .hierarchy.system_context import HierarchySystemContextService
+from .hierarchy.geometry import hierarchy_record_positions
+from .hierarchy.graph import (
     GRAPH_EDGE_STATUSES,
     edge_row,
     latest_overrides,
 )
-from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
+from .hierarchy.wds import UNUSABLE_SEPARATION_ARCSEC
 from .identity_results import effective_identity_candidate_ids
 from .models.identity import AstrometricSolution, MatchCandidate, Submission, Target
 from .models.catalogs import (

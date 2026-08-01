@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .hierarchy_geometry import (
+from .geometry import (
     hierarchy_separation_usable,
     offset_position,
     record_raw_payload,
     wds_record_has_unusable_separation,
 )
-from .hierarchy_wds import component_pair
-from .models.hierarchy import (
+from .wds import component_pair
+from ..models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     StructuralEdge,

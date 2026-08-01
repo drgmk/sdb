@@ -12,7 +12,7 @@ from sdb_identity.catalogs.measurements import current_measurements_for_target
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.decision_history import system_decision_history
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,

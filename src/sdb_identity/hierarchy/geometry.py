@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import math
 
-from .hierarchy_wds import UNUSABLE_SEPARATION_ARCSEC
-from .models.hierarchy import HierarchyRecord
+from .wds import UNUSABLE_SEPARATION_ARCSEC
+from ..models.hierarchy import HierarchyRecord
 
 
 def hierarchy_record_positions(

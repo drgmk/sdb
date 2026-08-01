@@ -5,10 +5,10 @@ from dataclasses import asdict, dataclass
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .dirty import mark_export_dirty
-from .models.hierarchy import StructuralEdge, TargetSystem, TargetSystemMember
-from .models.identity import Target
-from .targets import resolve_target
+from ..dirty import mark_export_dirty
+from ..models.hierarchy import StructuralEdge, TargetSystem, TargetSystemMember
+from ..models.identity import Target
+from ..targets import resolve_target
 
 
 RELATIONSHIP_STATUS = "accepted"

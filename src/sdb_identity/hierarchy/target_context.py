@@ -7,18 +7,18 @@ from dataclasses import asdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .astrometry import angular_separation_arcsec
-from .catalogs.measurements import current_measurements_for_target
-from .hierarchy_graph import (
+from ..astrometry import angular_separation_arcsec
+from ..catalogs.measurements import current_measurements_for_target
+from .graph import (
     HierarchyGraphEdgeRow,
     diagnostics_for_system,
     edges_for_system,
 )
-from .hierarchy_identity_context import (
+from .identity_context import (
     target_semantic_identity,
     target_semantic_identity_summary,
 )
-from .hierarchy_photometry import (
+from .photometry import (
     refresh_photometry_band_summaries,
     review_queue_row,
     target_component_assignment,
@@ -26,11 +26,11 @@ from .hierarchy_photometry import (
     target_photometry_context,
     target_photometry_context_summary,
 )
-from .models.hierarchy import HierarchyMatchCandidate, HierarchyRecord
-from .models.identity import Target
-from .providers import Astrometry
-from .targets import resolve_target
-from .vocabulary import review_priority_rank
+from ..models.hierarchy import HierarchyMatchCandidate, HierarchyRecord
+from ..models.identity import Target
+from ..providers import Astrometry
+from ..targets import resolve_target
+from ..vocabulary import review_priority_rank
 
 
 class HierarchyTargetContextService:

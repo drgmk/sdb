@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 from sqlalchemy import select
 
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService, RelationshipValue
 from sdb_identity.models.hierarchy import (
     StructuralEdge,
@@ -15,7 +15,7 @@ from sdb_identity.models.hierarchy import (
 )
 from sdb_identity.models.identity import Target
 from sdb_identity.service import AddRequest, IdentityService
-from sdb_identity.system_expansion import (
+from sdb_identity.hierarchy.expansion import (
     import_immediate_relatives,
     preview_immediate_relatives,
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.providers import SimbadNeighbour
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.target_import import (

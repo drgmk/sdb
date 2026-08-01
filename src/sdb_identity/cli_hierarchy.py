@@ -347,7 +347,7 @@ def _register_matching_commands(
 
 
 def run_hierarchy_command(context: CliContext) -> int:
-    from .hierarchy import HierarchyService
+    from .hierarchy.service import HierarchyService
 
     args = context.args
     sessions = context.require_sessions()
@@ -631,7 +631,7 @@ def _run_target_state(context: CliContext, service) -> None:
         )
         print(context.json(_relationship_payload(value)))
     elif args.hierarchy_command == "relatives":
-        from .system_expansion import preview_immediate_relatives
+        from .hierarchy.expansion import preview_immediate_relatives
 
         print(context.json(preview_immediate_relatives(sessions, args.target)))
     elif args.hierarchy_command == "import-relatives":
@@ -641,7 +641,7 @@ def _run_target_state(context: CliContext, service) -> None:
             )
         with context.provider_output():
             from .live_providers import AstroqueryGaia, AstroquerySimbad
-            from .system_expansion import import_immediate_relatives
+            from .hierarchy.expansion import import_immediate_relatives
 
             identity = IdentityService(
                 sessions,

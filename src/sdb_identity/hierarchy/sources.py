@@ -12,11 +12,11 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .cache_store import SnapshotCache
-from .hierarchy_parsing import parse_cached_snapshot, parse_snapshot, parse_tables
-from .hierarchy_records import ParsedHierarchyRecord
-from .hierarchy_registry import hierarchy_source
-from .models.hierarchy import (
+from ..cache_store import SnapshotCache
+from .parsing import parse_cached_snapshot, parse_snapshot, parse_tables
+from .records import ParsedHierarchyRecord
+from .registry import hierarchy_source
+from ..models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
@@ -24,9 +24,9 @@ from .models.hierarchy import (
     StructuralEdge,
     StructuralEdgeAction,
 )
-from .models.base import utcnow
-from .providers import ProviderError
-from .snapshots import SnapshotClient, VizierSnapshotClient
+from ..models.base import utcnow
+from ..providers import ProviderError
+from ..snapshots import SnapshotClient, VizierSnapshotClient
 
 
 @dataclass(frozen=True)

@@ -3,8 +3,8 @@ from __future__ import annotations
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .decisions import DecisionContext
-from .hierarchy_graph import (
+from ..decisions import DecisionContext
+from .graph import (
     GRAPH_EDGE_STATUSES,
     HierarchyGraphDeriveResult,
     HierarchyGraphDiagnosticRow,
@@ -19,14 +19,14 @@ from .hierarchy_graph import (
     edge_row,
     latest_overrides,
 )
-from .models.hierarchy import (
+from ..models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     StructuralEdge,
     StructuralEdgeAction,
 )
-from .models.identity import Target
-from .targets import resolve_target
+from ..models.identity import Target
+from ..targets import resolve_target
 
 
 class HierarchyGraphService:

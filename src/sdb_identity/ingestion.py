@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Iterable
 
-from .hierarchy_matching import HierarchyMatchingService
+from .hierarchy.matching import HierarchyMatchingService
 from .service import AddRequest, AddResult, IdentityService
 from .update import UpdateService, UpdateSummary
 

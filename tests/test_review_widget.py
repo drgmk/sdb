@@ -12,7 +12,7 @@ from sdb_identity.catalogs.types import (
     CatalogCandidate,
     MeasurementValue,
 )
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.models.identity import (
     AstrometricSolution,
     ExternalIdentifier,

@@ -5,43 +5,43 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models.hierarchy import (
+from ..models.hierarchy import (
     HierarchySource,
     StructuralEdge,
     TargetSystem,
     TargetSystemMember,
 )
-from .hierarchy_graph import (
+from .graph import (
     HierarchyGraphDeriveResult,
     HierarchyGraphDiagnosticRow,
     HierarchyGraphEdgeRow,
     HierarchyGraphOverrideResult,
 )
-from .hierarchy_graph_service import HierarchyGraphService
-from .hierarchy_matching import (
+from .graph_service import HierarchyGraphService
+from .matching import (
     HierarchyMatchActionResult,
     HierarchyMatchResult,
     HierarchyMatchReviewRow,
     HierarchyMatchingService,
     HierarchyTargetMatchResult,
 )
-from .hierarchy_reporting import HierarchyReportingService
-from .hierarchy_sources import (
+from .reporting import HierarchyReportingService
+from .sources import (
     HierarchyImportResult,
     HierarchyPruneResult,
     HierarchySourceService,
 )
-from .hierarchy_structure import (
+from .structure import (
     HierarchyStatus,
     HierarchyStructureService,
     RelationshipSummary as RelationshipSummary,
     SystemMember as SystemMember,
 )
-from .hierarchy_system_context import HierarchySystemContextService
-from .hierarchy_target_context import (
+from .system_context import HierarchySystemContextService
+from .target_context import (
     HierarchyTargetContextService,
 )
-from .snapshots import SnapshotClient
+from ..snapshots import SnapshotClient
 
 
 class HierarchyService:

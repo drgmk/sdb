@@ -41,8 +41,8 @@ def measurement_assignment_proposals(
     proposal never changes the materialized assignment table.
     """
     if system_context is None or target_context_loader is None:
-        from .hierarchy_system_context import HierarchySystemContextService
-        from .hierarchy_target_context import HierarchyTargetContextService
+        from .hierarchy.system_context import HierarchySystemContextService
+        from .hierarchy.target_context import HierarchyTargetContextService
 
         if system_context is None:
             system_context = HierarchySystemContextService(

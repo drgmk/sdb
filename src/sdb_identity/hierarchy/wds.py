@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .hierarchy_records import (
+from .records import (
     ParsedHierarchyRecord,
     coords_from_hierarchy_id,
     delta_mag,

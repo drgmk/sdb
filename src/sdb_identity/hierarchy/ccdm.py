@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from .hierarchy_records import ParsedHierarchyRecord, coords_from_hierarchy_id, float_value
+from .records import ParsedHierarchyRecord, coords_from_hierarchy_id, float_value
 
 
 def parse_fixed_width(line: str) -> ParsedHierarchyRecord | None:

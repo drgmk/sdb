@@ -11,7 +11,7 @@ from sqlalchemy import func, inspect, select
 
 from sdb_identity.database import make_engine
 from sdb_identity.dirty import pending_export_targets
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService, RelationshipValue
 from sdb_identity.models.identity import (
     AstrometricSolution,
@@ -461,7 +461,7 @@ def test_hierarchy_photometry_context_prefers_accepted_candidate(session_factory
 
 
 def test_system_target_scope_respects_catalog_resolution():
-    from sdb_identity.hierarchy_photometry import photometry_scope_prediction
+    from sdb_identity.hierarchy.photometry import photometry_scope_prediction
 
     common = {
         "target_level": "system",

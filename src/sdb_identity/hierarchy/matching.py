@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .decisions import DecisionContext
-from .dirty import mark_export_dirty
-from .hierarchy_geometry import (
+from ..decisions import DecisionContext
+from ..dirty import mark_export_dirty
+from .geometry import (
     best_separation,
     position_usable_for_matching,
     record_positions,
@@ -20,9 +20,9 @@ from .hierarchy_geometry import (
     separation_arcsec,
     wds_record_has_unusable_separation,
 )
-from .identifiers import normalize_identifier
-from .models.identity import ExternalIdentifier, Target
-from .models.hierarchy import (
+from ..identifiers import normalize_identifier
+from ..models.identity import ExternalIdentifier, Target
+from ..models.hierarchy import (
     HierarchyMatchAction,
     HierarchyMatchCandidate,
     HierarchyRecord,
@@ -30,7 +30,7 @@ from .models.hierarchy import (
     TargetSystem,
     TargetSystemMember,
 )
-from .targets import resolve_target
+from ..targets import resolve_target
 
 
 @dataclass(frozen=True)

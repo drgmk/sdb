@@ -7,37 +7,37 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalogs.adapters.review_metadata import normalize_review_payload
-from .astrometry import angular_separation_arcsec
-from .hierarchy_identity_context import (
+from ..catalogs.adapters.review_metadata import normalize_review_payload
+from ..astrometry import angular_separation_arcsec
+from .identity_context import (
     target_semantic_identity,
     target_semantic_identity_summary,
 )
-from .hierarchy_photometry import target_photometry_context_summary
-from .hierarchy_semantics import component_label_from_identifier
-from .hierarchy_target_context import (
+from .photometry import target_photometry_context_summary
+from .semantics import component_label_from_identifier
+from .target_context import (
     HierarchyTargetContextService,
     candidate_projection,
 )
-from .identifiers import normalize_identifier
-from .models.identity import (
+from ..identifiers import normalize_identifier
+from ..models.identity import (
     AstrometricSolution,
     ExternalIdentifier,
     MatchCandidate,
     Submission,
     Target,
 )
-from .models.catalogs import CatalogRun, RawCatalogRow
-from .models.hierarchy import (
+from ..models.catalogs import CatalogRun, RawCatalogRow
+from ..models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     TargetSystemMember,
 )
-from .models.metadata import MetadataRun, SimbadMetadata
-from .providers import Astrometry
-from .system_photometry import SystemPhotometryState, load_system_photometry_state
-from .targets import resolve_target
-from .vocabulary import ProviderRunStatus
+from ..models.metadata import MetadataRun, SimbadMetadata
+from ..providers import Astrometry
+from ..system_photometry import SystemPhotometryState, load_system_photometry_state
+from ..targets import resolve_target
+from ..vocabulary import ProviderRunStatus
 
 
 class HierarchySystemContextService:
@@ -118,7 +118,7 @@ class HierarchySystemContextService:
             )
             catalog_neighbourhood = _system_catalog_neighbourhood(session, target_ids)
 
-            from .catalogs.associations import (
+            from ..catalogs.associations import (
                 catalog_coverage_by_target,
                 catalog_target_candidates,
             )
@@ -179,7 +179,7 @@ class HierarchySystemContextService:
                 ],
             }
 
-        from .system_expansion import preview_immediate_relatives
+        from .expansion import preview_immediate_relatives
 
         try:
             result["simbad_relative_preview"] = preview_immediate_relatives(
@@ -758,7 +758,7 @@ def _system_catalog_neighbourhood(
         sdbid: [] for sdbid in targets.values()
     }
 
-    from .catalogs.results import (
+    from ..catalogs.results import (
         effective_catalog_results,
         effective_catalog_selected_rows,
     )
@@ -841,7 +841,7 @@ def _identity_cross_candidates(
         return []
     source_index = _target_source_index(session, nearby_target_ids)
 
-    from .identity_results import effective_identity_candidate_ids
+    from ..identity_results import effective_identity_candidate_ids
 
     selected_ids = effective_identity_candidate_ids(session, target_ids=[target.id])
     rows = []

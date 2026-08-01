@@ -12,7 +12,7 @@ from sdb_identity.astrometry import propagate_to_epoch
 from sdb_identity.cli import main
 from sdb_identity.database import init_database, make_session_factory
 from sdb_identity.export import export_ipac
-from sdb_identity.hierarchy import HierarchyService
+from sdb_identity.hierarchy.service import HierarchyService
 from sdb_identity.models.catalogs import (
     CatalogDetection,
     NormalizedMeasurement,

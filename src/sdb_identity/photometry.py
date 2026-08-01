@@ -449,7 +449,7 @@ def photometry_review_queue(
     provider: str | None = None,
 ) -> list[dict[str, object]]:
     provider_value = None if provider is None else provider.strip().lower()
-    from .hierarchy_target_context import HierarchyTargetContextService
+    from .hierarchy.target_context import HierarchyTargetContextService
 
     hierarchy_rows = HierarchyTargetContextService(session_factory).photometry_review(
         target_references, provider=provider_value

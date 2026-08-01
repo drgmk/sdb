@@ -6,35 +6,35 @@ from dataclasses import asdict, dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .astrometry import angular_separation_arcsec
-from .decisions import DecisionContext
-from .dirty import mark_export_dirty
-from .hierarchy_structure import HierarchyStructureService
-from .hierarchy_target_context import HierarchyTargetContextService
-from .hierarchy_semantics import (
+from ..astrometry import angular_separation_arcsec
+from ..decisions import DecisionContext
+from ..dirty import mark_export_dirty
+from .structure import HierarchyStructureService
+from .target_context import HierarchyTargetContextService
+from .semantics import (
     component_label_from_identifier,
     simbad_component_relevance,
 )
-from .models.identity import ExternalIdentifier, Target
-from .models.metadata import MetadataRun, SimbadMetadata, SimbadRelationship
-from .models.hierarchy import (
+from ..models.identity import ExternalIdentifier, Target
+from ..models.metadata import MetadataRun, SimbadMetadata, SimbadRelationship
+from ..models.hierarchy import (
     StructuralEdge,
     TargetLifecycleAction,
     TargetSystem,
     TargetSystemMember,
 )
-from .providers import Astrometry
-from .identifiers import normalize_identifier
-from .service import (
+from ..providers import Astrometry
+from ..identifiers import normalize_identifier
+from ..service import (
     AddRequest,
     IdentityService,
     TargetRegistrar,
     UnresolvedTarget,
 )
-from .ingestion import TargetIngestionPlan
-from .target_lifecycle import set_target_lifecycle, target_lifecycle_status
-from .targets import resolve_target
-from .vocabulary import ProviderRunStatus, TargetRole, TargetState
+from ..ingestion import TargetIngestionPlan
+from ..target_lifecycle import set_target_lifecycle, target_lifecycle_status
+from ..targets import resolve_target
+from ..vocabulary import ProviderRunStatus, TargetRole, TargetState
 
 
 @dataclass(frozen=True)

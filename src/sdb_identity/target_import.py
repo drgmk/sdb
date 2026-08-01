@@ -6,8 +6,8 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hierarchy_matching import HierarchyMatchingService
-from .hierarchy_semantics import simbad_component_relevance
+from .hierarchy.matching import HierarchyMatchingService
+from .hierarchy.semantics import simbad_component_relevance
 from .ingestion import TargetIngestionPlan
 from .models.identity import ExternalIdentifier, Target
 from .models.metadata import MetadataRun, SimbadMetadata

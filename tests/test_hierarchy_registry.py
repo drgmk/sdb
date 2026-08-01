@@ -1,4 +1,4 @@
-from sdb_identity.hierarchy_registry import HIERARCHY_SOURCES, hierarchy_source
+from sdb_identity.hierarchy.registry import HIERARCHY_SOURCES, hierarchy_source
 
 
 def test_hierarchy_source_registry_is_explicit():

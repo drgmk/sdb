@@ -3,8 +3,8 @@ from __future__ import annotations
 from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hierarchy_graph import GRAPH_EDGE_STATUSES
-from .models.hierarchy import (
+from .graph import GRAPH_EDGE_STATUSES
+from ..models.hierarchy import (
     HierarchyMatchCandidate,
     HierarchyRecord,
     HierarchySource,

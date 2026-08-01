@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .hierarchy_ccdm import parse_fixed_width as parse_ccdm_fixed_width
-from .hierarchy_records import ParsedHierarchyRecord
-from .hierarchy_wds import parse_fixed_width as parse_wds_fixed_width
+from .ccdm import parse_fixed_width as parse_ccdm_fixed_width
+from .records import ParsedHierarchyRecord
+from .wds import parse_fixed_width as parse_wds_fixed_width
 
 
 @dataclass(frozen=True)

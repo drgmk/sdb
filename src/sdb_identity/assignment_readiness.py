@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from sqlalchemy.orm import Session, sessionmaker
 
 from .fitting_groups import fitting_group_report
-from .system_expansion import preview_immediate_relatives
+from .hierarchy.expansion import preview_immediate_relatives
 from .vocabulary import TargetRole, review_priority_rank
 
 
