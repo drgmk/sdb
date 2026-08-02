@@ -48,7 +48,10 @@ def test_catalog_overview_routes_are_structured_and_expandable(session_factory):
     page = client.get("/catalogs")
     assert page.status_code == 200
     assert "Catalog providers" in page.text
-    assert "<details>" in page.text
+    assert "class='catalog-provider'" in page.text
+    assert "queried on demand" in page.text
+    assert "local snapshots" in page.text
+    assert "Component handling" in page.text
     assert "I/259/suppl_2 is retained" in page.text
 
 

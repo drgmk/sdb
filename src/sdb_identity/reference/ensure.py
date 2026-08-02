@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..progress import NULL_PROGRESS, ProgressReporter
+
 
 def ensure_reference_snapshots(
     store: Any,
@@ -15,11 +17,13 @@ def ensure_reference_snapshots(
     max_age_days: float,
     check_only: bool = False,
     now: datetime | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> dict[str, object]:
     if max_age_days <= 0:
         raise ValueError("max_age_days must be positive")
     current_time = now or datetime.now(timezone.utc)
     cutoff = current_time - timedelta(days=max_age_days)
+    reporter = reporter or NULL_PROGRESS
     rows = []
     for provider in providers:
         snapshot = store.current_snapshot(provider)
@@ -41,10 +45,12 @@ def ensure_reference_snapshots(
             "action": "none",
         }
         if state != "current" and not check_only:
+            reporter.step(f"{provider}: {state}; fetching reference snapshot")
             result = store.fetch(
                 provider,
                 cache_path=cache_path,
                 refresh_cache=state == "stale",
+                reporter=reporter,
             )
             row.update({
                 "action": "checked" if result.unchanged else "fetched",
@@ -53,6 +59,11 @@ def ensure_reference_snapshots(
                 "row_count": result.row_count,
                 "unchanged": result.unchanged,
             })
+            reporter.step(
+                f"{provider}: {row['action']} {result.row_count:,} reference rows"
+            )
+        else:
+            reporter.step(f"{provider}: {state}")
         rows.append(row)
 
     counts = {

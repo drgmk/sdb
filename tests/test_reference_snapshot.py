@@ -48,6 +48,19 @@ from sdb_identity.reference.store import ReferenceStore
 from sdb_identity.service import AddRequest, IdentityService
 
 
+class RecordingReporter:
+    def __init__(self):
+        self.messages = []
+        self.descriptions = []
+
+    def step(self, message):
+        self.messages.append(message)
+
+    def iter(self, values, *, desc, total=None, unit="it"):
+        self.descriptions.append((desc, total, unit))
+        yield from values
+
+
 def test_reference_schema_declares_derived_row_indexes(tmp_path):
     store = ReferenceStore(tmp_path / "reference.sqlite")
     inspector = inspect(store.engine)
@@ -246,8 +259,11 @@ def test_reference_fetch_can_reuse_generic_snapshot_cache(tmp_path):
     cache = tmp_path / "cache.sqlite"
     client = FakeSnapshotClient()
     store = ReferenceStore(reference)
+    reporter = RecordingReporter()
 
-    first = store.fetch("gaspar13", client, cache_path=cache)
+    first = store.fetch(
+        "gaspar13", client, cache_path=cache, reporter=reporter
+    )
     assert first.unchanged is False
     assert client.fetch_count == 1
 
@@ -263,6 +279,17 @@ def test_reference_fetch_can_reuse_generic_snapshot_cache(tmp_path):
     assert (f70["unit"], f70["ucd"], f70["description"]) == (
         "mJy", "PHOT_FLUX_IR_60", "70um measured flux",
     )
+    assert reporter.messages == [f"gaspar13: downloading {GASPAR_CATALOG}"]
+    assert reporter.descriptions == [
+        (f"gaspar13: caching {GASPAR_MAIN_TABLE}", 1, "row"),
+        (f"gaspar13: caching {GASPAR_REFS_TABLE}", 2, "row"),
+        (f"gaspar13: storing cache {GASPAR_MAIN_TABLE}", 1, "row"),
+        (f"gaspar13: storing cache {GASPAR_REFS_TABLE}", 2, "row"),
+        (f"gaspar13: preparing {GASPAR_MAIN_TABLE}", 1, "row"),
+        (f"gaspar13: preparing {GASPAR_REFS_TABLE}", 2, "row"),
+        (f"gaspar13: ingesting {GASPAR_MAIN_TABLE}", 1, "row"),
+        (f"gaspar13: ingesting {GASPAR_REFS_TABLE}", 2, "row"),
+    ]
 
 
 def test_gaspar_adapter_matches_locally_and_resolves_references(tmp_path):

@@ -90,7 +90,11 @@ def build_target_workspace(
     navigation = None
     display_name = None
     if sample is not None:
-        queue_report = review_dashboard_report(session_factory, sample=sample)
+        queue_report = review_dashboard_report(
+            session_factory,
+            sample=sample,
+            catalog_providers=catalog_coverage_providers,
+        )
         display_name = next(
             (
                 str(row["display_name"])

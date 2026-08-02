@@ -12,6 +12,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .serialization import row_payload as _row_payload, safe_json as _safe_json
 from .catalogs.provenance import materialize_catalog_documentation
+from .progress import NULL_PROGRESS, ProgressReporter
 
 
 def utcnow():
@@ -134,8 +135,21 @@ def _table_metadata(table) -> dict[str, object]:
     return meta
 
 
-def _table_rows(table) -> tuple[dict[str, object], ...]:
-    return tuple(_row_payload(row) for row in table)
+def _table_rows(
+    table,
+    *,
+    reporter: ProgressReporter,
+    desc: str,
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        _row_payload(row)
+        for row in reporter.iter(
+            table,
+            desc=desc,
+            total=len(table),
+            unit="row",
+        )
+    )
 
 
 class SnapshotCache:
@@ -147,7 +161,12 @@ class SnapshotCache:
         self.sessions = sessionmaker(self.engine, expire_on_commit=False, future=True)
 
     def current_snapshot(
-        self, provider: str, catalog_id: str
+        self,
+        provider: str,
+        catalog_id: str,
+        *,
+        reporter: ProgressReporter | None = None,
+        progress_label: str | None = None,
     ) -> CachedSnapshotData | None:
         provider = provider.lower().strip()
         catalog_id = catalog_id.strip()
@@ -161,7 +180,13 @@ class SnapshotCache:
             )
             if source is None:
                 return None
-            return self._snapshot_data(session, source, unchanged=True)
+            return self._snapshot_data(
+                session,
+                source,
+                unchanged=True,
+                reporter=reporter,
+                progress_label=progress_label,
+            )
 
     def current_snapshot_for_catalog(
         self, catalog_id: str, *, provider: str | None = None
@@ -282,18 +307,27 @@ class SnapshotCache:
         readme: str,
         tables: Iterable[object],
         note: str | None = None,
+        reporter: ProgressReporter | None = None,
+        progress_label: str | None = None,
     ) -> CachedSnapshotData:
+        reporter = reporter or NULL_PROGRESS
         provider = provider.lower().strip()
         catalog_id = catalog_id.strip()
-        table_data = tuple(
-            CachedTableData(
-                name=_table_name(table, f"{catalog_id}/table{index + 1}"),
+        progress_label = progress_label or catalog_id
+        table_data = []
+        for index, table in enumerate(tables):
+            table_name = _table_name(table, f"{catalog_id}/table{index + 1}")
+            table_data.append(CachedTableData(
+                name=table_name,
                 description=_table_description(table),
                 metadata=_table_metadata(table),
-                rows=_table_rows(table),
-            )
-            for index, table in enumerate(tables)
-        )
+                rows=_table_rows(
+                    table,
+                    reporter=reporter,
+                    desc=f"{progress_label}: caching {table_name}",
+                ),
+            ))
+        table_data = tuple(table_data)
         canonical = _safe_json({
             "provider": provider,
             "catalog_id": catalog_id,
@@ -364,14 +398,30 @@ class SnapshotCache:
                 )
                 session.add(table_row)
                 session.flush()
-                for row_number, payload in enumerate(table.rows, start=1):
+                pending = []
+                for row_number, payload in enumerate(
+                    reporter.iter(
+                        table.rows,
+                        desc=f"{progress_label}: storing cache {table.name}",
+                        total=len(table.rows),
+                        unit="row",
+                    ),
+                    start=1,
+                ):
                     payload_json = _safe_json(payload)
-                    session.add(CachedRow(
+                    pending.append(CachedRow(
                         table_id=table_row.id,
                         row_number=row_number,
                         payload_json=payload_json,
                         row_sha256=hashlib.sha256(payload_json.encode()).hexdigest(),
                     ))
+                    if len(pending) >= 1000:
+                        session.add_all(pending)
+                        session.flush()
+                        pending.clear()
+                if pending:
+                    session.add_all(pending)
+                    session.flush()
             return CachedSnapshotData(
                 source_id=source.id,
                 provider=provider,
@@ -390,7 +440,11 @@ class SnapshotCache:
         source: CachedSource,
         *,
         unchanged: bool,
+        reporter: ProgressReporter | None = None,
+        progress_label: str | None = None,
     ) -> CachedSnapshotData:
+        reporter = reporter or NULL_PROGRESS
+        progress_label = progress_label or source.catalog_id
         tables = []
         for table in session.scalars(
             select(CachedTable)
@@ -399,10 +453,15 @@ class SnapshotCache:
         ):
             rows = tuple(
                 json.loads(row.payload_json)
-                for row in session.scalars(
-                    select(CachedRow)
-                    .where(CachedRow.table_id == table.id)
-                    .order_by(CachedRow.row_number)
+                for row in reporter.iter(
+                    session.scalars(
+                        select(CachedRow)
+                        .where(CachedRow.table_id == table.id)
+                        .order_by(CachedRow.row_number)
+                    ),
+                    desc=f"{progress_label}: loading cache {table.name}",
+                    total=table.row_count,
+                    unit="row",
                 )
             )
             tables.append(CachedTableData(

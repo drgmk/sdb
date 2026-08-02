@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.models.identity import ExternalIdentifier, Target
 from sdb_identity.photometry.assignments import assign_measurement_target
 from sdb_identity.review.dashboard import review_dashboard_report
@@ -10,6 +11,7 @@ from sdb_identity.samples.service import SampleService
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_review_actions import _wise_measurements
+from tests.test_catalog import FakeCatalog, candidate
 
 
 def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
@@ -109,7 +111,47 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
         "mixed_ownership_target_count": 1,
         "unassigned_target_count": 1,
         "no_photometry_target_count": 1,
+        "catalog_review_target_count": 0,
+        "catalog_review_result_count": 0,
         "detection_count": 3,
         "unassigned_detection_count": 1,
         "mixed_detection_count": 1,
     }
+
+
+def test_dashboard_makes_ambiguous_catalog_results_actionable(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    samples = SampleService(session_factory)
+    samples.create("catalog-review")
+    samples.add(
+        "catalog-review", target.sdbid,
+        actor="test", reason="catalog review fixture",
+    )
+    CatalogAcquisitionService(session_factory, {
+        "2mass": FakeCatalog([
+            candidate("one", ra=10.00010),
+            candidate("two", ra=10.00011),
+        ]),
+    }).refresh(target.target_id, "2mass")
+
+    report = review_dashboard_report(
+        session_factory,
+        sample="catalog-review",
+        catalog_providers=("2mass",),
+    )
+    row = report["rows"][0]
+
+    assert row["classification"] == "catalog_association_review"
+    assert row["priority"] == "high"
+    assert row["recommended_action"] == (
+        "review ambiguous catalog associations: 2mass"
+    )
+    assert row["catalog_review"] == [{
+        "provider": "2mass",
+        "status": "ambiguous",
+        "error": None,
+    }]
+    assert row["providers"][0]["review_status"] == "ambiguous"
+    assert report["summary"]["actionable_target_count"] == 1

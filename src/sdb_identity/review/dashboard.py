@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..catalogs.results import effective_catalog_results
 from ..photometry.readiness import assignment_readiness_report
 from ..fitting_groups import fitting_group_report
 from ..models.identity import ExternalIdentifier
-from ..vocabulary import INACTIVE_TARGET_STATES, ReviewPriority, review_priority_rank
+from ..vocabulary import (
+    INACTIVE_TARGET_STATES,
+    PROVIDER_FAILURE_STATUSES,
+    PROVIDER_REVIEW_STATUSES,
+    ReviewPriority,
+    review_priority_rank,
+)
 
 
 def review_dashboard_report(
     session_factory: sessionmaker[Session], *, sample: str,
+    catalog_providers: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """Summarize every selected sample target from current stored review state.
 
@@ -35,6 +44,11 @@ def review_dashboard_report(
     display_names = _target_display_names(
         session_factory, set(selected_targets),
     )
+    catalog_review_by_target = _catalog_review_by_target(
+        session_factory,
+        set(selected_targets),
+        catalog_providers=catalog_providers,
+    )
     measurements_by_target: dict[int, dict[int, dict[str, object]]] = defaultdict(dict)
     for measurement in graph["measurements"]:
         relevant_target_ids = set(measurement.get("encounter_target_ids") or [])
@@ -54,10 +68,11 @@ def review_dashboard_report(
         measurements = list(measurements_by_target.get(target_id, {}).values())
         detections = _detection_rows(measurements)
         scope = scope_by_target.get(target_id)
+        catalog_review = catalog_review_by_target.get(target_id, [])
         classification, priority, action = _target_classification(
-            target, detections, scope,
+            target, detections, scope, catalog_review,
         )
-        providers = _provider_summary(measurements)
+        providers = _provider_summary(measurements, catalog_review)
         rows.append({
             "target_id": target_id,
             "sdbid": target["sdbid"],
@@ -88,6 +103,7 @@ def review_dashboard_report(
             "providers": providers,
             "systems": target["systems"],
             "detections": detections,
+            "catalog_review": catalog_review,
             "importable_relative_count": (
                 0 if scope is None else scope["importable_relative_count"]
             ),
@@ -119,6 +135,12 @@ def review_dashboard_report(
             "no_photometry_target_count": sum(
                 row["detection_count"] == 0 for row in rows
             ),
+            "catalog_review_target_count": sum(
+                bool(row["catalog_review"]) for row in rows
+            ),
+            "catalog_review_result_count": sum(
+                len(row["catalog_review"]) for row in rows
+            ),
             "detection_count": sum(row["detection_count"] for row in rows),
             "unassigned_detection_count": sum(
                 row["unassigned_detection_count"] for row in rows
@@ -132,8 +154,52 @@ def review_dashboard_report(
             "all current sample members are listed, including clean and no-photometry targets",
             "dashboard states use accepted source associations and explicit attribution exceptions",
             "open a target to compute detailed identifier, position, hierarchy, and resolution proposals",
+            "configured missing, failed, and ambiguous catalog results remain actionable until resolved",
         ],
     }
+
+
+def _catalog_review_by_target(
+    session_factory: sessionmaker[Session],
+    target_ids: set[int],
+    *,
+    catalog_providers: Iterable[str] | None,
+) -> dict[int, list[dict[str, object]]]:
+    configured = (
+        None
+        if catalog_providers is None
+        else tuple(dict.fromkeys(str(value) for value in catalog_providers))
+    )
+    with session_factory() as session:
+        results = effective_catalog_results(
+            session,
+            target_ids,
+            providers=configured,
+        )
+        providers_by_target: dict[int, set[str]] = defaultdict(set)
+        if configured is None:
+            for target_id, provider in results:
+                providers_by_target[target_id].add(provider)
+        else:
+            for target_id in target_ids:
+                providers_by_target[target_id].update(configured)
+        review: dict[int, list[dict[str, object]]] = defaultdict(list)
+        for target_id in sorted(target_ids):
+            for provider in sorted(providers_by_target[target_id]):
+                result = results.get((target_id, provider))
+                if result is None:
+                    review[target_id].append({
+                        "provider": provider,
+                        "status": "missing",
+                        "error": None,
+                    })
+                elif result.status in PROVIDER_REVIEW_STATUSES:
+                    review[target_id].append({
+                        "provider": provider,
+                        "status": str(result.status),
+                        "error": result.error,
+                    })
+    return dict(review)
 
 
 def _target_display_names(
@@ -215,12 +281,32 @@ def _target_classification(
     target: dict[str, object],
     detections: list[dict[str, object]],
     scope: dict[str, object] | None,
+    catalog_review: list[dict[str, object]],
 ) -> tuple[str, str, str]:
     if scope is not None:
         return (
             str(scope["classification"]),
             str(scope["priority"]),
             str(scope["recommended_action"]),
+        )
+    incomplete = [
+        row for row in catalog_review
+        if row["status"] == "missing" or row["status"] in PROVIDER_FAILURE_STATUSES
+    ]
+    if incomplete:
+        providers = ", ".join(str(row["provider"]) for row in incomplete)
+        return (
+            "catalog_coverage_incomplete", "high",
+            f"complete or retry catalog coverage: {providers}",
+        )
+    ambiguous = [
+        row for row in catalog_review if row["status"] == "ambiguous"
+    ]
+    if ambiguous:
+        providers = ", ".join(str(row["provider"]) for row in ambiguous)
+        return (
+            "catalog_association_review", "high",
+            f"review ambiguous catalog associations: {providers}",
         )
     if any(row["assignment_state"] == "mixed_band_ownership" for row in detections):
         return (
@@ -259,12 +345,19 @@ def _target_classification(
 
 def _provider_summary(
     measurements: list[dict[str, object]],
+    catalog_review: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     result = []
-    for provider in sorted({str(row["provider"]) for row in measurements}):
+    providers = {str(row["provider"]) for row in measurements}
+    providers.update(str(row["provider"]) for row in catalog_review)
+    review_by_provider = {
+        str(row["provider"]): str(row["status"]) for row in catalog_review
+    }
+    for provider in sorted(providers):
         rows = [row for row in measurements if row["provider"] == provider]
         result.append({
             "provider": provider,
+            "review_status": review_by_provider.get(provider),
             "measurement_count": len(rows),
             "included_count": sum(not row["fit_excluded"] for row in rows),
             "detection_count": len({int(row["detection_id"]) for row in rows}),

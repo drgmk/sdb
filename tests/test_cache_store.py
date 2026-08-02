@@ -8,6 +8,18 @@ from sdb_identity.cache_store import SnapshotCache
 from sdb_identity.cli import main
 
 
+class RecordingReporter:
+    def __init__(self):
+        self.descriptions = []
+
+    def iter(self, values, *, desc, total=None, unit="it"):
+        self.descriptions.append((desc, total, unit))
+        yield from values
+
+    def step(self, message):
+        pass
+
+
 def test_snapshot_cache_stores_and_reuses_current_snapshot(tmp_path):
     path = tmp_path / "sdb-cache.sqlite"
     table = Table(
@@ -18,6 +30,7 @@ def test_snapshot_cache_stores_and_reuses_current_snapshot(tmp_path):
     table.meta["description"] = "Washington Double Star test rows"
 
     cache = SnapshotCache(path)
+    reporter = RecordingReporter()
     first = cache.store_snapshot(
         provider="vizier",
         catalog_id="B/wds",
@@ -25,6 +38,8 @@ def test_snapshot_cache_stores_and_reuses_current_snapshot(tmp_path):
         source_url="https://example.invalid/B/wds",
         readme="ReadMe v1",
         tables=[table],
+        reporter=reporter,
+        progress_label="wds",
     )
     second = cache.store_snapshot(
         provider="vizier",
@@ -51,6 +66,10 @@ def test_snapshot_cache_stores_and_reuses_current_snapshot(tmp_path):
         "name": "B/wds/wds",
         "row_count": 1,
     }]
+    assert reporter.descriptions == [
+        ("wds: caching B/wds/wds", 1, "row"),
+        ("wds: storing cache B/wds/wds", 1, "row"),
+    ]
 
 
 def test_snapshot_cache_summaries_and_cli_inspection(tmp_path, capsys):

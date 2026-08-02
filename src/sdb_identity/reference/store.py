@@ -21,6 +21,7 @@ from ..providers import ProviderError
 from ..catalogs.reference_definitions import SNAPSHOT_CATALOGS
 from ..serialization import safe_json as _safe_json
 from ..identifiers import normalize_identifier
+from ..progress import NULL_PROGRESS, ProgressReporter
 from ..snapshots import SnapshotClient, VizierSnapshotClient as AstroquerySnapshotClient
 from ..serialization import row_float, row_payload, row_text
 
@@ -274,7 +275,9 @@ class ReferenceStore:
         *,
         cache_path: str | Path | None = None,
         refresh_cache: bool = False,
+        reporter: ProgressReporter | None = None,
     ) -> SnapshotResult:
+        reporter = reporter or NULL_PROGRESS
         definition = SNAPSHOT_CATALOGS[adapter]
         client = client or (
             CdsBulkSnapshotClient()
@@ -294,9 +297,13 @@ class ReferenceStore:
             else:
                 cache = SnapshotCache(cache_path)
                 cached_snapshot = None if refresh_cache else cache.current_snapshot(
-                    provider, definition.catalog
+                    provider,
+                    definition.catalog,
+                    reporter=reporter,
+                    progress_label=adapter,
                 )
                 if cached_snapshot is None:
+                    reporter.step(f"{adapter}: downloading {definition.catalog}")
                     fetched_tables = client.fetch_tables(definition.catalog)
                     fetched_readme = client.fetch_readme(definition.catalog)
                     if not fetched_tables:
@@ -316,7 +323,11 @@ class ReferenceStore:
                         readme=fetched_readme,
                         tables=fetched_tables,
                         note=f"reference adapter {definition.adapter}",
+                        reporter=reporter,
+                        progress_label=adapter,
                     )
+                else:
+                    reporter.step(f"{adapter}: loading cached {definition.catalog}")
                 tables = _cached_tables_as_astropy(cached_snapshot)
                 readme = cached_snapshot.readme
                 source_url = cached_snapshot.source_url
@@ -339,7 +350,15 @@ class ReferenceStore:
                 "description": column.description,
                 "meta": column.meta,
             } for column in table.itercols()]
-            rows = [row_payload(row) for row in table]
+            rows = [
+                row_payload(row)
+                for row in reporter.iter(
+                    table,
+                    desc=f"{adapter}: preparing {table_name}",
+                    total=len(table),
+                    unit="row",
+                )
+            ]
             serialized.append({
                 "name": table_name,
                 "description": table.meta.get("description", ""),
@@ -430,7 +449,15 @@ class ReferenceStore:
                     session.flush()
                     pending.clear()
 
-                for position, payload in enumerate(item["rows"], start=1):
+                for position, payload in enumerate(
+                    reporter.iter(
+                        item["rows"],
+                        desc=f"{adapter}: ingesting {item['name']}",
+                        total=len(item["rows"]),
+                        unit="row",
+                    ),
+                    start=1,
+                ):
                     name = row_text(payload, definition.primary_identifier)
                     if item["name"] in definition.tables_for_matching:
                         ra_deg, dec_deg = definition.position(payload)

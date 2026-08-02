@@ -139,7 +139,8 @@ def render_queue_page(
 def render_catalogs_page(report: dict[str, object]) -> str:
     rows = []
     for provider in report["providers"]:
-        bands = ", ".join(
+        bands = ", ".join(band["name"] for band in provider["bands"]) or "—"
+        band_details = ", ".join(
             f"{band['name']} ({band['wavelength_micron']:g} µm)"
             for band in provider["bands"]
         ) or "—"
@@ -151,13 +152,16 @@ def render_catalogs_page(report: dict[str, object]) -> str:
             table_rows = "".join(
                 f"<li><code>{_e(table['name'])}</code>: "
                 f"{table['row_count']:,} rows"
-                f"{' (science)' if table['science'] else ' (retained only)'}</li>"
+                f"{' (used for matching)' if table['science'] else ' (context only)'}</li>"
                 for table in snapshot["tables"]
             )
+            fingerprint = str(snapshot["content_sha256"])
+            retrieved = str(snapshot["retrieved_at"]).replace("T", " ")[:16]
             snapshot_detail = (
-                f"<p><strong>Snapshot:</strong> {snapshot['row_count']:,} rows; "
-                f"retrieved {_e(snapshot['retrieved_at'])}; "
-                f"SHA-256 <code>{_e(snapshot['content_sha256'])}</code></p>"
+                f"<p class='catalog-snapshot'><strong>Local snapshot:</strong> "
+                f"{snapshot['row_count']:,} rows · downloaded {_e(retrieved)} UTC · "
+                f"fingerprint <code title='{_e(fingerprint)}'>"
+                f"{_e(fingerprint[:12])}…</code></p>"
                 f"<ul>{table_rows}</ul>"
             )
         caveats = "".join(
@@ -165,25 +169,38 @@ def render_catalogs_page(report: dict[str, object]) -> str:
         )
         details = f"""
 <div class="catalog-detail">
-  <p><strong>Science tables:</strong> {_e(science_tables)}<br>
-  <strong>Retained-only tables:</strong> {_e(retained_tables)}<br>
-  <strong>Identifier policy:</strong> {_e(provider['identifier_policy'])}<br>
-  <strong>Component policy:</strong> {_e(provider['component_policy'])}<br>
-  <strong>Epoch:</strong> {_e(provider['query_epoch'] if provider['query_epoch'] is not None else 'source identifier')} ·
-  <strong>query radius:</strong> {_e(str(provider['radius_arcsec']) + ' arcsec' if provider['radius_arcsec'] is not None else 'n/a')} ·
-  <strong>review radius:</strong> {_e(str(provider['review_radius_arcsec']) + ' arcsec' if provider['review_radius_arcsec'] is not None else 'n/a')}<br>
-  <strong>Bibliography:</strong> <code>{_e(provider['bibliography'] or '—')}</code></p>
+  <p><strong>Matching tables:</strong> {_e(science_tables)}<br>
+  <strong>Context tables:</strong> {_e(retained_tables)}<br>
+  <strong>Identifiers:</strong> {_e(provider['identifier_policy'])}<br>
+  <strong>Component handling:</strong> {_e(provider['component_policy'])}<br>
+  <strong>Position epoch:</strong> {_e(provider['query_epoch'] if provider['query_epoch'] is not None else 'not fixed')} ·
+  <strong>match radius:</strong> {_e(str(provider['radius_arcsec']) + ' arcsec' if provider['radius_arcsec'] is not None else 'not used')} ·
+  <strong>nearby review radius:</strong> {_e(str(provider['review_radius_arcsec']) + ' arcsec' if provider['review_radius_arcsec'] is not None else 'not used')}<br>
+  <strong>Photometry:</strong> {_e(band_details)}<br>
+  <strong>Reference:</strong> <code>{_e(provider['bibliography'] or '—')}</code></p>
   {snapshot_detail}
   {f'<ul class="warning-list">{caveats}</ul>' if caveats else ''}
 </div>"""
+        access = {
+            "remote_cone": "Cone search",
+            "remote_identifier": "Identifier query",
+            "reference_snapshot": "Local snapshot",
+        }.get(provider["acquisition_mode"], provider["acquisition_mode"])
+        local_state = {
+            "remote": "on demand",
+            "current": "available",
+            "missing": "missing",
+        }.get(provider["status"], provider["status"])
         rows.append(
-            f"<tr><td><details><summary><strong>{_e(provider['display_name'])}</strong> "
-            f"<code>{_e(provider['key'])}</code></summary>{details}</details></td>"
-            f"<td><a href='{_e(provider['vizier_url'])}' target='_blank' rel='noopener'>"
-            f"<code>{_e(provider['catalog'])}</code></a></td>"
-            f"<td>{_e(str(provider['acquisition_mode']).replace('_', ' '))}</td>"
-            f"<td>{_e(bands)}</td><td class='catalog-status-{_e(provider['status'])}'>"
-            f"{_e(provider['status'])}</td></tr>"
+            f"<details class='catalog-provider'><summary class='catalog-provider-summary'>"
+            f"<span class='catalog-provider-name'><strong>{_e(provider['display_name'])}</strong> "
+            f"<code>{_e(provider['key'])}</code></span>"
+            f"<span class='catalog-catalog'><a href='{_e(provider['vizier_url'])}' "
+            f"target='_blank' rel='noopener'><code>{_e(provider['catalog'])}</code></a></span>"
+            f"<span class='catalog-access'>{_e(access)}</span>"
+            f"<span class='catalog-bands'>{_e(bands)}</span>"
+            f"<span class='catalog-local-state catalog-status-{_e(provider['status'])}'>"
+            f"{_e(local_state)}</span></summary>{details}</details>"
         )
     body = _template(
         "catalogs.html",

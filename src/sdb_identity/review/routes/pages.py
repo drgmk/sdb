@@ -39,6 +39,7 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
         report = review_dashboard_report(
             context.session_factory,
             sample=context.sample,
+            catalog_providers=context.catalog_coverage_providers,
         )
         return render_queue_page(
             context.sample,
@@ -102,6 +103,7 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
         return review_dashboard_report(
             context.session_factory,
             sample=context.sample,
+            catalog_providers=context.catalog_coverage_providers,
         )
 
     @app.get("/catalogs", response_class=HTMLResponse)

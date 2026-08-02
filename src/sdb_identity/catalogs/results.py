@@ -35,6 +35,11 @@ class EffectiveCatalogResult:
             return self.selected_detection.source_id
         return self.run.selected_source_id
 
+    @property
+    def error(self) -> str | None:
+        """Return the acquisition error attached to the underlying run."""
+        return self.run.error
+
 
 def effective_catalog_selected_rows(
     session: Session,

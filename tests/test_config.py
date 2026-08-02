@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import json
+import os
 
 from sdb_identity.cli import main
 from sdb_identity.config import load_config
@@ -24,20 +25,24 @@ def test_config_layers_reference_defaults_and_mirrors(tmp_path, monkeypatch):
     for name in ("SDB_SIMBAD_SERVER", "SDB_VIZIER_SERVER", "SDB_ACTOR"):
         monkeypatch.delenv(name, raising=False)
 
-    value = load_config(config)
-    value.apply_environment_defaults()
+    try:
+        value = load_config(config)
+        value.apply_environment_defaults()
 
-    assert value.reference_providers(("hip2", "tdsc", "koen10")) == (
-        "hip2", "tdsc",
-    )
-    assert value.reference_max_age_days() == 45
-    assert value.catalog_providers(("2mass", "tycho2")) == (
-        "2mass", "tycho2",
-    )
-    assert value.sources == (config,)
-    assert __import__("os").environ["SDB_SIMBAD_SERVER"] == "simbad.example"
-    assert __import__("os").environ["SDB_VIZIER_SERVER"] == "vizier.example"
-    assert __import__("os").environ["SDB_ACTOR"] == "configured reviewer"
+        assert value.reference_providers(("hip2", "tdsc", "koen10")) == (
+            "hip2", "tdsc",
+        )
+        assert value.reference_max_age_days() == 45
+        assert value.catalog_providers(("2mass", "tycho2")) == (
+            "2mass", "tycho2",
+        )
+        assert value.sources == (config,)
+        assert os.environ["SDB_SIMBAD_SERVER"] == "simbad.example"
+        assert os.environ["SDB_VIZIER_SERVER"] == "vizier.example"
+        assert os.environ["SDB_ACTOR"] == "configured reviewer"
+    finally:
+        for name in ("SDB_SIMBAD_SERVER", "SDB_VIZIER_SERVER", "SDB_ACTOR"):
+            os.environ.pop(name, None)
 
 
 def test_reference_provider_default_expands_to_all(tmp_path):
@@ -80,7 +85,7 @@ def test_reference_ensure_fetches_only_missing_and_stale():
         def current_snapshot(self, provider):
             return self.snapshots.get(provider)
 
-        def fetch(self, provider, *, cache_path, refresh_cache):
+        def fetch(self, provider, *, cache_path, refresh_cache, reporter):
             self.fetches.append((provider, cache_path, refresh_cache))
             return SimpleNamespace(
                 snapshot_id=10 + len(self.fetches),
@@ -90,12 +95,15 @@ def test_reference_ensure_fetches_only_missing_and_stale():
             )
 
     store = FakeStore()
+    messages = []
+    reporter = SimpleNamespace(step=messages.append)
     result = ensure_reference_snapshots(
         store,
         ("current", "missing", "stale"),
         cache_path="cache.sqlite",
         max_age_days=30,
         now=now,
+        reporter=reporter,
     )
 
     assert result["summary"] == {
@@ -108,6 +116,13 @@ def test_reference_ensure_fetches_only_missing_and_stale():
     assert store.fetches == [
         ("missing", "cache.sqlite", False),
         ("stale", "cache.sqlite", True),
+    ]
+    assert messages == [
+        "current: current",
+        "missing: missing; fetching reference snapshot",
+        "missing: fetched 100 reference rows",
+        "stale: stale; fetching reference snapshot",
+        "stale: fetched 100 reference rows",
     ]
 
 

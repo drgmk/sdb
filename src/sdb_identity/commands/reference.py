@@ -135,6 +135,7 @@ def run_reference_command(context: CliContext) -> int:
                         None if args.no_cache else context.cache_database_path
                     ),
                     refresh_cache=args.refresh_cache,
+                    reporter=context.reporter,
                 )
             print(context.json(value.__dict__, sort_keys=True))
         elif args.reference_command == "ensure":
@@ -157,6 +158,7 @@ def run_reference_command(context: CliContext) -> int:
                     cache_path=context.cache_database_path,
                     max_age_days=max_age_days,
                     check_only=args.check,
+                    reporter=context.reporter,
                 )
             print(context.json(value, sort_keys=True))
         elif args.reference_command == "status":

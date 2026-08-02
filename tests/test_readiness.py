@@ -83,6 +83,27 @@ def test_readiness_reports_photometry_review_signals(session_factory):
     assert "pending_export" in kinds
 
 
+def test_readiness_reports_effective_ambiguous_catalog_result(session_factory):
+    target = _sample_target(session_factory)
+    CatalogAcquisitionService(session_factory, {
+        "2mass": FakeCatalog([
+            candidate("one", ra=10.00010),
+            candidate("two", ra=10.00011),
+        ]),
+    }).refresh(target.target_id, "2mass")
+
+    report = ReadinessService(session_factory).report(
+        "science", providers=("2mass",),
+    )
+
+    issue = next(
+        issue for issue in report.issues
+        if issue["kind"] == "provider_result"
+    )
+    assert issue["detail"] == "ambiguous"
+    assert issue["error"] is None
+
+
 def test_readiness_blocks_only_sample_relevant_unresolved_curated_rows(
     session_factory,
 ):
