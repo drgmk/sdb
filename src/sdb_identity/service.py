@@ -48,12 +48,22 @@ class AddRequest:
     dec_deg: float | None = None
     epoch: float = 2000.0
     command: str | None = None
+    pm_ra_cosdec_masyr: float | None = None
+    pm_dec_masyr: float | None = None
 
     def validate(self) -> None:
         if not self.name and (self.ra_deg is None or self.dec_deg is None):
             raise ValueError("provide a name or both --ra and --dec")
         if (self.ra_deg is None) != (self.dec_deg is None):
             raise ValueError("--ra and --dec must be provided together")
+        if (self.pm_ra_cosdec_masyr is None) != (self.pm_dec_masyr is None):
+            raise ValueError("proper motion requires both RA and Dec components")
+        if self.pm_ra_cosdec_masyr is not None and self.ra_deg is None:
+            raise ValueError("proper motion requires an input position")
+        if self.pm_ra_cosdec_masyr is not None and not all(math.isfinite(value) for value in (
+            self.pm_ra_cosdec_masyr, self.pm_dec_masyr,
+        )):
+            raise ValueError("proper-motion components must be finite")
         if self.ra_deg is not None:
             validate_position(self.ra_deg, self.dec_deg)
 
@@ -127,6 +137,8 @@ class IdentityResolver:
                 request.ra_deg,
                 request.dec_deg,
                 request.epoch,
+                pm_ra_cosdec_masyr=request.pm_ra_cosdec_masyr,
+                pm_dec_masyr=request.pm_dec_masyr,
                 source="input",
             )
 

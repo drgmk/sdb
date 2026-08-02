@@ -29,6 +29,10 @@ from ..models.catalogs import (
     RawCatalogRow,
 )
 from ..providers import Astrometry, ProviderError
+from ..target_astrometry import (
+    best_target_astrometry,
+    best_target_astrometry_map,
+)
 from ..targets import resolve_target
 from ..vocabulary import ProviderRunStatus
 
@@ -67,21 +71,7 @@ class CatalogAcquisitionService:
             solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
             if solution is None:
                 raise RuntimeError(f"target {target.sdbid} has no canonical astrometry")
-            native = Astrometry(
-                ra_deg=solution.ra_deg,
-                dec_deg=solution.dec_deg,
-                epoch=solution.epoch,
-                pm_ra_cosdec_masyr=solution.pm_ra_cosdec_masyr,
-                pm_dec_masyr=solution.pm_dec_masyr,
-                parallax_mas=solution.parallax_mas,
-                radial_velocity_kms=solution.radial_velocity_kms,
-                source=solution.source,
-                source_id=solution.source_id,
-                position_bibcode=solution.position_bibcode,
-                proper_motion_bibcode=solution.proper_motion_bibcode,
-                parallax_bibcode=solution.parallax_bibcode,
-                radial_velocity_bibcode=solution.radial_velocity_bibcode,
-            )
+            native = best_target_astrometry(session, target)
             query_astrometry = propagate_to_epoch(native, adapter.query_epoch)
             identifiers = tuple(session.scalars(
                 select(ExternalIdentifier.value)
@@ -342,7 +332,7 @@ class CatalogAcquisitionService:
             return tuple(self._context(reference, adapter) for reference in references)
         target_ids = [int(reference) for reference in references]
         targets_by_id: dict[int, Target] = {}
-        solutions_by_id: dict[int, AstrometricSolution] = {}
+        astrometry_by_target: dict[int, Astrometry] = {}
         identifiers_by_target: dict[int, list[str]] = {
             target_id: [] for target_id in target_ids
         }
@@ -351,17 +341,9 @@ class CatalogAcquisitionService:
                 chunk = target_ids[offset:offset + 500]
                 for target in session.scalars(select(Target).where(Target.id.in_(chunk))):
                     targets_by_id[target.id] = target
-            solution_ids = [
-                target.canonical_astrometry_id
-                for target in targets_by_id.values()
-                if target.canonical_astrometry_id is not None
-            ]
-            for offset in range(0, len(solution_ids), 500):
-                chunk = solution_ids[offset:offset + 500]
-                for solution in session.scalars(
-                    select(AstrometricSolution).where(AstrometricSolution.id.in_(chunk))
-                ):
-                    solutions_by_id[solution.id] = solution
+            astrometry_by_target = best_target_astrometry_map(
+                session, targets_by_id.values()
+            )
             for offset in range(0, len(target_ids), 500):
                 chunk = target_ids[offset:offset + 500]
                 for target_id, value in session.execute(
@@ -376,24 +358,9 @@ class CatalogAcquisitionService:
             target = targets_by_id.get(target_id)
             if target is None:
                 raise KeyError(f"target not found: {target_id}")
-            solution = solutions_by_id.get(target.canonical_astrometry_id)
-            if solution is None:
+            if target.canonical_astrometry_id is None:
                 raise RuntimeError(f"target {target.sdbid} has no canonical astrometry")
-            native = Astrometry(
-                ra_deg=solution.ra_deg,
-                dec_deg=solution.dec_deg,
-                epoch=solution.epoch,
-                pm_ra_cosdec_masyr=solution.pm_ra_cosdec_masyr,
-                pm_dec_masyr=solution.pm_dec_masyr,
-                parallax_mas=solution.parallax_mas,
-                radial_velocity_kms=solution.radial_velocity_kms,
-                source=solution.source,
-                source_id=solution.source_id,
-                position_bibcode=solution.position_bibcode,
-                proper_motion_bibcode=solution.proper_motion_bibcode,
-                parallax_bibcode=solution.parallax_bibcode,
-                radial_velocity_bibcode=solution.radial_velocity_bibcode,
-            )
+            native = astrometry_by_target[target.id]
             contexts.append(CatalogQueryContext(
                 target.id,
                 target.sdbid,
@@ -410,21 +377,7 @@ class CatalogAcquisitionService:
             solution = session.get(AstrometricSolution, target.canonical_astrometry_id)
             if solution is None:
                 raise RuntimeError(f"target {target.sdbid} has no canonical astrometry")
-            native = Astrometry(
-                ra_deg=solution.ra_deg,
-                dec_deg=solution.dec_deg,
-                epoch=solution.epoch,
-                pm_ra_cosdec_masyr=solution.pm_ra_cosdec_masyr,
-                pm_dec_masyr=solution.pm_dec_masyr,
-                parallax_mas=solution.parallax_mas,
-                radial_velocity_kms=solution.radial_velocity_kms,
-                source=solution.source,
-                source_id=solution.source_id,
-                position_bibcode=solution.position_bibcode,
-                proper_motion_bibcode=solution.proper_motion_bibcode,
-                parallax_bibcode=solution.parallax_bibcode,
-                radial_velocity_bibcode=solution.radial_velocity_bibcode,
-            )
+            native = best_target_astrometry(session, target)
             identifiers = tuple(session.scalars(
                 select(ExternalIdentifier.value)
                 .where(ExternalIdentifier.target_id == target.id)

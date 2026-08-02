@@ -36,6 +36,7 @@ from ..models.catalogs import (
 from ..models.hierarchy import HierarchyMatchCandidate, HierarchyRecord, StructuralEdge
 from ..models.metadata import SimbadMetadata
 from ..providers import Astrometry
+from ..target_astrometry import best_target_astrometry
 from ..targets import resolve_target
 from ..catalogs.ubv_components import decode_ubv_component
 from ..catalogs.tdsc_components import decode_tdsc_component
@@ -418,30 +419,9 @@ def _target_motion_solution(
     solution: AstrometricSolution | None = None,
 ) -> AstrometricSolution | Astrometry | None:
     solution = solution if solution is not None else _target_solution(session, target)
-    if solution is not None and solution.proper_motion_available:
-        return solution
-    metadata = session.scalar(
-        select(SimbadMetadata)
-        .where(
-            SimbadMetadata.target_id == target.id,
-            SimbadMetadata.pm_ra_cosdec_masyr.is_not(None),
-            SimbadMetadata.pm_dec_masyr.is_not(None),
-        )
-        .order_by(SimbadMetadata.id.desc())
-        .limit(1)
-    )
-    if metadata is None:
-        return solution
-    return Astrometry(
-        metadata.ra_deg,
-        metadata.dec_deg,
-        2000.0,
-        pm_ra_cosdec_masyr=metadata.pm_ra_cosdec_masyr,
-        pm_dec_masyr=metadata.pm_dec_masyr,
-        source="simbad metadata",
-        source_id=metadata.main_id,
-        proper_motion_bibcode=metadata.proper_motion_bibcode,
-    )
+    if solution is None:
+        return None
+    return best_target_astrometry(session, target)
 
 
 def _proper_motion_arrows(

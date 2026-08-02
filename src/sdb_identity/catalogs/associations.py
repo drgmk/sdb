@@ -15,7 +15,7 @@ from .policy import (
 from ..astrometry import angular_separation_arcsec
 from .measurements import current_catalog_detection_target_pairs
 from .results import effective_catalog_results
-from ..models.identity import AstrometricSolution, ExternalIdentifier, Target
+from ..models.identity import ExternalIdentifier, Target
 from ..models.catalogs import (
     CatalogDetection,
     CatalogDetectionProvenance,
@@ -25,6 +25,7 @@ from ..models.catalogs import (
     RawCatalogRow,
 )
 from ..providers import Astrometry
+from ..target_astrometry import best_target_astrometry_map
 from ..vocabulary import PROVIDER_FAILURE_STATUSES
 
 
@@ -503,36 +504,7 @@ def _target_astrometry(
     session: Session,
     targets: dict[int, Target],
 ) -> dict[int, Astrometry]:
-    solution_ids = {
-        target.canonical_astrometry_id
-        for target in targets.values()
-        if target.canonical_astrometry_id is not None
-    }
-    solutions = {
-        solution.id: solution
-        for solution in session.scalars(
-            select(AstrometricSolution).where(
-                AstrometricSolution.id.in_(solution_ids)
-            )
-        )
-    }
-    result = {}
-    for target in targets.values():
-        solution = solutions.get(target.canonical_astrometry_id)
-        result[target.id] = Astrometry(
-            target.ra2000_deg if solution is None else solution.ra_deg,
-            target.dec2000_deg if solution is None else solution.dec_deg,
-            2000.0 if solution is None else solution.epoch,
-            pm_ra_cosdec_masyr=(
-                None if solution is None else solution.pm_ra_cosdec_masyr
-            ),
-            pm_dec_masyr=(
-                None if solution is None else solution.pm_dec_masyr
-            ),
-            source="sdb" if solution is None else solution.source,
-            source_id=target.sdbid if solution is None else solution.source_id,
-        )
-    return result
+    return best_target_astrometry_map(session, targets.values())
 
 
 def _payload(value: str | None) -> dict[str, object]:

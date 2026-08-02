@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 
 import pytest
 from sqlalchemy import delete, select
 
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
+from sdb_identity.astrometry import angular_separation_arcsec
 from sdb_identity.catalogs.types import (
     CatalogCandidate,
     CatalogQueryContext,
@@ -30,9 +31,11 @@ from sdb_identity.models.catalogs import (
 )
 from sdb_identity.models.exports import ExportDirtyTarget
 from sdb_identity.models.identity import AstrometricSolution, ExternalIdentifier
+from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
-from sdb_identity.providers import ProviderError
+from sdb_identity.providers import Astrometry, ProviderError
 from sdb_identity.service import AddRequest, IdentityService
+from tests.test_metadata import FakeMetadataProvider, snapshot
 
 
 @dataclass
@@ -368,6 +371,48 @@ def test_query_coordinates_are_propagated_to_catalog_epoch(session_factory):
     CatalogAcquisitionService(session_factory, {"2mass": adapter}).refresh(target.sdbid, "2mass")
     assert adapter.contexts[0].astrometry.epoch == 1999.3
     assert adapter.contexts[0].astrometry.ra_deg < 10.0
+
+
+def test_query_uses_current_simbad_motion_when_canonical_motion_is_missing(
+    session_factory,
+):
+    target = add_target(
+        session_factory,
+        ra_deg=4.59535403,
+        dec_deg=44.0229548,
+    )
+    value = replace(
+        snapshot(),
+        ra_deg=4.5953540832,
+        dec_deg=44.0229549865522,
+        pm_ra_cosdec_masyr=2891.518,
+        pm_dec_masyr=411.832,
+    )
+    MetadataService(
+        session_factory,
+        FakeMetadataProvider(MetadataQueryResult("match", (value,))),
+    ).refresh(target.sdbid)
+
+    adapter = FakeCatalog([])
+    adapter.query_epoch = 1999.33
+    CatalogAcquisitionService(
+        session_factory, {"2mass": adapter}
+    ).refresh(target.sdbid, "2mass")
+
+    context = adapter.contexts[0].astrometry
+    assert context.epoch == 1999.33
+    assert context.proper_motion_available
+    assert context.source == "simbad metadata"
+    candidate_position = Astrometry(
+        4.594036,
+        44.022842,
+        1998.84052019165,
+    )
+    assert angular_separation_arcsec(
+        context,
+        candidate_position,
+        epoch=candidate_position.epoch,
+    ) == pytest.approx(0.093, abs=0.002)
 
 
 def test_bulk_refresh_chunks_queries_and_reuses_normal_scoring(session_factory):

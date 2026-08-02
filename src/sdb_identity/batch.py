@@ -582,10 +582,30 @@ class BatchService:
         ra_text = (data.get("ra", "") or data.get("ra_deg", "")).strip()
         dec_text = (data.get("dec", "") or data.get("dec_deg", "")).strip()
         epoch_text = data.get("epoch", "").strip()
+        pmra_text = (
+            data.get("pmra_masyr", "")
+            or data.get("pm_ra_cosdec_masyr", "")
+            or data.get("pmra", "")
+        ).strip()
+        pmdec_text = (
+            data.get("pmdec_masyr", "")
+            or data.get("pm_dec_masyr", "")
+            or data.get("pmdec", "")
+        ).strip()
         ra = float(ra_text) if ra_text else None
         dec = float(dec_text) if dec_text else None
         epoch = float(epoch_text) if epoch_text else 2000.0
-        return AddRequest(name=name, ra_deg=ra, dec_deg=dec, epoch=epoch, command="batch import")
+        pmra = float(pmra_text) if pmra_text else None
+        pmdec = float(pmdec_text) if pmdec_text else None
+        return AddRequest(
+            name=name,
+            ra_deg=ra,
+            dec_deg=dec,
+            epoch=epoch,
+            command="batch import",
+            pm_ra_cosdec_masyr=pmra,
+            pm_dec_masyr=pmdec,
+        )
 
     @staticmethod
     def _delimiter(path: Path, text: str) -> str:

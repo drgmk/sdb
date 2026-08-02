@@ -8,7 +8,7 @@ from sdb_identity.batch import BatchService
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.metadata import MetadataQueryResult, MetadataService
 from sdb_identity.models.batch import ImportItem, ImportJob, ImportRun
-from sdb_identity.models.identity import Target
+from sdb_identity.models.identity import AstrometricSolution, Target
 from sdb_identity.providers import ProviderError
 from sdb_identity.service import IdentityService
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, simbad_result
@@ -71,6 +71,25 @@ def test_csv_batch_runs_dependency_order_and_deduplicates_targets(session_factor
         assert session.query(ImportItem).count() == 3
         assert session.query(ImportJob).count() == 9
         assert all(item.target_id is not None for item in session.scalars(select(ImportItem)))
+
+
+def test_csv_batch_preserves_optional_proper_motion(session_factory, tmp_path):
+    path = write_targets(
+        tmp_path / "moving.csv",
+        "name,ra_deg,dec_deg,pmra_masyr,pmdec_masyr\n"
+        ",4.59535403,44.0229548,2891.518,411.832\n",
+    )
+    service = BatchService(session_factory, **factories(session_factory))
+
+    created = service.create(path)
+    summary = service.execute(created.run_id)
+
+    assert summary.status == "completed"
+    with session_factory() as session:
+        solution = session.scalars(select(AstrometricSolution)).one()
+        assert solution.pm_ra_cosdec_masyr == 2891.518
+        assert solution.pm_dec_masyr == 411.832
+        assert solution.proper_motion_available
 
 
 def test_identity_stage_batches_simbad_name_resolution(session_factory, tmp_path):
