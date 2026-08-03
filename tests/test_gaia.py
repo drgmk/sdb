@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from astropy.table import Table
 from sqlalchemy import select
 
 from sdb_identity.catalogs.adapters.gaia import GaiaDr3Adapter
@@ -25,22 +24,6 @@ class FakeVizier:
     def query_constraints(self, **constraints):
         self.calls.append(constraints)
         return [self.rows] if self.rows else []
-
-
-class FakeGaiaTap:
-    def __init__(self, rows):
-        self.rows = rows
-        self.calls = []
-
-    def launch_job_async(self, query, **kwargs):
-        self.calls.append((query, kwargs))
-        rows = self.rows
-
-        class Job:
-            def get_results(self):
-                return rows
-
-        return Job()
 
 
 def gaia_row(**values):
@@ -150,13 +133,10 @@ def test_gaia_query_without_an_established_source_id_is_no_match():
     assert client.calls == []
 
 
-def test_gaia_bulk_query_uploads_ids_and_maps_rows_to_targets():
-    row = gaia_row(input_target_id=7, bp_rp_excess_factor=1.12)
-    row.pop("E(BP/RP)")
-    table = Table(rows=[tuple(row.values())], names=tuple(row.keys()))
-    client = FakeGaiaTap(table)
+def test_gaia_query_many_uses_bounded_vizier_source_id_lookups():
+    client = FakeVizier([gaia_row()])
     adapter = GaiaDr3Adapter()
-    adapter.create_bulk_client = lambda: client
+    adapter.create_client = lambda: client
     contexts = (
         CatalogQueryContext(
             7, "with-gaia", Astrometry(10, -20, 2016),
@@ -171,13 +151,9 @@ def test_gaia_bulk_query_uploads_ids_and_maps_rows_to_targets():
 
     assert [candidate.source_id for candidate in result[7]] == ["123456789"]
     assert result[8] == []
-    query, kwargs = client.calls[0]
-    assert "JOIN gaiadr3.gaia_source" in query
-    assert "classprob_dsc_combmod_star AS PSS" in query
-    assert kwargs["upload_table_name"] == "targets"
-    assert list(kwargs["upload_resource"]["input_target_id"]) == [7]
+    assert client.calls == [{"catalog": "I/355/gaiadr3", "Source": "123456789"}]
     provenance = result[7][0].provenance[0]
-    assert provenance.service == "Gaia TAP"
+    assert provenance.service == "VizieR"
     assert provenance.table_id == "I/355/gaiadr3"
     assert "gea.esac" not in provenance.access_url
     assert provenance.access_url.endswith(

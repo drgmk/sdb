@@ -22,7 +22,10 @@ class ReviewField:
 
 @dataclass(frozen=True)
 class PositionUncertainty:
-    """Provider-declared positional uncertainty columns and their units."""
+    """Provider-declared positional uncertainty columns and their units.
+
+    Position angles, when present, are degrees east of north.
+    """
 
     major_columns: tuple[str, ...]
     minor_columns: tuple[str, ...]
@@ -124,12 +127,15 @@ def normalize_review_payload(
     from .gaia import GaiaDr3Adapter
     from .twomass import TwoMassAdapter
     from .tycho2 import Tycho2Adapter
+    from .reference import IrasFscSnapshotAdapter, IrasPscSnapshotAdapter
 
     adapters = {
         AllWiseAdapter.name: AllWiseAdapter,
         GaiaDr3Adapter.name: GaiaDr3Adapter,
         TwoMassAdapter.name: TwoMassAdapter,
         Tycho2Adapter.name: Tycho2Adapter,
+        "iras_psc": IrasPscSnapshotAdapter,
+        "iras_fsc": IrasFscSnapshotAdapter,
     }
     adapter = adapters.get(provider)
     if adapter is None:

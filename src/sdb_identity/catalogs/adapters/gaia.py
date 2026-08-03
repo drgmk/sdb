@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
-from astropy.table import Table
 from astroquery.vizier import Vizier
 
 from ...astroquery_config import configure_vizier_class
@@ -32,6 +32,7 @@ class GaiaDr3Adapter:
     release = _PROVIDER.catalog
     query_epoch = _PROVIDER.query_epoch
     timeout_seconds = 30.0
+    query_many_workers = 4
     bibcode = _PROVIDER.bibliography
     # Native photometric bands and their flux/quality support columns.
     bands = (
@@ -80,11 +81,6 @@ class GaiaDr3Adapter:
         configure_vizier_class(Vizier)
         return Vizier(columns=["**"], row_limit=1)
 
-    def create_bulk_client(self):
-        from astroquery.gaia import Gaia
-
-        return Gaia
-
     @staticmethod
     def source_id(context: CatalogQueryContext) -> str | None:
         for identifier in context.identifiers:
@@ -127,61 +123,32 @@ class GaiaDr3Adapter:
         self, contexts: tuple[CatalogQueryContext, ...]
     ) -> dict[int, list[CatalogCandidate]]:
         result = {context.target_id: [] for context in contexts}
-        rows = [
-            (context.target_id, int(source_id))
-            for context in contexts
-            if (source_id := self.source_id(context)) is not None
-        ]
-        if not rows:
+        selected = tuple(
+            context for context in contexts if self.source_id(context) is not None
+        )
+        if not selected:
             return result
-        # Bulk TAP lookup of exactly the established Gaia source IDs.
-        upload = Table(rows=rows, names=("input_target_id", "source_id"))
-        query = """
-            SELECT t.input_target_id, g.source_id AS Source,
-                   g.ra AS RA_ICRS, g.dec AS DE_ICRS,
-                   g.ra_error AS e_RA_ICRS, g.dec_error AS e_DE_ICRS,
-                   g.phot_g_mean_mag AS Gmag,
-                   1.0857362047581294*g.phot_g_mean_flux_error/g.phot_g_mean_flux AS e_Gmag,
-                   g.phot_g_mean_flux AS FG, g.phot_g_mean_flux_error AS e_FG,
-                   g.phot_g_n_obs AS o_Gmag,
-                   g.phot_bp_mean_mag AS BPmag,
-                   1.0857362047581294*g.phot_bp_mean_flux_error/g.phot_bp_mean_flux AS e_BPmag,
-                   g.phot_bp_mean_flux AS FBP, g.phot_bp_mean_flux_error AS e_FBP,
-                   g.phot_bp_n_obs AS o_BPmag,
-                   g.phot_bp_n_contaminated_transits AS NBPcont,
-                   g.phot_bp_n_blended_transits AS NBPblend,
-                   g.phot_rp_mean_mag AS RPmag,
-                   1.0857362047581294*g.phot_rp_mean_flux_error/g.phot_rp_mean_flux AS e_RPmag,
-                   g.phot_rp_mean_flux AS FRP, g.phot_rp_mean_flux_error AS e_FRP,
-                   g.phot_rp_n_obs AS o_RPmag,
-                   g.phot_rp_n_contaminated_transits AS NRPcont,
-                   g.phot_rp_n_blended_transits AS NRPblend,
-                   g.phot_bp_rp_excess_factor AS bp_rp_excess_factor,
-                   g.classprob_dsc_combmod_star AS PSS
-            FROM tap_upload.targets AS t
-            JOIN gaiadr3.gaia_source AS g ON g.source_id=t.source_id
-        """
-        client = self.create_bulk_client()
-        try:
-            job = client.launch_job_async(
-                query,
-                upload_resource=upload,
-                upload_table_name="targets",
-                dump_to_file=False,
-            )
-            returned = job.get_results()
-        except Exception as error:
-            raise ProviderError(
-                f"{self.display_name} bulk Gaia TAP query failed: {error}",
-                transient=True,
-            ) from error
-        for row in returned:
-            target_id = int(row["input_target_id"])
-            result.setdefault(target_id, []).append(self._with_provenance(
-                self.parse_row(row),
-                service="Gaia TAP",
-                table_id="gaiadr3.gaia_source",
-            ))
+        # Use the same bounded VizieR source-ID lookup as the single-target path.
+        # Astroquery's asynchronous Gaia TAP jobs do not honour the adapter's
+        # HTTP timeout while polling and can otherwise strand a whole batch.
+        max_workers = max(1, min(self.query_many_workers, len(selected)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.query, context): context
+                for context in selected
+            }
+            for future in as_completed(futures):
+                context = futures[future]
+                try:
+                    result[context.target_id] = future.result()
+                except ProviderError:
+                    raise
+                except Exception as error:
+                    raise ProviderError(
+                        f"{self.display_name} VizieR query_many failed for "
+                        f"{context.sdbid}: {error}",
+                        transient=True,
+                    ) from error
         return result
 
     @classmethod

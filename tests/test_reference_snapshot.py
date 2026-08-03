@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 
 import astropy.units as u
+import pytest
 from astropy.table import Column, Table
 from sqlalchemy import inspect, select
 
@@ -449,6 +451,13 @@ def test_iras_psc_full_snapshot_normalizes_resolution_quality_and_ellipse(tmp_pa
     ))
     assert len(candidates) == 1
     assert candidates[0].payload["Major"] == 16
+    assert candidates[0].payload["_sdb_review"]["position_uncertainty"] == {
+        "major_arcsec": 16.0,
+        "minor_arcsec": 4.0,
+        "kind": "error_ellipse",
+        "source_columns": ["Major", "Minor", "PosAng"],
+        "position_angle_deg": 0.0,
+    }
     values = {value.band: value for value in candidates[0].measurements}
     assert values["IRAS12"].resolution_major_arcsec == 30.0
     assert values["IRAS100"].resolution_major_arcsec == 120.0
@@ -563,6 +572,68 @@ def test_iras_ellipse_score_uses_orientation_and_handles_ra_wrap():
     )
     assert IrasPscSnapshotAdapter.score_candidate(east, candidate, 7.2) > 0.9
     assert IrasPscSnapshotAdapter.score_candidate(north, candidate, 8.0) < 0.001
+
+
+def test_iras_unique_candidate_is_accepted_within_three_sigma(tmp_path):
+    from sdb_identity.catalogs.matching import match_catalog_candidates
+
+    adapter = object.__new__(IrasPscSnapshotAdapter)
+    adapter.query_epoch = 1983.5
+    candidate = CatalogCandidate(
+        "IRAS test", 10.0, -20.0, 1983.5,
+        {"Major": 20, "Minor": 2, "PosAng": 90},
+    )
+    context = CatalogQueryContext(
+        1,
+        "east",
+        Astrometry(10.0 + 50.0 / (3600.0 * math.cos(math.radians(20.0))), -20.0, 1983.5),
+        (),
+    )
+
+    matched = match_catalog_candidates(
+        adapter,
+        context,
+        [candidate],
+        acceptance_score=0.5,
+        acceptance_margin=0.15,
+        score_scale_arcsec=2.0,
+    )
+
+    assert matched.candidates[0].score == pytest.approx(math.exp(-0.5 * 2.5**2))
+    assert matched.selected_index == 0
+
+
+def test_iras_competing_candidates_still_require_normal_score_margin(tmp_path):
+    from sdb_identity.catalogs.matching import match_catalog_candidates
+
+    adapter = object.__new__(IrasPscSnapshotAdapter)
+    adapter.query_epoch = 1983.5
+    context = CatalogQueryContext(
+        1, "target", Astrometry(10.0, -20.0, 1983.5), (),
+    )
+    candidates = [
+        CatalogCandidate(
+            label, ra, -20.0, 1983.5,
+            {"Major": 20, "Minor": 2, "PosAng": 90},
+        )
+        for label, ra in (
+            ("near", 10.0 + 20.0 / (3600.0 * math.cos(math.radians(20.0)))),
+            ("runner", 10.0 + 21.0 / (3600.0 * math.cos(math.radians(20.0)))),
+        )
+    ]
+
+    matched = match_catalog_candidates(
+        adapter,
+        context,
+        candidates,
+        acceptance_score=0.5,
+        acceptance_margin=0.15,
+        score_scale_arcsec=2.0,
+    )
+
+    assert matched.candidates[0].score >= adapter.acceptance_score
+    assert matched.candidates[0].score - matched.candidates[1].score < 0.15
+    assert matched.selected_index is None
 
 
 def test_snapshot_alias_index_finds_alternate_identifier_without_spatial_scan(tmp_path):

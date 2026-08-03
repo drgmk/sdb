@@ -18,6 +18,39 @@ _HIERARCHY_VIZIER_LOCATORS = {
 }
 
 
+def _uncertainty_ellipse_xy(
+    x_center: float,
+    y_center: float,
+    major_arcsec: float,
+    minor_arcsec: float,
+    position_angle_deg: float | None,
+    *,
+    samples: int = 96,
+) -> tuple[list[float], list[float]]:
+    """Project catalog semi-axes with PA measured east of north."""
+    # Without a catalog PA, retain the previous east-west major-axis display.
+    angle = math.radians(
+        90.0 if position_angle_deg is None else position_angle_deg
+    )
+    sin_angle = math.sin(angle)
+    cos_angle = math.cos(angle)
+    phases = [2.0 * math.pi * index / samples for index in range(samples + 1)]
+    return (
+        [
+            x_center
+            + major_arcsec * sin_angle * math.cos(phase)
+            + minor_arcsec * cos_angle * math.sin(phase)
+            for phase in phases
+        ],
+        [
+            y_center
+            + major_arcsec * cos_angle * math.cos(phase)
+            - minor_arcsec * sin_angle * math.sin(phase)
+            for phase in phases
+        ],
+    )
+
+
 def write_review_sky_html(view: ReviewSkyView, output: str | Path) -> Path:
     path = Path(output)
     path.write_text(render_review_sky_html(view), encoding="utf-8")
@@ -122,6 +155,50 @@ def render_review_sky_html(
         return f"{point['provider']} {point_display_id(point)}"
 
     figure = go.Figure()
+    for point in payload["points"]:
+        major = point.get("uncertainty_major_arcsec")
+        if major is None:
+            continue
+        minor = point.get("uncertainty_minor_arcsec") or major
+        position_angle = point.get("uncertainty_position_angle_deg")
+        x_values, y_values = _uncertainty_ellipse_xy(
+            float(point["x_arcsec"]),
+            float(point["y_arcsec"]),
+            float(major),
+            float(minor),
+            None if position_angle is None else float(position_angle),
+        )
+        angle_label = (
+            ""
+            if position_angle is None
+            else (
+                f"<br>PA {_compact_display_value(float(position_angle))}° "
+                "east of north"
+            )
+        )
+        label = (
+            f"{point['provider']} {point_display_id(point)}<br>"
+            f"position uncertainty: {_compact_display_value(float(major))}″ × "
+            f"{_compact_display_value(float(minor))}″{angle_label}"
+        )
+        figure.add_trace(go.Scatter(
+            x=x_values,
+            y=y_values,
+            mode="lines",
+            name=f"position uncertainty / {point['provider']}",
+            text=label,
+            meta={"review_kind": "line", "point_index": point["index"]},
+            line={"color": "rgba(37, 99, 235, 0.42)", "width": 1, "dash": "dash"},
+            fill="toself",
+            fillcolor="rgba(37, 99, 235, 0.04)",
+            opacity=0.95,
+            showlegend=False,
+            hovertemplate=(
+                "%{text}<br>x=%{x:.2f}″ east<br>y=%{y:.2f}″ north"
+                "<extra>position uncertainty</extra>"
+            ),
+        ))
+
     for (provider, status), points in grouped.items():
         first = points[0]
         figure.add_trace(go.Scatter(
@@ -330,23 +407,6 @@ def render_review_sky_html(
             "fillcolor": "rgba(17, 24, 39, 0.03)",
         }
     ]
-    for point in payload["points"]:
-        major = point.get("uncertainty_major_arcsec")
-        minor = point.get("uncertainty_minor_arcsec") or major
-        if major is None or minor is None:
-            continue
-        shapes.append({
-            "type": "circle",
-            "xref": "x",
-            "yref": "y",
-            "x0": point["x_arcsec"] - major,
-            "x1": point["x_arcsec"] + major,
-            "y0": point["y_arcsec"] - minor,
-            "y1": point["y_arcsec"] + minor,
-            "line": {"color": "rgba(37, 99, 235, 0.35)", "width": 1, "dash": "dash"},
-            "fillcolor": "rgba(37, 99, 235, 0.04)",
-        })
-
     label_annotations = [
         {
             "x": point["x_arcsec"],
@@ -837,7 +897,7 @@ def render_review_sky_html(
     }});
     function showDetails(point) {{
       const pm = point.pm_ra_cosdec_masyr == null || point.pm_dec_masyr == null ? "" : `${{displayNumber(point.pm_ra_cosdec_masyr)}}, ${{displayNumber(point.pm_dec_masyr)}} mas/yr (${{point.pm_source || "unknown"}})`;
-      const uncertainty = point.uncertainty_major_arcsec == null ? "" : `${{displayNumber(point.uncertainty_major_arcsec)}} × ${{displayNumber(point.uncertainty_minor_arcsec ?? point.uncertainty_major_arcsec)}} arcsec`;
+      const uncertainty = point.uncertainty_major_arcsec == null ? "" : `${{displayNumber(point.uncertainty_major_arcsec)}} × ${{displayNumber(point.uncertainty_minor_arcsec ?? point.uncertainty_major_arcsec)}} arcsec${{point.uncertainty_position_angle_deg == null ? "" : `; PA ${{displayNumber(point.uncertainty_position_angle_deg)}}° east of north`}}`;
       const shortRows = [["provider", point.provider], ["status", point.status], ["separation", `${{displayNumber(point.separation_arcsec)}} arcsec`], ["score", point.score == null ? "" : displayNumber(point.score)], ["offset", `${{displayNumber(point.x_arcsec)}}\" east, ${{displayNumber(point.y_arcsec)}}\" north`], ["native epoch", point.native_epoch == null ? "" : displayNumber(point.native_epoch)], ["display epoch", point.display_epoch == null ? "" : displayNumber(point.display_epoch)], ["kind", point.kind], ["accepted", point.accepted ? "yes" : "no"], ["target ID", point.target_id ?? ""], ["detection ID", point.detection_id ?? ""], ["run ID", point.run_id ?? ""], ["raw row ID", point.raw_row_id ?? ""], ["candidate ID", point.candidate_id ?? ""]];
       const longRows = [["ID", sourceLink(pointDisplayId(point), point.provenance), true], ["catalog component", point.catalog_component || ""], ["catalog query target", point.run_target_sdbid ? targetMainId(point.run_target_sdbid) : ""], ["linked targets", (point.linked_target_sdbids || []).map(value => targetMainId(value)).join("; ")], ["cross-match reason", point.cross_candidate_reason || ""], ["photometry", listValue(point.photometry)], ["photometry beams", beamValue(point.photometry_beams)], ["attributes", listValue(point.attributes)], ["proper motion", pm], ["position uncertainty", uncertainty], ["note", point.note || ""]];
       const column = rows => `<dl class="detail-list">${{rows.filter(([,value]) => value !== "" && value != null).map(([key,value,html]) => `<div class="detail-row"><dt><code>${{escapeHtml(String(key))}}</code></dt><dd>${{html ? value : escapeHtml(String(value))}}</dd></div>`).join("")}}</dl>`;
@@ -1217,4 +1277,3 @@ def _offset_arcsec(
         dra * math.cos(math.radians(dec0)) * 3600.0,
         (dec_deg - dec0) * 3600.0,
     )
-

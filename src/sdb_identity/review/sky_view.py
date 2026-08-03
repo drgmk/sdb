@@ -93,6 +93,7 @@ class SkyPoint:
     cross_candidate_reason: str | None = None
     uncertainty_major_arcsec: float | None = None
     uncertainty_minor_arcsec: float | None = None
+    uncertainty_position_angle_deg: float | None = None
     catalog_component: str | None = None
     provenance: tuple[dict[str, object], ...] = ()
     note: str = ""
@@ -344,6 +345,7 @@ def _merge_duplicate_point(first: SkyPoint, second: SkyPoint) -> SkyPoint:
         cross_candidate_reason=first.cross_candidate_reason or second.cross_candidate_reason,
         uncertainty_major_arcsec=first.uncertainty_major_arcsec if first.uncertainty_major_arcsec is not None else second.uncertainty_major_arcsec,
         uncertainty_minor_arcsec=first.uncertainty_minor_arcsec if first.uncertainty_minor_arcsec is not None else second.uncertainty_minor_arcsec,
+        uncertainty_position_angle_deg=first.uncertainty_position_angle_deg if first.uncertainty_position_angle_deg is not None else second.uncertainty_position_angle_deg,
         catalog_component=first.catalog_component or second.catalog_component,
         provenance=tuple(provenance),
         note="; duplicate view row merged: ".join(notes),
@@ -715,9 +717,11 @@ def _catalog_points(
                     f"catalog run {run.id}; provider status {effective_status}"
                 ),
             )
-            uncertainty_major, uncertainty_minor = _position_uncertainty_arcsec(
-                run.provider, row.payload_json
-            )
+            (
+                uncertainty_major,
+                uncertainty_minor,
+                uncertainty_position_angle,
+            ) = _position_uncertainty_arcsec(run.provider, row.payload_json)
             provenance = tuple({
                 "role": item.role,
                 "service": item.service,
@@ -764,6 +768,7 @@ def _catalog_points(
                     attributes=attributes,
                     uncertainty_major_arcsec=uncertainty_major,
                     uncertainty_minor_arcsec=uncertainty_minor,
+                    uncertainty_position_angle_deg=uncertainty_position_angle,
                     catalog_component=_catalog_component_summary(
                         run.provider, payload, row.source_id,
                     ),
@@ -1780,26 +1785,32 @@ def _attribute_pm(
 
 def _position_uncertainty_arcsec(
     provider: str, payload_json: str
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None, float | None]:
     try:
         payload = json.loads(payload_json)
     except json.JSONDecodeError:
-        return None, None
+        return None, None, None
     if not isinstance(payload, dict):
-        return None, None
+        return None, None, None
     payload = normalize_review_payload(provider, payload)
     review = payload.get("_sdb_review")
     uncertainty = review.get("position_uncertainty") if isinstance(review, dict) else None
     if not isinstance(uncertainty, dict):
-        return None, None
+        return None, None, None
     try:
         major = float(uncertainty["major_arcsec"])
         minor = float(uncertainty["minor_arcsec"])
     except (KeyError, TypeError, ValueError):
-        return None, None
+        return None, None, None
     if not all(math.isfinite(value) and value > 0 for value in (major, minor)):
-        return None, None
-    return major, minor
+        return None, None, None
+    try:
+        position_angle = float(uncertainty["position_angle_deg"])
+    except (KeyError, TypeError, ValueError):
+        position_angle = None
+    if position_angle is not None and not math.isfinite(position_angle):
+        position_angle = None
+    return major, minor, position_angle
 
 
 def _simbad_metadata_points(session: Session, target: Target, center: tuple[float, float]) -> list[SkyPoint]:

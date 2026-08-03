@@ -30,7 +30,10 @@ from sdb_identity.review.sky_view import (
     _offset_position,
     build_review_sky_view,
 )
-from sdb_identity.review.sky_render import render_review_sky_html
+from sdb_identity.review.sky_render import (
+    _uncertainty_ellipse_xy,
+    render_review_sky_html,
+)
 from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
@@ -100,6 +103,49 @@ def test_review_sky_view_includes_identity_catalog_points_but_hides_no_match_poi
         point.kind == "catalog" and point.provider == "empty"
         for point in view.points
     )
+
+
+def test_review_sky_view_renders_rotated_iras_position_uncertainty(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    iras = CatalogCandidate(
+        source_id="00001-2000",
+        ra_deg=10.0,
+        dec_deg=-20.0,
+        epoch=1983.5,
+        payload={
+            "IRAS": "00001-2000",
+            "Major": 16,
+            "Minor": 4,
+            "PosAng": 35,
+        },
+    )
+    CatalogAcquisitionService(session_factory, {
+        "iras_psc": FakeCatalog(
+            [iras], name="iras_psc", release="fake-iras-psc"
+        ),
+    }).refresh(target.sdbid, "iras_psc")
+
+    view = build_review_sky_view(session_factory, target.sdbid)
+    point = next(point for point in view.points if point.provider == "iras_psc")
+
+    assert point.uncertainty_major_arcsec == 16.0
+    assert point.uncertainty_minor_arcsec == 4.0
+    assert point.uncertainty_position_angle_deg == 35.0
+
+    html = render_review_sky_html(view)
+    assert "position uncertainty: 16.00\\u2033 \\u00d7 4.00\\u2033" in html
+    assert "PA 35.00\\u00b0 east of north" in html
+
+
+def test_position_uncertainty_angle_is_measured_east_of_north():
+    x_values, y_values = _uncertainty_ellipse_xy(
+        0.0, 0.0, 16.0, 4.0, 0.0, samples=4,
+    )
+
+    assert x_values[:2] == pytest.approx([0.0, 4.0], abs=1e-12)
+    assert y_values[:2] == pytest.approx([16.0, 0.0], abs=1e-12)
 
 
 def test_review_sky_view_projects_reconciled_catalog_candidate_from_nearby_target(

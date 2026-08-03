@@ -39,6 +39,7 @@ from ..tdsc_components import decode_tdsc_component
 from ..v70a_components import decode_v70a_component
 from ...reference.store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
 from .vizier import row_float, row_text
+from .review_metadata import add_review_metadata, PositionUncertainty
 
 class SnapshotCatalogAdapter:
     """Shared local-snapshot matching; subclasses declare extracted science."""
@@ -514,6 +515,22 @@ class IrasSnapshotAdapter(SnapshotCatalogAdapter):
     """Shared normalization for the complete IRAS PSC and FSC snapshots."""
 
     resolutions = {12: 30.0, 25: 30.0, 60: 60.0, 100: 120.0}
+    # Major and Minor are 1-sigma semiaxes. A three-sigma ellipse contains
+    # about 98.9% of a two-dimensional Gaussian positional distribution.
+    acceptance_score = math.exp(-0.5 * 3.0**2)
+    review_fields = ()
+    position_uncertainty = PositionUncertainty(
+        major_columns=("Major",),
+        minor_columns=("Minor",),
+        position_angle_columns=("PosAng",),
+        scale_to_arcsec=1.0,
+    )
+
+    def enrich_payload(self, payload, refs):
+        return add_review_metadata(
+            payload,
+            position_uncertainty=self.position_uncertainty,
+        )
 
     @staticmethod
     def score_candidate(context, candidate, separation_arcsec):
