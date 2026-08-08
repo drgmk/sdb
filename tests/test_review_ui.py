@@ -443,12 +443,18 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
         "HD 1 b — planet" in row
         for row in value["human_summary"]["warnings"]
     )
+    selected_id = next(
+        row["relationship_id"]
+        for row in value["relatives"]
+        if row["main_id"] == "HD 1B"
+    )
 
     applied = client.post("/api/relatives/apply", json={
         "target": root.sdbid,
         "actor": "browser reviewer",
         "reason": "import immediate stellar relatives",
         "state_token": value["state_token"],
+        "selected_relationship_ids": [selected_id],
     })
     assert applied.status_code == 200
     result = applied.json()
@@ -698,6 +704,11 @@ def test_review_ui_relative_import_is_disabled_without_live_identity_service(ses
         "actor": "browser reviewer",
         "reason": "should fail offline",
         "state_token": preview.json()["state_token"],
+        "selected_relationship_ids": [
+            row["relationship_id"]
+            for row in preview.json()["relatives"]
+            if row["recommended_selected"]
+        ],
     })
 
     assert applied.status_code == 409

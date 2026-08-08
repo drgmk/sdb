@@ -476,6 +476,41 @@ document.getElementById('apply-lifecycle').addEventListener('click',async()=>{
 });
 const relativesDialog=document.getElementById('relatives-dialog');
 let relativesPreview=null;
+function selectedRelativeIds(){
+  return Array.from(document.querySelectorAll('#relatives-rows input:checked')).map(input=>Number(input.value));
+}
+function updateRelativesApplyButton(){
+  document.getElementById('apply-relatives').disabled=!relativesPreview||selectedRelativeIds().length===0;
+}
+function relativeSeparation(value){
+  const arcsec=Number(value);
+  if(!Number.isFinite(arcsec))return '—';
+  if(arcsec>=3600)return `${(arcsec/3600).toFixed(2)}°`;
+  if(arcsec>=60)return `${(arcsec/60).toFixed(2)}′`;
+  return `${arcsec.toFixed(arcsec<10?2:1)}″`;
+}
+function renderRelativeRows(value){
+  const body=document.getElementById('relatives-rows');
+  body.innerHTML=value.relatives.map(row=>{
+    const warnings=row.selection_warnings||[];
+    const assessment=warnings.length
+      ? `<span class="relative-warning">${escapeHtml(warnings.join(' · '))}</span>`
+      : escapeHtml(row.reason||String(row.action).replaceAll('_',' '));
+    const checked=row.selectable&&row.recommended_selected?' checked':'';
+    const selection=row.selectable
+      ? `<input type="checkbox" value="${Number(row.relationship_id)}" aria-label="Import ${escapeHtml(row.main_id)}"${checked}>`
+      : `<input type="checkbox" aria-label="${escapeHtml(row.main_id)} cannot be imported" disabled>`;
+    const params=new URLSearchParams({submit:'submit id',Ident:row.main_id});
+    const simbadUrl=`https://simbad.cds.unistra.fr/simbad/sim-id?${params}`;
+    const status=String(row.action).replaceAll('_',' ');
+    const relationship=`${escapeHtml(row.direction)}${row.component_label?` · component ${escapeHtml(row.component_label)}`:''}`;
+    const types=(row.object_types||[]).join(', ')||row.object_type||'—';
+    return `<tr class="${warnings.length?'relative-risky':''}"><td>${selection}</td><td><a href="${escapeHtml(simbadUrl)}" target="_blank" rel="noopener">${escapeHtml(row.main_id)}</a>${row.matched_sdbid?`<br><a class="muted" href="/target/${encodeURIComponent(row.matched_sdbid)}">${escapeHtml(row.matched_sdbid)}</a>`:''}</td><td>${relationship}<br><span class="muted">${escapeHtml(status)}</span></td><td>${escapeHtml(types)}</td><td class="relative-distance">${relativeSeparation(row.separation_arcsec)}</td><td>${assessment}</td></tr>`;
+  }).join('');
+  document.getElementById('relatives-results').hidden=value.relatives.length===0;
+  body.querySelectorAll('input').forEach(input=>input.addEventListener('change',updateRelativesApplyButton));
+  updateRelativesApplyButton();
+}
 async function refreshRelativesPreview(){
   const element=document.getElementById('relatives-preview');
   element.classList.add('muted');
@@ -483,9 +518,10 @@ async function refreshRelativesPreview(){
   document.getElementById('apply-relatives').disabled=true;
   try{
     relativesPreview=await request('/api/relatives/preview',{target:window.SDB_TARGET});
+    renderRelativeRows(relativesPreview);
     renderHumanSummary(element,relativesPreview);
     prefillReason('relatives-reason',relativesPreview);
-    document.getElementById('apply-relatives').disabled=!relativesPreview.has_changes;
+    updateRelativesApplyButton();
   }catch(error){relativesPreview=null;renderRequestError(element,error);}
 }
 function openRelativesDialog(){
@@ -498,16 +534,18 @@ document.getElementById('apply-relatives').addEventListener('click',async()=>{
   const actor=document.getElementById('relatives-actor').value;
   const reason=document.getElementById('relatives-reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Import and reconcile the displayed immediate stellar relatives?'))return;
+  const selected_relationship_ids=selectedRelativeIds();
+  if(!selected_relationship_ids.length)return;
+  if(!confirm(`Import or reconcile ${selected_relationship_ids.length} selected SIMBAD relative${selected_relationship_ids.length===1?'':'s'}?`))return;
   const button=document.getElementById('apply-relatives');
   button.disabled=true;
   button.textContent='Importing…';
   try{
-    const value=await request('/api/relatives/apply',{target:window.SDB_TARGET,actor,reason,state_token:relativesPreview.state_token});
+    const value=await request('/api/relatives/apply',{target:window.SDB_TARGET,actor,reason,state_token:relativesPreview.state_token,selected_relationship_ids});
     renderHumanSummary(document.getElementById('relatives-preview'),value);
     setTimeout(()=>location.reload(),1000);
   }catch(error){renderRequestError(document.getElementById('relatives-preview'),error);button.disabled=false;}
-  finally{button.textContent='Import and reconcile stellar relatives';}
+  finally{button.textContent='Import selected relatives';}
 });
 const nearbyImportDialog=document.getElementById('nearby-import-dialog');
 let nearbyImportSearch=null;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 
 from sqlalchemy import select
@@ -47,6 +48,7 @@ class RelativeImportResult:
     already_complete: int
     context_only: int
     review_required: int
+    skipped: int
     failed: int
     relatives: tuple[dict[str, object], ...]
 
@@ -155,6 +157,16 @@ def preview_immediate_relatives(
             else:
                 action = "review_required"
                 reason = "SIMBAD object types do not establish a stellar structural component"
+            selectable = action in {"import", "reconcile"}
+            selection_warnings = (
+                _relative_selection_warnings(
+                    direction=relationship.direction,
+                    main_id=relationship.related_main_id,
+                    separation_arcsec=relationship.separation_arcsec,
+                )
+                if selectable
+                else []
+            )
             result.append({
                 "relationship_id": relationship.id,
                 "relationship_ids": [
@@ -176,6 +188,9 @@ def preview_immediate_relatives(
                 "suggested_state": state.value,
                 "action": action,
                 "reason": reason,
+                "selectable": selectable,
+                "recommended_selected": selectable and not selection_warnings,
+                "selection_warnings": selection_warnings,
                 "reconciliation_missing": reconciliation_missing,
                 "matched_target_id": None if matched is None else matched.id,
                 "matched_sdbid": None if matched is None else matched.sdbid,
@@ -200,8 +215,28 @@ def import_immediate_relatives(
     identity_service: IdentityService,
     actor: str | None,
     reason: str | None = None,
+    selected_relationship_ids: set[int] | None = None,
 ) -> RelativeImportResult:
     preview = preview_immediate_relatives(session_factory, target_reference)
+    actionable_ids = {
+        int(row["relationship_id"])
+        for row in preview
+        if row["action"] in {"import", "reconcile"}
+    }
+    if selected_relationship_ids is None:
+        selected_ids = actionable_ids
+    else:
+        selected_ids = {int(value) for value in selected_relationship_ids}
+        invalid_ids = selected_ids - actionable_ids
+        if invalid_ids:
+            invalid = ", ".join(str(value) for value in sorted(invalid_ids))
+            raise ValueError(
+                f"selected SIMBAD relationships are not currently importable: {invalid}"
+            )
+        if not selected_ids:
+            raise ValueError(
+                "select at least one SIMBAD relative to import or reconcile"
+            )
     with session_factory() as session:
         requested = resolve_target(session, target_reference)
         if requested is None:
@@ -235,6 +270,7 @@ def import_immediate_relatives(
         "already_complete": 0,
         "context_only": 0,
         "review_required": 0,
+        "skipped": 0,
         "failed": 0,
     }
     for relative in preview:
@@ -248,6 +284,11 @@ def import_immediate_relatives(
                 else str(relative["action"])
             )
             counts[count_key] += 1
+            rows.append(row)
+            continue
+        if int(relative["relationship_id"]) not in selected_ids:
+            row["action"] = "skipped"
+            counts["skipped"] += 1
             rows.append(row)
             continue
         target_sdbid = relative.get("matched_sdbid")
@@ -313,9 +354,45 @@ def import_immediate_relatives(
         already_complete=counts["already_complete"],
         context_only=counts["context_only"],
         review_required=counts["review_required"],
+        skipped=counts["skipped"],
         failed=counts["failed"],
         relatives=tuple(rows),
     )
+
+
+_CONTEXTUAL_GROUP_NAME_RE = re.compile(
+    r"(?:^|\b)(?:ass(?:ociation)?|cluster|moving\s+group)(?:\b|$)",
+    re.IGNORECASE,
+)
+_DEFAULT_SELECTION_MAX_SEPARATION_ARCSEC = 600.0
+
+
+def _relative_selection_warnings(
+    *,
+    direction: str,
+    main_id: str,
+    separation_arcsec: float | None,
+) -> list[str]:
+    """Return evidence that makes an otherwise stellar relative unsafe to preselect.
+
+    These warnings deliberately affect only the operator-facing default. SIMBAD
+    relationships can be unusual or incorrectly typed, so none of them hard-block
+    an explicit selection.
+    """
+    warnings = []
+    if _CONTEXTUAL_GROUP_NAME_RE.search(main_id):
+        warnings.append(
+            "name resembles an association or group despite the SIMBAD stellar type"
+        )
+    if (
+        separation_arcsec is not None
+        and separation_arcsec > _DEFAULT_SELECTION_MAX_SEPARATION_ARCSEC
+    ):
+        degrees = separation_arcsec / 3600.0
+        warnings.append(
+            f"{direction} is {degrees:.2f}° from the target; review before importing"
+        )
+    return warnings
 
 
 def _group_simbad_relationships(

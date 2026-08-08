@@ -52,11 +52,14 @@
     <div class="dialog-actions"><button id="preview-lifecycle" type="button">Preview role decision</button><button id="apply-lifecycle" type="button" disabled>Apply audited decision</button></div>
     <div id="lifecycle-preview" class="change-summary muted">Choose a role, then preview.</div>
   </dialog>
-  <dialog id="relatives-dialog">
+  <dialog id="relatives-dialog" class="relatives-dialog">
     <form method="dialog" class="dialog-header"><div><h2>Immediate SIMBAD relatives</h2><code>$requested_target_label</code></div><button value="cancel" aria-label="Close relative import dialog">×</button></form>
-    <p>Preview or import only immediate stellar parents and children. Contextual groups, planets, and unknown object types are retained for review but are not imported; newly imported targets are not expanded recursively.</p>
+    <p>Select the SIMBAD relationships that should become SDB structure. Likely stellar components are checked by default; suspicious relationships remain available but unchecked. Contextual groups, planets, and unknown types cannot be selected. Newly imported targets are not expanded recursively.</p>
+    <div id="relatives-results" class="relatives-results" hidden>
+      <table><thead><tr><th>Import</th><th>SIMBAD relative</th><th>Relationship</th><th>Type</th><th>d</th><th>Assessment</th></tr></thead><tbody id="relatives-rows"></tbody></table>
+    </div>
     <section class="decision-meta"><label>Actor <input id="relatives-actor" value="$default_actor"></label><label>Reason <input id="relatives-reason" placeholder="Preview suggests a reason"></label></section>
-    <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh preview</button><button id="apply-relatives" type="button" disabled>Import and reconcile stellar relatives</button></div>
+    <div class="dialog-actions"><button id="preview-relatives" type="button">Refresh relatives</button><button id="apply-relatives" type="button" disabled>Import selected relatives</button></div>
     <div id="relatives-preview" class="change-summary muted">Open this dialog from Immediate SIMBAD relatives in the system column.</div>
   </dialog>
   <dialog id="nearby-import-dialog" class="nearby-import-dialog">

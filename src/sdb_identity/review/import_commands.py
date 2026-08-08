@@ -48,6 +48,17 @@ def review_relatives_command(
         raise RuntimeError(
             "SIMBAD relative state changed after preview; reload and preview again"
         )
+    raw_selected_ids = payload.get("selected_relationship_ids")
+    if not isinstance(raw_selected_ids, list):
+        raise ValueError("selected_relationship_ids must be a list")
+    if any(isinstance(value, bool) for value in raw_selected_ids):
+        raise ValueError("selected relationship IDs must be integers")
+    try:
+        selected_relationship_ids = {int(value) for value in raw_selected_ids}
+    except (TypeError, ValueError) as error:
+        raise ValueError("selected relationship IDs must be integers") from error
+    if not selected_relationship_ids:
+        raise ValueError("select at least one SIMBAD relative to import or reconcile")
     decision = DecisionContext.resolve(
         actor=_optional_text(payload.get("actor")),
         reason=_optional_text(payload.get("reason")),
@@ -59,6 +70,7 @@ def review_relatives_command(
         identity_service=identity_service_factory(),
         actor=decision.actor,
         reason=decision.reason,
+        selected_relationship_ids=selected_relationship_ids,
     ).as_dict()
     value = {
         **preview,
@@ -81,6 +93,8 @@ def _relative_preview_payload(
         "reconciliation_missing": row.get("reconciliation_missing", []),
         "suggested_role": row["suggested_role"],
         "suggested_state": row["suggested_state"],
+        "recommended_selected": row["recommended_selected"],
+        "selection_warnings": row["selection_warnings"],
     } for row in rows]
     token = hashlib.sha256(
         json.dumps(token_rows, sort_keys=True).encode("utf-8")
@@ -117,18 +131,30 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
             else f" component {row['component_label']}"
         )
         if row["action"] == "import":
-            changes.append(
-                f"Import {label} as {row['suggested_role']}{component}."
-            )
+            if row.get("recommended_selected"):
+                changes.append(
+                    f"Import {label} as {row['suggested_role']}{component}."
+                )
+            else:
+                detail = "; ".join(row.get("selection_warnings") or [])
+                warnings.append(
+                    f"Not preselected: {label} — {detail or 'operator review required'}"
+                )
         elif row["action"] == "imported":
             changes.append(
                 f"Imported {label} as {row['suggested_role']}{component}: "
                 f"{row['matched_sdbid']}."
             )
         elif row["action"] == "reconcile":
-            changes.append(
-                f"Reconcile existing {row['matched_sdbid']} with {label}{component}."
-            )
+            if row.get("recommended_selected"):
+                changes.append(
+                    f"Reconcile existing {row['matched_sdbid']} with {label}{component}."
+                )
+            else:
+                detail = "; ".join(row.get("selection_warnings") or [])
+                warnings.append(
+                    f"Not preselected: {label} — {detail or 'operator review required'}"
+                )
         elif row["action"] == "reconciled":
             changes.append(
                 f"Reconciled existing {row['matched_sdbid']} with {label}{component}."
@@ -152,11 +178,14 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
             warnings.append(f"Context only: {label} — {relevance}")
         elif row["action"] == "failed":
             warnings.append(f"Import failed: {label} — {row.get('error', 'unknown error')}")
+        elif row["action"] == "skipped":
+            changes.append(f"No change for {label}; it was not selected.")
     if value.get("mode") == "applied":
         title = (
             f"Relative import finished: {int(value.get('imported', 0))} imported, "
             f"{int(value.get('reconciled', 0))} reconciled, "
             f"{int(value.get('already_complete', 0))} already complete, "
+            f"{int(value.get('skipped', 0))} not selected, "
             f"{int(value.get('failed', 0))} failed"
         )
     else:

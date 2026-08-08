@@ -133,6 +133,71 @@ def test_relative_preview_groups_same_simbad_object_and_keeps_provenance(
     ]
 
 
+def test_distant_mistyped_association_is_selectable_but_not_preselected(
+    session_factory,
+):
+    suspicious_parent = RelationshipValue(
+        "parent", 601, "Ass Sco OB 2-4", 42.0, -25.0,
+        100, "2000MNRAS.313...43H", 138598.6,
+        related_object_type="*",
+        related_object_types=("*",),
+    )
+    base = _system_snapshot()
+    value = replace(
+        base,
+        relationships=(*base.relationships, suspicious_parent),
+    )
+    root = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    MetadataService(
+        session_factory,
+        FakeMetadataProvider(MetadataQueryResult("match", (value,))),
+    ).refresh(root.sdbid)
+
+    rows = preview_immediate_relatives(session_factory, root.sdbid)
+    by_name = {row["main_id"]: row for row in rows}
+    suspicious = by_name["Ass Sco OB 2-4"]
+
+    assert suspicious["action"] == "import"
+    assert suspicious["selectable"] is True
+    assert suspicious["recommended_selected"] is False
+    assert any(
+        "association or group" in row
+        for row in suspicious["selection_warnings"]
+    )
+    assert any("38.50°" in row for row in suspicious["selection_warnings"])
+    assert by_name["HD 1B"]["recommended_selected"] is True
+
+    identity = IdentityService(
+        session_factory,
+        simbad=FakeSimbad({
+            "HD 1B": simbad_result(
+                "HD 1B",
+                astrometry(10.001, -20.0, source="simbad"),
+                ("WDS J00400-2000B",),
+            ),
+        }),
+    )
+    result = import_immediate_relatives(
+        session_factory,
+        root.sdbid,
+        identity_service=identity,
+        actor="reviewer",
+        reason="import selected component only",
+        selected_relationship_ids={int(by_name["HD 1B"]["relationship_id"])},
+    )
+
+    assert (result.imported, result.skipped, result.failed) == (1, 1, 0)
+    skipped = next(
+        row for row in result.relatives
+        if row["main_id"] == "Ass Sco OB 2-4"
+    )
+    assert skipped["action"] == "skipped"
+    with session_factory() as session:
+        assert session.query(Target).count() == 2
+
+
 def test_existing_relative_is_reconciled_once_then_reported_complete(
     session_factory,
 ):
