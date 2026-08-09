@@ -9,7 +9,6 @@ from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.photometry.readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report
-from sdb_identity.joint_fit_manifest import write_joint_fit_manifest
 from sdb_identity.models.photometry import MeasurementTargetAssociation
 from sdb_identity.models.catalogs import NormalizedMeasurement, RawCatalogRow
 from sdb_identity.photometry.assignments import (
@@ -339,33 +338,30 @@ def test_fitting_groups_requires_exactly_one_selection(session_factory):
             raise AssertionError("expected selection validation error")
 
 
-def test_joint_fit_manifest_preserves_assignments_and_single_export_sidecar(
+def test_joint_fit_manifest_preserves_assignments_and_target_package_export(
     session_factory, db_path, tmp_path, capsys,
 ):
     system, component_a, component_b = _configured_system(session_factory)
     measurement = _measurement(session_factory, system)
     _assign_pair(session_factory, measurement, system, component_a, component_b)
-    manifest_path = tmp_path / "explicit-joint-fit.json"
-
-    write_joint_fit_manifest(
-        session_factory, manifest_path, target_reference=system.sdbid,
+    export_root = tmp_path / "exports"
+    assert main([
+        "--database", str(db_path), "export", system.sdbid,
+        "--output-dir", str(export_root), "--workers", "1",
+    ]) == 0
+    capsys.readouterr()
+    package = json.loads(
+        (export_root / system.sdbid / "joint-fit.json").read_text()
     )
-    manifest = json.loads(manifest_path.read_text())
-    row = manifest["graph"]["measurements"][0]
-    assert manifest["schema_version"] == 1
+    row = package["graph"]["measurements"][0]
+    assert package["schema_version"] == 1
     assert [(value["sdbid"], value["role"]) for value in row["assignments"]] == [
         (system.sdbid, "composite_scope"),
         (component_a.sdbid, "contributor"),
         (component_b.sdbid, "contributor"),
     ]
     assert row["resolution_major_arcsec"] == 12.0
-
-    rawphot = tmp_path / "one-rawphot.txt"
-    assert main([
-        "--database", str(db_path), "export", system.sdbid,
-        "--output", str(rawphot),
-    ]) == 0
-    capsys.readouterr()
-    sidecar = json.loads((tmp_path / "one-joint-fit.json").read_text())
-    assert sidecar["legacy_exports"][0]["sdbid"] == system.sdbid
-    assert sidecar["legacy_exports"][0]["output"] == str(rawphot.resolve())
+    assert package["package"]["selected_sdbids"] == [system.sdbid]
+    assert {row["sdbid"] for row in package["inputs"]} == {
+        component_a.sdbid, component_b.sdbid,
+    }

@@ -405,7 +405,7 @@ def test_cli_offline_batch_import_status_and_resume(tmp_path, capsys):
     assert resumed["status"] == "completed"
 
 
-def test_cli_lists_and_exports_only_dirty_targets(tmp_path, capsys):
+def test_cli_lists_dirty_targets_and_exports_all(tmp_path, capsys):
     database = tmp_path / "cli.sqlite"
     output_dir = tmp_path / "exports"
     main(["--database", str(database), "init"])
@@ -419,11 +419,11 @@ def test_cli_lists_and_exports_only_dirty_targets(tmp_path, capsys):
     dirty = json.loads(capsys.readouterr().out)
     assert dirty["sdbid"] == added["sdbid"]
     assert main([
-        "--database", str(database), "export-dirty",
-        "--output-dir", str(output_dir),
+        "--database", str(database), "export", "--all",
+        "--output-dir", str(output_dir), "--workers", "1",
     ]) == 0
-    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert lines[-1] == {"exported": 1, "failed": 0}
+    result = json.loads(capsys.readouterr().out)
+    assert (result["exported"], result["failed"]) == (1, 0)
     assert main(["--database", str(database), "dirty"]) == 0
     assert capsys.readouterr().out == ""
 

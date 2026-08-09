@@ -113,7 +113,7 @@ def test_dirty_targets_can_be_limited_to_current_sample_members(session_factory)
     )] == [second.target_id]
 
 
-def test_export_dirty_cli_limits_work_to_sample(db_path, tmp_path, capsys):
+def test_export_sample_selection_limits_acknowledgement(db_path, tmp_path, capsys):
     sessions = make_session_factory(db_path)
     first, second = _targets(sessions)
     samples = SampleService(sessions)
@@ -121,12 +121,16 @@ def test_export_dirty_cli_limits_work_to_sample(db_path, tmp_path, capsys):
     samples.add("selected", first.target_id, actor="grant", reason="selected")
 
     assert main([
-        "--database", str(db_path), "export-dirty", "--sample", "selected",
-        "--output-dir", str(tmp_path / "exports"),
+        "--database", str(db_path), "export", "--sample", "selected",
+        "--output-dir", str(tmp_path / "exports"), "--workers", "1",
     ]) == 0
-    output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert output[-1] == {"exported": 1, "failed": 0}
-    assert output[0]["target_id"] == first.target_id
+    output = json.loads(capsys.readouterr().out)
+    assert (output["exported"], output["failed"], output["package_count"]) == (
+        1, 0, 1,
+    )
+    assert (
+        tmp_path / "exports" / first.sdbid / f"{first.sdbid}-rawphot.txt"
+    ).is_file()
     assert [value[0].id for value in pending_export_targets(sessions)] == [
         second.target_id,
     ]

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..catalogs.policy import catalog_source_display_name
+from ..catalogs.associations import resolved_ambiguous_catalog_results
 from ..catalogs.adapters.review_metadata import normalize_review_payload
 from ..photometry.review import build_measurement_assignment_review
 from ..catalogs.results import (
@@ -259,6 +260,9 @@ def build_review_sky_view(
             assignment_review.proposals
         )
         system_context["measurement_assignment_matrix"] = assignment_review.matrix
+        system_context["ambiguous_photometry"] = (
+            assignment_review.ambiguous_photometry
+        )
 
         nearby_points, nearby_arrows = _nearby_target_points(
             session,
@@ -607,6 +611,9 @@ def _catalog_points(
     for run in all_runs:
         runs_by_provider.setdefault(run.provider, []).append(run)
     effective = effective_catalog_results(session, [target.id])
+    component_resolutions = resolved_ambiguous_catalog_results(
+        session, effective,
+    )
     runs: list[tuple[CatalogRun, str, frozenset[int]]] = []
     for provider_runs in runs_by_provider.values():
         current = next((run for run in provider_runs if run.is_current), None)
@@ -647,6 +654,20 @@ def _catalog_points(
     runs.sort(key=lambda value: (value[0].provider, value[0].id))
     points = []
     for run, effective_status, selected_raw_row_ids in runs:
+        component_resolution = component_resolutions.get(
+            (target.id, run.provider)
+        )
+        component_targets_by_detection = {
+            int(association["detection_id"]): tuple(
+                str(value["sdbid"])
+                for value in association["targets"]
+            )
+            for association in (
+                []
+                if component_resolution is None
+                else component_resolution["associations"]
+            )
+        }
         rows = list(session.scalars(
             select(RawCatalogRow)
             .where(RawCatalogRow.run_id == run.id)
@@ -692,12 +713,17 @@ def _catalog_points(
             payload = _catalog_payload(row.payload_json)
             association = _catalog_association(row.payload_json)
             review_only = bool(association.get("review_only"))
-            accepted = row.id in selected_raw_row_ids
-            status = "accepted" if accepted else (
-                "review_neighbour" if review_only else (
-                    "ambiguous"
-                    if effective_status == "ambiguous"
-                    else effective_status
+            component_targets = component_targets_by_detection.get(
+                row.detection_id, (),
+            )
+            accepted = row.id in selected_raw_row_ids or bool(component_targets)
+            status = "associated" if component_targets else (
+                "accepted" if accepted else (
+                    "review_neighbour" if review_only else (
+                        "ambiguous"
+                        if effective_status == "ambiguous"
+                        else effective_status
+                    )
                 )
             )
             measurements = _measurement_summaries(session, row.id)
@@ -714,7 +740,12 @@ def _catalog_points(
                 motion_solution,
                 native_pm=native_pm,
                 base_note=(
-                    f"catalog run {run.id}; provider status {effective_status}"
+                    f"catalog run {run.id}; provider status "
+                    + (
+                        "resolved by physical system components"
+                        if component_targets
+                        else effective_status
+                    )
                 ),
             )
             (
@@ -766,6 +797,7 @@ def _catalog_points(
                     photometry=measurements,
                     photometry_beams=beams,
                     attributes=attributes,
+                    linked_target_sdbids=component_targets,
                     uncertainty_major_arcsec=uncertainty_major,
                     uncertainty_minor_arcsec=uncertainty_minor,
                     uncertainty_position_angle_deg=uncertainty_position_angle,
@@ -850,6 +882,12 @@ def _annotate_catalog_target_candidates(
             annotated.append(point)
             continue
         existing_detection_ids.add(point.detection_id)
+        if point.status == "associated":
+            # The system-level resolution is already stricter than the generic
+            # neighbourhood projection: retain its effective component links
+            # instead of adding every nearby positional candidate.
+            annotated.append(point)
+            continue
         associations = strong_by_detection.get(point.detection_id, [])
         current_row = current_target_rows.get(point.detection_id)
         if not associations and current_row is None:

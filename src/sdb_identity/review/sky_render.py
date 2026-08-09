@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..catalogs.provenance import vizier_entry_url
+from .sed import build_review_sed
 from .sky_view import ReviewSkyView
 
 
@@ -70,6 +71,7 @@ def render_review_sky_html(
         "nearby": "#0f766e",
         "match": "#f59e0b",
         "accepted": "#16a34a",
+        "associated": "#16a34a",
         "ambiguous": "#f59e0b",
         "no_match": "#2563eb",
         "rejected": "#2563eb",
@@ -78,17 +80,24 @@ def render_review_sky_html(
         "candidate": "#2563eb",
         "review_neighbour": "#94a3b8",
     }
-    provider_symbols = ["circle", "square", "triangle-up", "diamond", "x", "cross", "star", "hexagon"]
-    providers = sorted({point["provider"] for point in payload["points"]})
-    provider_symbol = {
-        provider: provider_symbols[index % len(provider_symbols)]
-        for index, provider in enumerate(providers)
-    }
-
     def color_for(point: dict[str, object]) -> str:
         if point["kind"] == "identity" and not point["accepted"]:
             return status_colors["candidate"]
         return status_colors.get(str(point["status"]), "#64748b")
+
+    def marker_symbol(point: dict[str, object]) -> str:
+        provider = str(point.get("provider") or "").lower()
+        if provider == "sdb":
+            symbol = "cross"
+        elif provider == "simbad":
+            symbol = "x"
+        elif provider in {"wds", "ccdm"} or point.get("kind") == "hierarchy":
+            symbol = "circle"
+        else:
+            symbol = "diamond"
+        if point.get("status") == "review_neighbour":
+            return f"{symbol}-open"
+        return symbol
 
     beam_colors = [
         "#7c3aed", "#0891b2", "#db2777", "#ca8a04",
@@ -187,7 +196,7 @@ def render_review_sky_html(
             mode="lines",
             name=f"position uncertainty / {point['provider']}",
             text=label,
-            meta={"review_kind": "line", "point_index": point["index"]},
+            meta={"review_kind": "position_uncertainty", "point_index": point["index"]},
             line={"color": "rgba(37, 99, 235, 0.42)", "width": 1, "dash": "dash"},
             fill="toself",
             fillcolor="rgba(37, 99, 235, 0.04)",
@@ -200,7 +209,6 @@ def render_review_sky_html(
         ))
 
     for (provider, status), points in grouped.items():
-        first = points[0]
         figure.add_trace(go.Scatter(
             x=[point["x_arcsec"] for point in points],
             y=[point["y_arcsec"] for point in points],
@@ -209,12 +217,9 @@ def render_review_sky_html(
             text=[point_hover_text(point) for point in points],
             customdata=[point["index"] for point in points],
             meta={"review_kind": "points"},
+            showlegend=False,
             marker={
-                "symbol": [
-                    "circle-open" if point["status"] == "review_neighbour"
-                    else provider_symbol.get(provider, "circle")
-                    for point in points
-                ],
+                "symbol": [marker_symbol(point) for point in points],
                 "color": [color_for(point) for point in points],
                 "size": [
                     9 if point["status"] == "review_neighbour"
@@ -317,7 +322,7 @@ def render_review_sky_html(
                 x=[path["x_native_arcsec"], path["x_display_arcsec"]],
                 y=[path["y_native_arcsec"], path["y_display_arcsec"]],
                 mode="lines",
-                name="catalog epoch to 2000",
+                name="catalog to 2000",
                 text=[label, label],
                 meta={"review_kind": "line", "point_index": path["index"]},
                 line={"color": "#f97316", "width": 2, "dash": "dot"},
@@ -357,7 +362,7 @@ def render_review_sky_html(
                 x=[segment["x_start_arcsec"], segment["x_end_arcsec"]],
                 y=[segment["y_start_arcsec"], segment["y_end_arcsec"]],
                 mode="lines+markers+text",
-                name=f"hierarchy {relation_type} / {segment['provider']}",
+                name="hierarchy",
                 text=[label, label],
                 texttemplate=[
                     "",
@@ -384,7 +389,7 @@ def render_review_sky_html(
                 x=[arrow["x_arcsec"], arrow["x_end_arcsec"]],
                 y=[arrow["y_arcsec"], arrow["y_end_arcsec"]],
                 mode="lines+markers",
-                name=f"proper motion / {_compact_display_value(arrow['years'])} yr",
+                name="PM",
                 text=[label, label],
                 meta={"review_kind": "line", "point_index": arrow.get("point_index")},
                 line={"color": "#ef4444", "width": 3},
@@ -430,7 +435,7 @@ def render_review_sky_html(
         plot_bgcolor="rgba(0,0,0,0)",
         margin={"l": 60, "r": 20, "t": 28, "b": 60},
         hovermode="closest",
-        annotations=label_annotations,
+        annotations=[],
         shapes=shapes,
         xaxis={
             "title": "arcsec east (east plotted left)",
@@ -461,6 +466,19 @@ def render_review_sky_html(
     )
     payload_json = json.dumps(payload, sort_keys=True)
     label_json = json.dumps(label_annotations, sort_keys=True)
+    shape_json = json.dumps(shapes, sort_keys=True)
+    sed = build_review_sed(
+        (view.system_context or {}).get("measurement_assignment_matrix") or {},
+        (view.system_context or {}).get("measurement_assignment_proposals") or [],
+        (view.system_context or {}).get("ambiguous_photometry") or [],
+    )
+    sed_html = _render_review_sed_html(sed)
+    sed_error_count = len(sed["errors"])
+    sed_note = (
+        ""
+        if not sed_error_count
+        else f'<div class="muted sed-note">{sed_error_count} band(s) could not be converted by SDF.</div>'
+    )
     escaped_title = html.escape(title)
     body_class = "embedded" if embedded else "standalone"
     return f"""<!doctype html>
@@ -476,9 +494,10 @@ def render_review_sky_html(
       --muted: #64748b;
       --panel: #ffffff;
       --grid: #cbd5e1;
+      --review-cell: #fff1f2;
     }}
     @media (prefers-color-scheme: dark) {{
-      :root {{ --bg: #0f172a; --fg: #e5e7eb; --muted: #94a3b8; --panel: #111827; --grid: #334155; }}
+      :root {{ --bg: #0f172a; --fg: #e5e7eb; --muted: #94a3b8; --panel: #111827; --grid: #334155; --review-cell: rgba(244, 63, 94, 0.16); }}
     }}
     body {{ margin: 0; font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }}
     body.embedded header {{ display: none; }}
@@ -494,6 +513,9 @@ def render_review_sky_html(
     @media (max-width: 900px) {{ .layout {{ grid-template-columns: 1fr; }} }}
     .sky-frame {{ box-sizing: border-box; width: 100%; aspect-ratio: 1 / 1; min-height: 0; background: var(--panel); border: 1px solid var(--grid); border-radius: 8px; }}
     #sky {{ box-sizing: border-box; width: 100% !important; height: 100% !important; background: transparent; }}
+    .sed-frame {{ box-sizing: border-box; width: 100%; min-height: 230px; margin-bottom: 4px; }}
+    #sed {{ width: 100% !important; min-height: 230px; }}
+    .sed-note {{ margin-bottom: 12px; }}
     .plot-column {{ min-width: 0; }}
     .plot-controls {{ margin: 0 0 8px; }}
     .panel {{ background: var(--panel); border: 1px solid var(--grid); border-radius: 8px; padding: 12px; }}
@@ -507,6 +529,7 @@ def render_review_sky_html(
     .assignment-matrix {{ border-collapse: collapse; font-size: 0.76rem; width: 100%; }}
     .assignment-matrix th, .assignment-matrix td {{ border: 1px solid #d7dee8; padding: 4px 5px; text-align: center; vertical-align: middle; }}
     .assignment-matrix th:first-child, .assignment-matrix td:first-child {{ text-align: left; min-width: 92px; }}
+    .matrix-detection.needs-review {{ background: var(--review-cell); }}
     .matrix-source {{ display: block; max-width: none; white-space: normal; overflow-wrap: anywhere; }}
     .matrix-cell.agrees {{ background: #dcfce7; color: #166534; }}
     .matrix-cell.proposed {{ background: #ffedd5; color: #9a3412; }}
@@ -563,7 +586,8 @@ def render_review_sky_html(
     </aside>
     <section class="plot-column">
       <div class="controls plot-controls">
-        <button id="toggle-annotations" type="button">Hide target labels</button>
+        <button id="toggle-annotations" type="button">Show target labels</button>
+        <button id="toggle-positional-uncertainties" type="button">Hide positional uncertainties</button>
         <button id="toggle-beams" type="button">Show photometry beams</button>
         <span class="muted">East is left; north is up.</span>
       </div>
@@ -574,6 +598,8 @@ def render_review_sky_html(
       </aside>
     </section>
     <aside class="panel items-panel">
+      <div class="sed-frame">{sed_html}</div>
+      {sed_note}
       <h2>Plotted items</h2>
       <div class="point-list-controls"><button id="toggle-point-list" type="button">Show all plotted items</button><span id="point-list-summary" class="muted"></span></div>
       <div id="points"></div>
@@ -586,8 +612,10 @@ def render_review_sky_html(
   <script>
     const view = {payload_json};
     const labelAnnotations = {label_json};
-    const statusColors = {{target: "#111827", nearby: "#0f766e", match: "#f59e0b", accepted: "#16a34a", ambiguous: "#f59e0b", no_match: "#2563eb", rejected: "#2563eb", transient_failure: "#dc2626", permanent_failure: "#991b1b", candidate: "#2563eb", review_neighbour: "#94a3b8"}};
-    let annotationsVisible = true;
+    const positionalShapes = {shape_json};
+    const statusColors = {{target: "#111827", nearby: "#0f766e", match: "#f59e0b", accepted: "#16a34a", associated: "#16a34a", ambiguous: "#f59e0b", no_match: "#2563eb", rejected: "#2563eb", transient_failure: "#dc2626", permanent_failure: "#991b1b", candidate: "#2563eb", review_neighbour: "#94a3b8"}};
+    let annotationsVisible = false;
+    let positionalUncertaintiesVisible = true;
     let beamsVisible = false;
     let selectedPointIndex = null;
     let clickedPlotItem = false;
@@ -805,7 +833,7 @@ def render_review_sky_html(
         const bands = row.bands || [];
         const bandNames = bands.map(value => value.band);
         const bandCount = row.band_count || bandNames.length;
-        const duplicate = row.stored_measurement_count > bandCount ? ` · ${{row.stored_measurement_count}} stored measurements${{row.duplicate_proposal_conflict ? " ⚠" : ""}}` : "";
+        const duplicate = !row.family_kind && row.stored_measurement_count > bandCount ? ` · ${{row.stored_measurement_count}} stored measurements${{row.duplicate_proposal_conflict ? " ⚠" : ""}}` : "";
         const mixed = row.mixed_band_assignments ? ' · <span class="matrix-warning">mixed assignments</span>' : "";
         const encounters = (row.encounter_sdbids || []).join(", ");
         const encounterText = encounters ? `<br><span class="muted">seen by ${{escapeHtml(encounters)}}</span>` : "";
@@ -813,6 +841,8 @@ def render_review_sky_html(
         if (bandNames.length) proposalDetails.push(`bands ${{bandNames.join(", ")}}`);
         for (const band of bands) {{
           proposalDetails.push(`${{band.band}}: ${{band.comparison_to_current}}${{band.excluded ? "; excluded" : ""}}`);
+          const selectedEntry = (band.catalog_entries || []).find(value => value.selected);
+          if (selectedEntry) proposalDetails.push(`${{band.band}} supplied by ${{selectedEntry.provider}} ${{selectedEntry.source_display_name || selectedEntry.source_id}}`);
         }}
         if (row.proposal_confidence) proposalDetails.push(`proposal confidence ${{row.proposal_confidence}}`);
         if (row.catalog_component && row.catalog_component.native_code) {{
@@ -828,7 +858,14 @@ def render_review_sky_html(
         const componentSummary = row.catalog_component && row.catalog_component.component_label
           ? ` · component ${{row.catalog_component.component_label}}`
           : "";
-        return `<tr><td><code>${{escapeHtml(row.provider)}}</code> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source">${{sourceLink(sourceName, row.provenance)}}</span><span class="muted">${{escapeHtml(bandSummary + componentSummary)}}${{duplicate}}${{mixed}}</span>${{encounterText}}</td>${{cells}}</tr>`;
+        const familyMembers = (row.family_members || []).map(member => `<div><code>${{escapeHtml(member.provider)}}</code> ${{sourceLink(member.source_display_name || member.source_id, member.provenance || [])}}</div>`).join("");
+        const sourceBlock = row.family_kind === "iras_psc_fsc"
+          ? `<details class="matrix-family"><summary><strong>IRAS</strong> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span> <span class="muted">${{escapeHtml(bandSummary)}}${{duplicate}}${{mixed}}</span></summary>${{familyMembers}}</details>`
+          : `<code>${{escapeHtml(row.provider)}}</code> <span class="matrix-info" title="${{escapeHtml(proposalDetails.join(" · "))}}">ⓘ</span><br><span class="matrix-source">${{sourceLink(sourceName, row.provenance)}}</span><span class="muted">${{escapeHtml(bandSummary + componentSummary)}}${{duplicate}}${{mixed}}</span>`;
+        const detectionClass = row.needs_review
+          ? "matrix-detection needs-review"
+          : "matrix-detection";
+        return `<tr><td class="${{detectionClass}}">${{sourceBlock}}${{encounterText}}</td>${{cells}}</tr>`;
       }}).join("");
       const matrixHtml = matrixRows ? `<div class="matrix-wrap"><table class="assignment-matrix"><thead><tr><th>detection</th>${{matrixHeader}}</tr></thead><tbody>${{matrixRows}}</tbody></table></div><div class="muted">✓ current agrees · + proposed · ● current only · ! differs or mixed · · candidate</div>` : '<div class="muted">No current measurements.</div>';
       const relativeChanges = relatives.some(row => row.action === "import" || row.action === "reconcile");
@@ -913,6 +950,16 @@ def render_review_sky_html(
           Plotly.restyle(plot, {{visible: visible}}, [traceIndex]);
         }}
       }}
+    }}
+    function updatePositionalUncertaintyVisibility() {{
+      const plot = document.getElementById("sky");
+      for (let traceIndex = 0; traceIndex < plot.data.length; traceIndex++) {{
+        const trace = plot.data[traceIndex];
+        if (trace.meta && trace.meta.review_kind === "position_uncertainty") {{
+          Plotly.restyle(plot, {{visible: positionalUncertaintiesVisible}}, [traceIndex]);
+        }}
+      }}
+      Plotly.relayout(plot, {{shapes: positionalUncertaintiesVisible ? positionalShapes : []}});
     }}
     function applySelection(index) {{
       selectedPointIndex = index;
@@ -1072,6 +1119,11 @@ def render_review_sky_html(
       Plotly.relayout("sky", {{annotations: annotationsVisible ? labelAnnotations : []}});
       event.target.textContent = annotationsVisible ? "Hide target labels" : "Show target labels";
     }});
+    document.getElementById("toggle-positional-uncertainties").addEventListener("click", event => {{
+      positionalUncertaintiesVisible = !positionalUncertaintiesVisible;
+      updatePositionalUncertaintyVisibility();
+      event.target.textContent = positionalUncertaintiesVisible ? "Hide positional uncertainties" : "Show positional uncertainties";
+    }});
     document.getElementById("toggle-beams").addEventListener("click", event => {{
       beamsVisible = !beamsVisible;
       updateBeamVisibility();
@@ -1081,6 +1133,120 @@ def render_review_sky_html(
 </body>
 </html>
 """
+
+
+def _render_review_sed_html(sed: dict[str, object]) -> str:
+    import plotly.graph_objects as go
+    import plotly.io as pio
+
+    points = sed.get("points") or []
+    if not points:
+        return '<div class="muted">No convertible photometry to plot.</div>'
+
+    component_colors = (
+        "#2563eb", "#dc2626", "#16a34a", "#7c3aed", "#ea580c",
+        "#0891b2", "#db2777", "#65a30d", "#4f46e5", "#ca8a04",
+    )
+    components = sorted({str(point["component"]) for point in points})
+    colors = {
+        component: component_colors[index % len(component_colors)]
+        for index, component in enumerate(components)
+    }
+    symbols = sed.get("symbols") or {}
+    figure = go.Figure()
+    for component in components:
+        legend_shown = False
+        for accepted in (True, False):
+            group = [
+                point for point in points
+                if point["component"] == component
+                and bool(point["accepted"]) is accepted
+            ]
+            if not group:
+                continue
+            group.sort(key=lambda point: bool(point["upper_limit"]))
+            figure.add_trace(go.Scatter(
+                x=[point["wavelength_micron"] for point in group],
+                y=[point["flux_jy"] for point in group],
+                error_y={
+                    "type": "data",
+                    "array": [
+                        0.0 if point["upper_limit"] else point["error_jy"]
+                        for point in group
+                    ],
+                    "visible": True,
+                    "color": colors[component] if accepted else "#94a3b8",
+                    "thickness": 1,
+                    "width": 2,
+                },
+                mode="markers",
+                name=component,
+                legendgroup=component,
+                showlegend=not legend_shown,
+                marker={
+                    "symbol": [
+                        "triangle-down"
+                        if point["upper_limit"]
+                        else symbols.get(component, "circle")
+                        for point in group
+                    ],
+                    "size": 9,
+                    "color": colors[component] if accepted else "#94a3b8",
+                    "opacity": 0.95 if accepted else 0.42,
+                    "line": {"color": "#ffffff", "width": 0.7},
+                },
+                customdata=[[point["band"]] for point in group],
+                hovertemplate=(
+                    f"%{{customdata[0]}} · {component}<extra></extra>"
+                ),
+            ))
+            legend_shown = True
+
+    figure.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin={"l": 44, "r": 8, "t": 34, "b": 30},
+        height=250,
+        hovermode="closest",
+        hoverlabel={
+            "bgcolor": "rgba(255,255,255,0.68)",
+            "bordercolor": "rgba(100,116,139,0.22)",
+            "font": {"color": "#111827", "size": 11},
+        },
+        title={
+            "text": "SED, Jy vs um",
+            "x": 0,
+            "xanchor": "left",
+            "y": 0.99,
+            "yanchor": "top",
+            "font": {"size": 15},
+        },
+        xaxis={
+            "type": "log",
+            "gridcolor": "#cbd5e1",
+            "automargin": True,
+        },
+        yaxis={
+            "type": "log",
+            "gridcolor": "#cbd5e1",
+            "automargin": True,
+        },
+        legend={
+            "orientation": "h",
+            "yanchor": "top",
+            "y": 1.18,
+            "xanchor": "left",
+            "x": 0.38,
+            "font": {"size": 10},
+        },
+    )
+    return pio.to_html(
+        figure,
+        include_plotlyjs=False,
+        full_html=False,
+        div_id="sed",
+        config={"responsive": True, "displaylogo": False},
+    )
 
 def _view_payload(view: ReviewSkyView) -> dict[str, object]:
     points = []

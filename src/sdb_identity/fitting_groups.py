@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .catalogs.policy import catalog_source_display_name
-from .samples.service import SampleService
 from .photometry.state import load_system_photometry_state
-from .targets import resolve_target
+from .models.catalogs import IrasBandSelection, IrasSourceFamily
+from .selection import TargetSelection, resolve_target_selection
 from .vocabulary import (
     INACTIVE_TARGET_STATES,
     MeasurementTargetRole,
@@ -21,16 +22,48 @@ def fitting_group_report(
     *,
     target_reference: str | int | None = None,
     sample: str | None = None,
+    all_targets: bool = False,
+    selection: TargetSelection | None = None,
 ) -> dict[str, object]:
     """Derive read-only joint-fitting groups from accepted assignments."""
-    if (target_reference is None) == (sample is None):
-        raise ValueError("specify exactly one target or --sample")
+    if selection is not None and any((
+        target_reference is not None, sample is not None, all_targets,
+    )):
+        raise ValueError("selection cannot be combined with another selector")
+    resolved_selection = selection or resolve_target_selection(
+        session_factory,
+        target_reference=target_reference,
+        sample=sample,
+        all_targets=all_targets,
+    )
     with session_factory() as session:
-        selected = _selected_targets(
-            session, session_factory,
-            target_reference=target_reference, sample=sample,
-        )
+        selected = set(resolved_selection.target_ids)
         state = load_system_photometry_state(session, selected)
+        detection_ids = {
+            value.detection_id for value in state.measurements.values()
+        }
+        iras_families = list(session.scalars(
+            select(IrasSourceFamily).where(
+                (IrasSourceFamily.psc_detection_id.in_(detection_ids))
+                | (IrasSourceFamily.fsc_detection_id.in_(detection_ids))
+            )
+        )) if detection_ids else []
+        iras_selected_measurement_ids = set(session.scalars(
+            select(IrasBandSelection.selected_measurement_id).where(
+                IrasBandSelection.family_id.in_(
+                    family.id for family in iras_families
+                )
+            )
+        )) if iras_families else set()
+
+    iras_family_by_detection = {
+        detection_id: family
+        for family in iras_families
+        for detection_id in (
+            family.psc_detection_id,
+            family.fsc_detection_id,
+        )
+    }
 
     targets = state.targets
     measurements = state.measurements
@@ -87,6 +120,7 @@ def fitting_group_report(
             if row.role == MeasurementTargetRole.COMPOSITE_SCOPE
         })
         eligibility_row = eligibility[measurement_id]
+        iras_family = iras_family_by_detection.get(measurement.detection_id)
         excluded = eligibility_row.excluded
         exclusion_basis = eligibility_row.basis
         fit_enabled = not excluded and bool(active_contributor_ids)
@@ -112,6 +146,16 @@ def fitting_group_report(
         measurement_rows[measurement_id] = {
             "measurement_id": measurement_id,
             "detection_id": measurement.detection_id,
+            "iras_family_id": None if iras_family is None else iras_family.id,
+            "iras_family_detection_ids": (
+                [] if iras_family is None else [
+                    iras_family.psc_detection_id,
+                    iras_family.fsc_detection_id,
+                ]
+            ),
+            "iras_selected_for_band": (
+                measurement.id in iras_selected_measurement_ids
+            ),
             "raw_row_id": measurement.raw_row_id,
             "origin_target_id": measurement.target_id,
             "origin_sdbid": targets.get(measurement.target_id).sdbid
@@ -310,11 +354,7 @@ def fitting_group_report(
         ),
     )
     return {
-        "selection": {
-            "target": None if target_reference is None else str(target_reference),
-            "sample": sample,
-            "selected_sdbids": [targets[value].sdbid for value in sorted(selected)],
-        },
+        "selection": resolved_selection.as_dict(),
         "summary": {
             "context_target_count": len(target_rows),
             "model_target_count": len(model_target_ids),
@@ -367,21 +407,117 @@ def fitting_group_report(
     }
 
 
-def _selected_targets(
-    session: Session,
-    session_factory: sessionmaker[Session],
-    *,
-    target_reference: str | int | None,
-    sample: str | None,
-) -> set[int]:
-    if sample is not None:
-        return {row.id for row in SampleService(session_factory).members(sample)}
-    target = resolve_target(session, target_reference)
-    if target is None:
-        raise KeyError(f"target not found: {target_reference}")
-    return {target.id}
-
-
 def _group_id(sdbids: list[str]) -> str:
     digest = hashlib.sha256("\n".join(sdbids).encode("utf-8")).hexdigest()[:12]
     return f"fit-group-{digest}"
+
+
+def fitting_group_subgraph(
+    report: dict[str, object],
+    group_id: str,
+) -> dict[str, object]:
+    """Return the self-contained manifest graph for one fitting group.
+
+    Sample reports deliberately include neighbouring systems and every fitting
+    group reached from the selection.  A directory consumed by SDF should not:
+    its metadata must describe only the measurements and targets relevant to
+    the rawphot files in that directory.
+    """
+    try:
+        group = next(
+            row for row in report["groups"]
+            if row["group_id"] == group_id
+        )
+    except StopIteration as error:
+        raise KeyError(f"fitting group not found: {group_id}") from error
+
+    measurement_ids = set(group["fit_measurement_ids"])
+    measurement_ids.update(group["context_measurement_ids"])
+    measurements = [
+        dict(row) for row in report["measurements"]
+        if row["measurement_id"] in measurement_ids
+    ]
+    for row in measurements:
+        row["fitting_group_ids"] = [
+            value for value in row["fitting_group_ids"]
+            if value == group_id
+        ]
+
+    target_ids = set(group["target_ids"])
+    target_ids.update(group["composite_scope_target_ids"])
+    for row in measurements:
+        for key in (
+            "encounter_target_ids",
+            "contributor_target_ids",
+            "active_model_contributor_ids",
+            "composite_scope_target_ids",
+        ):
+            target_ids.update(row[key])
+        if row["origin_target_id"] is not None:
+            target_ids.add(row["origin_target_id"])
+        target_ids.update(
+            assignment["target_id"] for assignment in row["assignments"]
+        )
+    targets = [
+        row for row in report["targets"]
+        if row["target_id"] in target_ids
+    ]
+
+    unresolved = [
+        row for row in report["unresolved_composite_measurements"]
+        if row["measurement_id"] in measurement_ids
+    ]
+    scope_role_review = [
+        row for row in report["scope_role_review_measurements"]
+        if row["measurement_id"] in measurement_ids
+    ]
+    validation_errors = [
+        f"fit-enabled measurement {row['measurement_id']} does not belong "
+        f"exclusively to {group_id}"
+        for row in measurements
+        if row["fit_enabled"] and row["fitting_group_ids"] != [group_id]
+    ]
+    package_group = dict(group)
+    return {
+        "selection": dict(report["selection"]),
+        "summary": {
+            "context_target_count": len(targets),
+            "model_target_count": len(group["target_ids"]),
+            "composite_target_count": sum(
+                row["role"] == TargetRole.COMPOSITE for row in targets
+            ),
+            "fitting_group_count": 1,
+            "measurement_count": len(measurements),
+            "fit_enabled_measurement_count": sum(
+                row["fit_enabled"] for row in measurements
+            ),
+            "excluded_context_measurement_count": sum(
+                row["fit_excluded"] for row in measurements
+            ),
+            "multi_contributor_measurement_count": sum(
+                len(row["active_model_contributor_ids"]) > 1
+                for row in measurements if row["fit_enabled"]
+            ),
+            "unresolved_composite_measurement_count": len(unresolved),
+            "scope_role_review_measurement_count": len(scope_role_review),
+            "unassigned_measurement_count": sum(
+                "no_current_assignment" in row["review_flags"]
+                for row in measurements
+            ),
+        },
+        "targets": targets,
+        "groups": [package_group],
+        "measurements": measurements,
+        "unresolved_composite_measurements": unresolved,
+        "scope_role_review_measurements": scope_role_review,
+        "invariants": {
+            "valid": not validation_errors,
+            "errors": validation_errors,
+            "fit_enabled_measurements_belong_to_one_group": not validation_errors,
+            "composite_targets_are_not_model_nodes": all(
+                not row["model_target"]
+                for row in targets if row["role"] == TargetRole.COMPOSITE
+            ),
+        },
+        "notes": list(report["notes"]),
+    }

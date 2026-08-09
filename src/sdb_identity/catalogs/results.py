@@ -13,6 +13,7 @@ from ..models.catalogs import (
     CatalogDetection,
     CatalogResultDecision,
     CatalogRun,
+    CatalogTargetAssociationAction,
     NormalizedMeasurement,
     RawCatalogRow,
 )
@@ -28,6 +29,7 @@ class EffectiveCatalogResult:
     selected_detection: CatalogDetection | None
     selected_raw_row: RawCatalogRow | None
     decision: CatalogResultDecision | None
+    association_action: CatalogTargetAssociationAction | None
 
     @property
     def selected_source_id(self) -> str | None:
@@ -54,7 +56,7 @@ def effective_catalog_selected_rows(
 
     if result.status != ProviderRunStatus.MATCH:
         return ()
-    if result.decision is not None:
+    if result.decision is not None or result.association_action is not None:
         if (
             result.selected_raw_row is None
             or result.selected_detection is None
@@ -111,9 +113,42 @@ def effective_catalog_results(
         )
         for decision in session.scalars(decision_query):
             decisions[decision.reviewed_run_id] = decision
+    ambiguous_rows_by_run: dict[int, list[RawCatalogRow]] = {}
+    ambiguous_detection_ids: set[int] = set()
+    ambiguous_runs = {
+        run.id: run
+        for run in runs
+        if run.status == ProviderRunStatus.AMBIGUOUS
+    }
+    if ambiguous_runs:
+        for raw_row in session.scalars(
+            select(RawCatalogRow)
+            .where(RawCatalogRow.run_id.in_(ambiguous_runs))
+            .order_by(RawCatalogRow.id)
+        ):
+            ambiguous_rows_by_run.setdefault(raw_row.run_id, []).append(raw_row)
+            ambiguous_detection_ids.add(raw_row.detection_id)
+    latest_association_actions: dict[
+        tuple[int, int], CatalogTargetAssociationAction
+    ] = {}
+    if ambiguous_detection_ids:
+        for action in session.scalars(
+            select(CatalogTargetAssociationAction)
+            .where(
+                CatalogTargetAssociationAction.target_id.in_(ids),
+                CatalogTargetAssociationAction.detection_id.in_(
+                    ambiguous_detection_ids
+                ),
+            )
+            .order_by(CatalogTargetAssociationAction.id)
+        ):
+            latest_association_actions[(
+                action.target_id, action.detection_id,
+            )] = action
     result: dict[tuple[int, str], EffectiveCatalogResult] = {}
     for run in runs:
         decision = decisions.get(run.id)
+        association_action = None
         status = ProviderRunStatus.parse(run.status, "catalog status")
         raw_row = None
         detection = None
@@ -131,6 +166,26 @@ def effective_catalog_results(
                 detection = session.get(
                     CatalogDetection, decision.accepted_detection_id,
                 )
+        elif status == ProviderRunStatus.AMBIGUOUS:
+            accepted_rows = []
+            for candidate_row in ambiguous_rows_by_run.get(run.id, []):
+                action = latest_association_actions.get((
+                    run.target_id, candidate_row.detection_id,
+                ))
+                if action is not None and action.action == "accept":
+                    accepted_rows.append((candidate_row, action))
+            accepted_detection_ids = {
+                candidate_row.detection_id
+                for candidate_row, _action in accepted_rows
+            }
+            if len(accepted_detection_ids) == 1:
+                raw_row, association_action = max(
+                    accepted_rows, key=lambda value: value[1].id,
+                )
+                detection = session.get(
+                    CatalogDetection, raw_row.detection_id,
+                )
+                status = ProviderRunStatus.MATCH
         elif status == ProviderRunStatus.MATCH:
             raw_row = session.scalar(
                 select(RawCatalogRow)
@@ -150,6 +205,7 @@ def effective_catalog_results(
             detection,
             raw_row,
             decision,
+            association_action,
         )
     return result
 

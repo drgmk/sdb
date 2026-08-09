@@ -37,7 +37,14 @@ from ..reference_definitions import (
 from ..ubv_components import decode_ubv_component, ubv_photometry_scope
 from ..tdsc_components import decode_tdsc_component
 from ..v70a_components import decode_v70a_component
-from ...reference.store import ReferenceAlias, ReferenceRow, ReferenceStore, ReferenceTable, _star_identifier
+from ...reference.store import (
+    ReferenceAlias,
+    ReferenceCrossIdentifier,
+    ReferenceRow,
+    ReferenceStore,
+    ReferenceTable,
+    _star_identifier,
+)
 from .vizier import row_float, row_text
 from .review_metadata import add_review_metadata, PositionUncertainty
 
@@ -60,7 +67,16 @@ class SnapshotCatalogAdapter:
         self.snapshot_catalog = snapshot.catalog
         self.snapshot_source_url = snapshot.source_url
         self.snapshot_digest = snapshot.content_sha256
-        self.release = f"{definition.catalog}@{snapshot.content_sha256[:16]}"
+        revision = (
+            ""
+            if definition.application_revision is None
+            else f"+{definition.application_revision}"
+        )
+        self.release = (
+            f"{definition.catalog}@{snapshot.content_sha256[:16]}{revision}"
+        )
+        self.application_revision = definition.application_revision
+        self.store.materialize_cross_identifiers(self.name)
 
     def _snapshot_context(self):
         # Select only explicitly declared science/matching tables. Related
@@ -188,11 +204,52 @@ class SnapshotCatalogAdapter:
             target_id: list(rows.values()) for target_id, rows in result.items()
         }
 
+    def _cross_identifier_rows_many(
+        self,
+        table_ids: tuple[int, ...],
+        contexts: list[CatalogQueryContext],
+    ) -> dict[int, list[ReferenceRow]]:
+        targets_by_alias: dict[str, set[int]] = {}
+        for context in contexts:
+            for value in context.identifiers:
+                alias = _star_identifier(value)
+                if alias:
+                    targets_by_alias.setdefault(alias, set()).add(
+                        context.target_id
+                    )
+        result: dict[int, dict[int, ReferenceRow]] = {
+            context.target_id: {} for context in contexts
+        }
+        if not targets_by_alias:
+            return {target_id: [] for target_id in result}
+        with self.store.sessions() as session:
+            links = list(session.execute(select(
+                ReferenceCrossIdentifier.normalized_identifier,
+                ReferenceRow,
+            ).join(
+                ReferenceRow,
+                ReferenceRow.id == ReferenceCrossIdentifier.row_id,
+            ).where(
+                ReferenceCrossIdentifier.normalized_identifier.in_(
+                    tuple(targets_by_alias)
+                ),
+                ReferenceRow.table_id.in_(table_ids),
+            )))
+        for alias, row in links:
+            for target_id in targets_by_alias[alias]:
+                result[target_id][row.id] = row
+        return {
+            target_id: list(rows.values()) for target_id, rows in result.items()
+        }
+
     def _candidate(self, row, refs, table: ReferenceTable) -> CatalogCandidate:
         # Common candidate envelope. The concrete adapter methods below own
         # payload enrichment, epoch, photometry, and auxiliary attributes.
         payload = json.loads(row.payload_json)
         payload = self.enrich_payload(payload, refs)
+        native_identifiers = self.store.cross_identifiers(row.id)
+        if native_identifiers:
+            payload["_sdb_native_identifiers"] = native_identifiers
         identifier_column, identifier_value = self._provenance_identifier(
             payload
         )
@@ -269,10 +326,17 @@ class SnapshotCatalogAdapter:
         table_ids, refs, tables_by_id = self._snapshot_context()
         result = {context.target_id: [] for context in contexts}
         alias_rows_by_target = self._alias_rows_many(table_ids, contexts)
+        cross_rows_by_target = self._cross_identifier_rows_many(
+            table_ids, contexts,
+        )
         for context in contexts:
             rows = {
                 row.id: row for row in alias_rows_by_target[context.target_id]
             }
+            rows.update({
+                row.id: row
+                for row in cross_rows_by_target[context.target_id]
+            })
             for table_id in table_ids:
                 rows.update({
                     row.id: row
@@ -287,7 +351,7 @@ class SnapshotCatalogAdapter:
                     candidate.astrometry,
                     epoch=self.query_epoch,
                 )
-                payload = json.loads(row.payload_json)
+                payload = candidate.payload
                 row_aliases = {
                     _star_identifier(value)
                     for value in self.definition.identifiers(payload)
@@ -534,6 +598,9 @@ class IrasSnapshotAdapter(SnapshotCatalogAdapter):
 
     @staticmethod
     def score_candidate(context, candidate, separation_arcsec):
+        association = candidate.payload.get("_sdb_association", {})
+        if association.get("identifier_agreement"):
+            return 1.0
         major = row_float(candidate.payload, "Major")
         minor = row_float(candidate.payload, "Minor")
         position_angle = row_float(candidate.payload, "PosAng")

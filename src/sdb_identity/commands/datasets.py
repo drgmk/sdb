@@ -108,7 +108,7 @@ def register_dataset_parser(
         "Mark curated-data export work complete for a target.",
         "Clears pending curated export state after an external export step. "
         "This is mainly for controlled workflows where export completion is "
-        "handled outside `sdb export-dirty`.",
+        "handled outside `sdb export`.",
     )
     mark_exported.add_argument("dataset", choices=DATASETS)
     mark_exported.add_argument("target")

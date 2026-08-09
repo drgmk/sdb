@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import threading
 import webbrowser
 from typing import Callable
+from uuid import uuid4
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -11,6 +13,7 @@ from ..service import IdentityService
 
 def create_review_app(
     session_factory: sessionmaker[Session], *, sample: str | None = None,
+    default_actor: str | None = None,
     identity_service_factory: Callable[[], IdentityService] | None = None,
     catalog_service_factory: Callable[[str, str], object] | None = None,
     catalog_coverage_providers: tuple[str, ...] | None = None,
@@ -33,6 +36,11 @@ def create_review_app(
     context = ReviewWebContext(
         session_factory=session_factory,
         sample=sample,
+        default_actor=(
+            str(default_actor or "").strip()
+            or os.environ.get("SDB_ACTOR", "").strip()
+        ),
+        review_session_id=uuid4().hex,
         identity_service_factory=identity_service_factory,
         catalog_service_factory=catalog_service_factory,
         catalog_coverage_providers=catalog_coverage_providers,
@@ -49,6 +57,7 @@ def serve_review_ui(
     session_factory: sessionmaker[Session],
     *,
     sample: str | None,
+    default_actor: str | None = None,
     host: str = "127.0.0.1",
     port: int = 8765,
     open_browser: bool = False,
@@ -71,6 +80,7 @@ def serve_review_ui(
     app = create_review_app(
         session_factory,
         sample=sample,
+        default_actor=default_actor,
         identity_service_factory=identity_service_factory,
         catalog_service_factory=catalog_service_factory,
         catalog_coverage_providers=catalog_coverage_providers,

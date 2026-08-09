@@ -8,6 +8,40 @@ let currentCatalogAssociationPayload=null;
 let currentCatalogAssociationPreview=null;
 const drawer=document.getElementById('assignment-drawer');
 const skyReview=document.getElementById('sky-review');
+const actorInputs=[...document.querySelectorAll('.decision-meta input[id$="actor"]')];
+function setActorInputs(value,source=null){
+  for(const input of actorInputs){
+    if(input!==source)input.value=value;
+  }
+}
+function rememberActor(value){
+  const actor=String(value||'').trim();
+  if(!actor)return actor;
+  setActorInputs(actor);
+  try{localStorage.setItem('sdb-review-actor',actor);}catch(error){/* Optional convenience only. */}
+  return actor;
+}
+function restoreActor(){
+  let remembered='';
+  let previousSession='';
+  try{
+    remembered=(localStorage.getItem('sdb-review-actor')||'').trim();
+    previousSession=localStorage.getItem('sdb-review-session')||'';
+  }catch(error){/* Fall back to the server-rendered value. */}
+  const serverActor=String(window.SDB_DEFAULT_ACTOR||'').trim();
+  const newServerSession=window.SDB_REVIEW_SESSION&&previousSession!==window.SDB_REVIEW_SESSION;
+  const actor=(newServerSession&&serverActor)?serverActor:(remembered||serverActor);
+  setActorInputs(actor);
+  try{
+    if(actor)localStorage.setItem('sdb-review-actor',actor);
+    if(window.SDB_REVIEW_SESSION)localStorage.setItem('sdb-review-session',window.SDB_REVIEW_SESSION);
+  }catch(error){/* Actor inputs still work without browser storage. */}
+}
+actorInputs.forEach(input=>input.addEventListener('input',()=>{
+  setActorInputs(input.value,input);
+  try{localStorage.setItem('sdb-review-actor',input.value);}catch(error){/* Optional convenience only. */}
+}));
+restoreActor();
 let reviewDrawerVisible=false;
 try{
   reviewDrawerVisible=sessionStorage.getItem('sdb-review-tools-visible')==='true';
@@ -152,20 +186,32 @@ function showCatalogAssociation(point,detectionId){
       resetEligibilityControls(section);
     }
   }
+  const familySection=hasPhotometry
+    ? document.querySelector(`.detection[data-detection="${detectionId}"]`)
+    : null;
+  const isIrasFamily=Boolean(
+    familySection?.querySelector('h3')?.textContent.trim().startsWith('IRAS family')
+  );
   document.getElementById('provider-result-editor').hidden=true;
   document.getElementById('provider-result-preview-panel').hidden=true;
   const editor=document.getElementById('catalog-association-editor');
   editor.hidden=false;
   editor.classList.add('active');
   document.getElementById('catalog-association-preview-panel').hidden=false;
-  document.getElementById('drawer-title').textContent=hasPhotometry?'Source association and photometry':'Catalog source association';
+  document.getElementById('drawer-title').textContent=isIrasFamily
+    ? 'IRAS family association and photometry'
+    : (hasPhotometry?'Source association and photometry':'Catalog source association');
   const runTarget=pointRunTarget(point);
   document.getElementById('selected-source').innerHTML=selectedSourceHtml(point);
-  document.getElementById('assignment-prompt').textContent=hasPhotometry
+  document.getElementById('assignment-prompt').textContent=isIrasFamily
+    ? 'PSC and FSC are separate plotted evidence, but one family association and photometry attribution applies to both.'
+    : hasPhotometry
     ? 'This source is accepted for the current target. Its photometry can be assigned below.'
     : 'Decide whether this discovered source belongs to the current target.';
-  document.getElementById('catalog-association-context').textContent=`${point.provider} · ${point.status}${runTarget?` · discovered by the catalog query for ${runTarget}`:''}${point.note?` · ${point.note}`:''}`;
+  document.getElementById('catalog-association-context').textContent=`${point.provider} · ${point.status}${runTarget?` · discovered by the catalog query for ${runTarget}`:''}${point.note?` · ${point.note}`:''}${isIrasFamily?' · the decision applies to the PSC/FSC family':''}`;
   for(const button of editor.querySelectorAll('.preview-catalog-association')){
+    button.textContent=(button.dataset.action==='accept'?'Accept':'Reject')
+      +(isIrasFamily?' family':'')+' for this target';
     button.dataset.detectionId=point.detection_id;
     button.dataset.rawRowId=point.raw_row_id;
   }
@@ -381,11 +427,10 @@ document.querySelectorAll('.preview-catalog-association').forEach(button=>button
 }));
 document.getElementById('apply').addEventListener('click',async()=>{
   if(!currentPayload||!currentPreview) return;
-  const actor=document.getElementById('actor').value;
+  const actor=rememberActor(document.getElementById('actor').value);
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
   const payload={...currentPayload,actor,reason,state_token:currentPreview.state_token};
-  if(!confirm('Apply the displayed lifecycle and assignment changes?')) return;
   try{
     const value=await request('/api/decision/apply',payload);
     renderHumanSummary(document.getElementById('preview'),value);
@@ -395,10 +440,9 @@ document.getElementById('apply').addEventListener('click',async()=>{
 });
 document.getElementById('apply-eligibility').addEventListener('click',async()=>{
   if(!currentEligibilityPayload||!currentEligibilityPreview)return;
-  const actor=document.getElementById('actor').value;
+  const actor=rememberActor(document.getElementById('actor').value);
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed fit include/exclude changes?'))return;
   const payload={...currentEligibilityPayload,actor,reason,state_token:currentEligibilityPreview.state_token};
   try{
     const value=await request('/api/eligibility/apply',payload);
@@ -409,10 +453,9 @@ document.getElementById('apply-eligibility').addEventListener('click',async()=>{
 });
 document.getElementById('apply-provider-result').addEventListener('click',async()=>{
   if(!currentProviderPayload||!currentProviderPreview)return;
-  const actor=document.getElementById('actor').value;
+  const actor=rememberActor(document.getElementById('actor').value);
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed provider result action?'))return;
   const payload={...currentProviderPayload,actor,reason,state_token:currentProviderPreview.state_token};
   try{
     const value=await request('/api/provider-result/apply',payload);
@@ -423,10 +466,9 @@ document.getElementById('apply-provider-result').addEventListener('click',async(
 });
 document.getElementById('apply-catalog-association').addEventListener('click',async()=>{
   if(!currentCatalogAssociationPayload||!currentCatalogAssociationPreview)return;
-  const actor=document.getElementById('actor').value;
+  const actor=rememberActor(document.getElementById('actor').value);
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  if(!confirm('Apply the displayed catalog source association?'))return;
   const payload={...currentCatalogAssociationPayload,actor,reason,state_token:currentCatalogAssociationPreview.state_token};
   try{
     const value=await request('/api/catalog-association/apply',payload);
@@ -461,12 +503,11 @@ document.getElementById('preview-lifecycle').addEventListener('click',async()=>{
 });
 document.getElementById('apply-lifecycle').addEventListener('click',async()=>{
   if(!lifecyclePreview)return;
-  const actor=document.getElementById('lifecycle-actor').value;
+  const actor=rememberActor(document.getElementById('lifecycle-actor').value);
   const reason=document.getElementById('lifecycle-reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
   const role=selectedLifecycleRole();
   const payload={target:window.SDB_TARGET,role,state:role==='composite'?'system_only':'active',actor,reason,state_token:lifecyclePreview.state_token};
-  if(!confirm('Apply the displayed target modelling role?'))return;
   try{
     const value=await request('/api/lifecycle/apply',payload);
     renderHumanSummary(document.getElementById('lifecycle-preview'),value);
@@ -531,12 +572,11 @@ function openRelativesDialog(){
 document.getElementById('preview-relatives').addEventListener('click',refreshRelativesPreview);
 document.getElementById('apply-relatives').addEventListener('click',async()=>{
   if(!relativesPreview)return;
-  const actor=document.getElementById('relatives-actor').value;
+  const actor=rememberActor(document.getElementById('relatives-actor').value);
   const reason=document.getElementById('relatives-reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
   const selected_relationship_ids=selectedRelativeIds();
   if(!selected_relationship_ids.length)return;
-  if(!confirm(`Import or reconcile ${selected_relationship_ids.length} selected SIMBAD relative${selected_relationship_ids.length===1?'':'s'}?`))return;
   const button=document.getElementById('apply-relatives');
   button.disabled=true;
   button.textContent='Importing…';
@@ -626,7 +666,6 @@ document.getElementById('apply-nearby-import').addEventListener('click',async()=
     ...document.querySelectorAll('#nearby-import-rows input:checked')
   ].map(input=>input.value);
   if(!selected.length)return;
-  if(!confirm(`Import ${selected.length} selected SIMBAD object(s) and fill provider coverage?`))return;
   const button=document.getElementById('apply-nearby-import');
   const summary=document.getElementById('nearby-import-summary');
   button.disabled=true;
@@ -678,7 +717,6 @@ document.getElementById('catalog-coverage').addEventListener('click',()=>{
 document.getElementById('preview-catalog-coverage').addEventListener('click',refreshCatalogCoveragePreview);
 document.getElementById('apply-catalog-coverage').addEventListener('click',async()=>{
   if(!catalogCoveragePreview)return;
-  if(!confirm('Complete the displayed catalog normalization and provider gaps?'))return;
   const button=document.getElementById('apply-catalog-coverage');
   button.disabled=true;
   button.textContent='Updating…';

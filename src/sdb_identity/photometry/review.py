@@ -7,19 +7,27 @@ the interactive review surface.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+import json
 from typing import TypedDict
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..catalogs.policy import (
     catalog_band_wavelength_micron,
     catalog_source_display_name,
 )
+from ..catalogs.results import effective_catalog_results
+from ..fitting_groups import fitting_group_report
+from ..models.catalogs import NormalizedMeasurement, RawCatalogRow
+from ..vocabulary import ProviderRunStatus
 from .proposals import (
     effective_target_role,
     measurement_assignment_proposals,
 )
+from .readiness import assignment_review_measurement_ids
 
 
 class AssignmentMatrixColumn(TypedDict):
@@ -63,6 +71,7 @@ class AssignmentMatrixBand(TypedDict):
     excluded: bool
     comparison_to_current: str
     duplicate_proposal_conflict: bool
+    catalog_entries: list[dict[str, object]]
 
 
 class AssignmentMatrixRow(TypedDict):
@@ -99,6 +108,9 @@ class AssignmentMatrixRow(TypedDict):
     duplicate_proposal_conflict: bool
     mixed_band_assignments: bool
     cells: list[AssignmentMatrixCell]
+    family_kind: str | None
+    family_members: list[dict[str, object]]
+    needs_review: bool
 
 
 class AssignmentMatrixSummary(TypedDict):
@@ -123,6 +135,7 @@ class MeasurementAssignmentMatrix(TypedDict):
 class MeasurementAssignmentReview:
     proposals: list[dict[str, object]]
     matrix: MeasurementAssignmentMatrix
+    ambiguous_photometry: list[dict[str, object]]
 
 
 def build_measurement_assignment_review(
@@ -143,17 +156,121 @@ def build_measurement_assignment_review(
         target_reference,
         system_context=system_context,
     )
+    graph = fitting_group_report(
+        session_factory,
+        target_reference=target_reference,
+    )
+    matrix = measurement_assignment_matrix(
+        system_context,
+        proposals,
+        review_measurement_ids=assignment_review_measurement_ids(graph),
+    )
+    with session_factory() as session:
+        ambiguous_photometry = _ambiguous_catalog_photometry(
+            session,
+            target_ids=(
+                int(column["target_id"])
+                for column in matrix["columns"]
+                if column.get("target_id") is not None
+            ),
+            displayed_measurement_ids=(
+                int(measurement_id)
+                for row in matrix["rows"]
+                for measurement_id in row["measurement_ids"]
+            ),
+        )
     return MeasurementAssignmentReview(
         proposals=proposals,
-        matrix=measurement_assignment_matrix(system_context, proposals),
+        matrix=matrix,
+        ambiguous_photometry=ambiguous_photometry,
     )
+
+
+def _ambiguous_catalog_photometry(
+    session: Session,
+    *,
+    target_ids: Iterable[int],
+    displayed_measurement_ids: Iterable[int] = (),
+) -> list[dict[str, object]]:
+    """Project measurements from currently ambiguous catalog candidates.
+
+    These rows intentionally sit outside the assignment matrix: no catalog
+    detection has yet been selected, so treating them as assignable current
+    photometry would skip the catalog-association decision.  They are useful
+    on the SED as grey candidate points, however.
+    """
+    ids = tuple(dict.fromkeys(int(value) for value in target_ids))
+    displayed = {int(value) for value in displayed_measurement_ids}
+    results = effective_catalog_results(session, ids)
+    ambiguous_run_ids = {
+        result.run.id
+        for result in results.values()
+        if result.status == ProviderRunStatus.AMBIGUOUS
+    }
+    if not ambiguous_run_ids:
+        return []
+
+    raw_rows = list(session.scalars(
+        select(RawCatalogRow)
+        .where(RawCatalogRow.run_id.in_(ambiguous_run_ids))
+        .order_by(RawCatalogRow.run_id, RawCatalogRow.id)
+    ))
+    raw_by_detection: dict[int, RawCatalogRow] = {}
+    for raw_row in raw_rows:
+        raw_by_detection.setdefault(raw_row.detection_id, raw_row)
+    if not raw_by_detection:
+        return []
+
+    rows: list[dict[str, object]] = []
+    seen: set[int] = set(displayed)
+    measurements = session.scalars(
+        select(NormalizedMeasurement)
+        .where(NormalizedMeasurement.detection_id.in_(raw_by_detection))
+        .order_by(
+            NormalizedMeasurement.provider,
+            NormalizedMeasurement.source_id,
+            NormalizedMeasurement.band,
+            NormalizedMeasurement.id,
+        )
+    )
+    for measurement in measurements:
+        if measurement.id in seen:
+            continue
+        seen.add(measurement.id)
+        raw_row = raw_by_detection[measurement.detection_id]
+        try:
+            payload = json.loads(raw_row.payload_json)
+        except (TypeError, json.JSONDecodeError):
+            payload = None
+        rows.append({
+            "measurement_id": measurement.id,
+            "detection_id": measurement.detection_id,
+            "provider": measurement.provider,
+            "source_id": measurement.source_id,
+            "source_display_name": catalog_source_display_name(
+                measurement.provider,
+                measurement.source_id,
+                payload if isinstance(payload, dict) else None,
+            ),
+            "band": measurement.band,
+            "value": measurement.value,
+            "error": measurement.error,
+            "systematic_error": measurement.systematic_error,
+            "unit": measurement.unit,
+            "upper_limit": measurement.upper_limit,
+            "excluded": measurement.excluded,
+        })
+    return rows
 
 
 def measurement_assignment_matrix(
     system_context: dict[str, object],
     proposals: list[dict[str, object]],
+    *,
+    review_measurement_ids: Iterable[int] = (),
 ) -> MeasurementAssignmentMatrix:
     """Build the review-only target-by-measurement matrix."""
+    review_ids = {int(value) for value in review_measurement_ids}
     requested = system_context.get("target") or {}
     requested_sdbid = str(requested.get("sdbid") or "")
     memberships = system_context.get("system_memberships_by_target") or {}
@@ -395,7 +512,8 @@ def measurement_assignment_matrix(
 
     measurement_groups: dict[object, list[dict[str, object]]] = {}
     for proposal in proposals:
-        key = proposal.get("detection_id") or (
+        iras_family = proposal.get("iras_family") or {}
+        key = iras_family.get("key") or proposal.get("detection_id") or (
             str(proposal["provider"]),
             str(proposal["source_id"]),
         )
@@ -403,7 +521,21 @@ def measurement_assignment_matrix(
 
     rows: list[AssignmentMatrixRow] = []
     for group in measurement_groups.values():
-        provider = str(group[0]["provider"])
+        iras_family = next((
+            proposal.get("iras_family")
+            for proposal in group
+            if proposal.get("iras_family")
+        ), None)
+        selected_group = [
+            proposal
+            for proposal in group
+            if (proposal.get("iras_family") or {}).get(
+                "selected_for_band"
+            )
+        ] if iras_family else group
+        if not selected_group:
+            selected_group = group
+        provider = "iras" if iras_family else str(group[0]["provider"])
         source_id = str(group[0]["source_id"])
         band_groups: dict[str, list[dict[str, object]]] = {}
         for proposal in group:
@@ -413,7 +545,9 @@ def measurement_assignment_matrix(
             item: tuple[str, list[dict[str, object]]],
         ) -> tuple[bool, float, str]:
             band = item[0]
-            wavelength = catalog_band_wavelength_micron(provider, band)
+            wavelength = catalog_band_wavelength_micron(
+                str(item[1][0]["provider"]), band
+            )
             return (
                 wavelength is None,
                 float("inf") if wavelength is None else wavelength,
@@ -425,9 +559,23 @@ def measurement_assignment_matrix(
             key=band_order,
         )
 
+        def review_band_group(
+            band_group: list[dict[str, object]],
+        ) -> list[dict[str, object]]:
+            if not iras_family:
+                return band_group
+            selected = [
+                proposal for proposal in band_group
+                if (proposal.get("iras_family") or {}).get(
+                    "selected_for_band"
+                )
+            ]
+            return selected or band_group
+
         bands: list[AssignmentMatrixBand] = []
         for band, band_group in ordered_band_groups:
-            first_band = band_group[0]
+            selected_band_group = review_band_group(band_group)
+            first_band = selected_band_group[0]
             values = {
                 (
                     proposal.get("value"),
@@ -436,11 +584,13 @@ def measurement_assignment_matrix(
                 )
                 for proposal in band_group
             }
-            duplicate_conflict = group_has_duplicate_conflict(band_group)
+            duplicate_conflict = group_has_duplicate_conflict(
+                selected_band_group
+            )
             bands.append({
                 "band": band,
                 "wavelength_micron": catalog_band_wavelength_micron(
-                    provider, band
+                    str(first_band["provider"]), band
                 ),
                 "measurement_ids": [
                     proposal["measurement_id"] for proposal in band_group
@@ -449,29 +599,46 @@ def measurement_assignment_matrix(
                 "value": first_band["value"],
                 "error": first_band.get("error"),
                 "unit": first_band["unit"],
-                "values_consistent": len(values) == 1,
+                "values_consistent": (
+                    True if iras_family else len(values) == 1
+                ),
                 "resolution_major_arcsec": first_band.get(
                     "resolution_major_arcsec"
                 ),
                 "resolution_minor_arcsec": first_band.get(
                     "resolution_minor_arcsec"
                 ),
-                "excluded": any(
-                    bool(proposal.get("excluded"))
-                    for proposal in band_group
-                ),
+                "excluded": bool(first_band.get("excluded")),
                 "comparison_to_current": group_comparison(
-                    band_group,
+                    selected_band_group,
                     duplicate_conflict=duplicate_conflict,
                 ),
                 "duplicate_proposal_conflict": duplicate_conflict,
+                "catalog_entries": [{
+                    "provider": str(proposal["provider"]),
+                    "source_id": str(proposal["source_id"]),
+                    "source_display_name": str(
+                        proposal.get("source_display_name")
+                        or proposal["source_id"]
+                    ),
+                    "measurement_id": proposal["measurement_id"],
+                    "value": proposal.get("value"),
+                    "error": proposal.get("error"),
+                    "unit": proposal.get("unit"),
+                    "selected": bool(
+                        (proposal.get("iras_family") or {}).get(
+                            "selected_for_band"
+                        )
+                    ),
+                    "provenance": list(proposal.get("provenance") or []),
+                } for proposal in band_group],
             })
 
         cells: list[AssignmentMatrixCell] = []
         for column in columns:
             sdbid = column["sdbid"]
             states = {
-                band: band_cell_state(band_group, column)
+                band: band_cell_state(review_band_group(band_group), column)
                 for band, band_group in ordered_band_groups
             }
             current_signatures = {
@@ -539,7 +706,28 @@ def measurement_assignment_matrix(
                     None if not separations else min(separations)
                 ),
             })
-        first = group[0]
+        first = selected_group[0]
+        family_members_by_key: dict[
+            tuple[str, str], dict[str, object]
+        ] = {}
+        for proposal in group:
+            member_key = (
+                str(proposal["provider"]),
+                str(proposal["source_id"]),
+            )
+            family_members_by_key.setdefault(member_key, {
+                "provider": member_key[0],
+                "source_id": member_key[1],
+                "source_display_name": str(
+                    proposal.get("source_display_name")
+                    or proposal["source_id"]
+                ),
+                "provenance": list(proposal.get("provenance") or []),
+            })
+        family_members = [
+            family_members_by_key[key]
+            for key in sorted(family_members_by_key)
+        ]
         duplicate_proposal_conflict = any(
             band["duplicate_proposal_conflict"] for band in bands
         )
@@ -558,13 +746,14 @@ def measurement_assignment_matrix(
         else:
             comparison = "mixed_band_state"
         scopes = sorted({
-            str(proposal["predicted_scope"]) for proposal in group
+            str(proposal["predicted_scope"]) for proposal in selected_group
         })
         blend_states = sorted({
-            str(proposal["predicted_blend_state"]) for proposal in group
+            str(proposal["predicted_blend_state"])
+            for proposal in selected_group
         })
         reasons = list(dict.fromkeys(
-            str(proposal["proposal_reason"]) for proposal in group
+            str(proposal["proposal_reason"]) for proposal in selected_group
         ))
         rows.append({
             "detection_id": first.get("detection_id"),
@@ -576,10 +765,16 @@ def measurement_assignment_matrix(
             "provider": provider,
             "source_id": source_id,
             "source_display_name": str(
-                first.get("source_display_name")
+                "IRAS family"
+                if iras_family
+                else first.get("source_display_name")
                 or catalog_source_display_name(provider, source_id)
             ),
-            "provenance": list(first.get("provenance") or []),
+            "provenance": [
+                provenance
+                for proposal in group
+                for provenance in proposal.get("provenance") or []
+            ],
             "band": bands[0]["band"] if len(bands) == 1 else "multiple",
             "wavelength_micron": min(
                 (
@@ -612,9 +807,7 @@ def measurement_assignment_matrix(
             "resolution_minor_arcsec": first.get(
                 "resolution_minor_arcsec"
             ),
-            "excluded": any(
-                bool(proposal.get("excluded")) for proposal in group
-            ),
+            "excluded": any(bool(band["excluded"]) for band in bands),
             "predicted_scope": (
                 scopes[0] if len(scopes) == 1 else "mixed"
             ),
@@ -627,7 +820,7 @@ def measurement_assignment_matrix(
             "proposal_confidence": min(
                 (
                     str(proposal["proposal_confidence"])
-                    for proposal in group
+                    for proposal in selected_group
                 ),
                 key=lambda value: {
                     "low": 0, "medium": 1, "high": 2
@@ -638,6 +831,12 @@ def measurement_assignment_matrix(
             "duplicate_proposal_conflict": duplicate_proposal_conflict,
             "mixed_band_assignments": mixed_band_assignments,
             "cells": cells,
+            "family_kind": "iras_psc_fsc" if iras_family else None,
+            "family_members": family_members,
+            "needs_review": any(
+                int(proposal["measurement_id"]) in review_ids
+                for proposal in group
+            ),
         })
 
     rows.sort(key=lambda row: (

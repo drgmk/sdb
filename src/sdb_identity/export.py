@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+import hashlib
+import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from astropy.table import Table
@@ -65,6 +67,19 @@ class TargetExportSnapshot:
 
     projection: TargetExportProjection
     dirty_event_watermark: int | None
+
+
+def projection_sha256(projection: TargetExportProjection) -> str:
+    """Fingerprint scientific export content independently of its destination."""
+    value = asdict(projection)
+    value.pop("target_id")
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def build_target_export_projection(

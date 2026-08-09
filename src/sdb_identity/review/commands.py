@@ -368,10 +368,22 @@ def _catalog_association_summary(
     action = str(value["action"])
     verb = "Accept" if action == "accept" else "Reject"
     source = detection.get("source_display_name") or detection["source_id"]
-    change = (
-        f"{verb} {detection['provider']} source {source} "
-        f"{'as' if action == 'accept' else 'for'} {target['sdbid']}."
-    )
+    family_members = detection.get("family_members") or []
+    if len(family_members) > 1:
+        change = (
+            f"{verb} the linked IRAS PSC/FSC family "
+            f"{'as' if action == 'accept' else 'for'} {target['sdbid']}: "
+            + "; ".join(
+                f"{member['provider']} {member['source_id']}"
+                for member in family_members
+            )
+            + "."
+        )
+    else:
+        change = (
+            f"{verb} {detection['provider']} source {source} "
+            f"{'as' if action == 'accept' else 'for'} {target['sdbid']}."
+        )
     if value["mode"] == "applied":
         applied = value.get("applied") or {}
         added = int(applied.get("actions_added", 0))
@@ -390,6 +402,10 @@ def _catalog_association_summary(
         "title": title,
         "facts": [
             f"Separation: {float(detection['separation_arcsec']):.2f} arcsec",
+            *(
+                ["The FSC catalogue's published PSC link makes this one IRAS family decision."]
+                if len(family_members) > 1 else []
+            ),
             "The original provider query and raw result remain unchanged.",
             "Measurement contributor/composite assignment is a separate decision.",
         ],

@@ -10,6 +10,10 @@ max_age_days = 30
 # Direct provider coverage expected for every target. "all" is the default.
 providers = ["all"]
 
+[export]
+# Canonical root containing one directory per SDF fitting group.
+# root = "/srv/sdb/seds/masters"
+
 [operator]
 # actor = "your name"
 

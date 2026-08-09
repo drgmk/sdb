@@ -18,6 +18,7 @@ from sdb_identity.models.identity import ExternalIdentifier
 from sdb_identity.providers import Astrometry
 from sdb_identity.catalogs.adapters.reference import (
     GasparSnapshotAdapter,
+    IrasFscSnapshotAdapter,
     IrasPscSnapshotAdapter,
     Koen10SnapshotAdapter,
     Paunzen15SnapshotAdapter,
@@ -31,6 +32,8 @@ from sdb_identity.catalogs.reference_definitions import (
     GASPAR_REFS_TABLE,
     IRAS_PSC_CATALOG,
     IRAS_PSC_MAIN_TABLE,
+    IRAS_FSC_CATALOG,
+    IRAS_FSC_MAIN_TABLE,
     KOEN10_CATALOG,
     KOEN10_MAIN_TABLE,
     PAUNZEN15_CATALOG,
@@ -187,6 +190,47 @@ class FakeIrasPscClient:
 
     def fetch_readme(self, catalog):
         return "IRAS Point Source Catalog"
+
+
+class FakeIrasFscClient:
+    def fetch_tables(self, catalog):
+        assert catalog == IRAS_FSC_CATALOG
+        main = Table()
+        main["IRAS"] = ["F00001+0001"]
+        main["RAh"] = [0]
+        main["RAm"] = [0]
+        main["RAds"] = [100]
+        main["DE-"] = ["+"]
+        main["DEd"] = [0]
+        main["DEm"] = [1]
+        main["DEs"] = [0]
+        main["Major"] = [16]
+        main["Minor"] = [4]
+        main["PosAng"] = [0]
+        main["Fnu_12"] = [1.0]
+        main["q_Fnu_12"] = [3]
+        main["e_Fnu_12"] = [10]
+        main.meta = {"name": IRAS_FSC_MAIN_TABLE, "description": "IRAS FSC"}
+        assoc = Table({
+            "IRAS": ["F00001+0001"],
+            "catID": [42],
+            "Source": ["00001+0001"],
+            "Dist": [7],
+            "Field1": [1],
+            "Field2": [1000],
+            "Field3": [900],
+            "dMaj": [7],
+            "dMin": [1],
+            "dPA": [90],
+        })
+        assoc.meta = {
+            "name": f"{IRAS_FSC_CATALOG}/assoc",
+            "description": "IRAS FSC associations",
+        }
+        return [main, assoc]
+
+    def fetch_readme(self, catalog):
+        return "IRAS Faint Source Catalog"
 
 
 class FakeNewOpticalClient:
@@ -465,6 +509,68 @@ def test_iras_psc_full_snapshot_normalizes_resolution_quality_and_ellipse(tmp_pa
     assert values["IRAS60"].upper_limit is True
     assert values["IRAS12"].blend_state == "blended"
     assert values["IRAS12"].blend_reason == "provider_flagged"
+
+
+def test_iras_fsc_native_psc_link_discovers_and_identifies_distant_row(tmp_path):
+    store = ReferenceStore(tmp_path / "reference.sqlite")
+    store.fetch("iras_fsc", FakeIrasFscClient())
+    adapter = IrasFscSnapshotAdapter(store)
+    candidates = adapter.query(CatalogQueryContext(
+        1,
+        "sdbid",
+        Astrometry(10.0, -20.0, 1983.5),
+        ("IRAS 00001+0001",),
+    ))
+    assert len(candidates) == 1
+    assert candidates[0].source_id == "F00001+0001"
+    assert candidates[0].payload["_sdb_association"] == {
+        "method": "position+identifier",
+        "identifier_agreement": True,
+        "matched_identifiers": ["IRAS 00001+0001"],
+        "catalog_identifiers": [
+            "IRAS 00001+0001", "IRAS F00001+0001",
+        ],
+    }
+    native = candidates[0].payload["_sdb_native_identifiers"]
+    assert native[0]["relationship"] == "iras_fsc_to_psc"
+    assert native[0]["identifier"] == "IRAS 00001+0001"
+    assert native[0]["metadata"]["Dist"] == 7
+
+
+def test_iras_fsc_application_revision_refreshes_pre_link_runs(
+    session_factory, tmp_path,
+):
+    store = ReferenceStore(tmp_path / "reference.sqlite")
+    store.fetch("iras_fsc", FakeIrasFscClient())
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    with session_factory() as session, session.begin():
+        session.add(ExternalIdentifier(
+            target_id=target.target_id,
+            value="IRAS 00001+0001",
+            normalized_value=normalize_identifier("IRAS 00001+0001"),
+            source="simbad",
+        ))
+    service = ReferenceApplicationService(session_factory, store)
+    first = service.apply("iras_fsc")
+    assert first.refreshed == 1
+    with session_factory() as session, session.begin():
+        run = session.scalar(select(CatalogRun).where(
+            CatalogRun.provider == "iras_fsc",
+            CatalogRun.is_current.is_(True),
+        ))
+        assert "+native-psc-links-v1" in run.release
+        run.release = run.release.split("+", 1)[0]
+    refreshed = service.apply("iras_fsc")
+    assert refreshed.refreshed == 1
+    assert refreshed.matched == 1
+    with session_factory() as session:
+        run = session.scalar(select(CatalogRun).where(
+            CatalogRun.provider == "iras_fsc",
+            CatalogRun.is_current.is_(True),
+        ))
+        assert "+native-psc-links-v1" in run.release
 
 
 def test_ubvmeans_marks_d_as_an_unresolved_multiple_in_the_aperture(tmp_path):

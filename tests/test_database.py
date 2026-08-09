@@ -8,7 +8,7 @@ from sdb_identity.database import init_database, make_engine
 from sdb_identity.models import Base
 
 
-CURRENT_REVISION = "0001_current_schema"
+CURRENT_REVISION = "0003_unified_exports"
 
 CURRENT_VIEWS = {
     "alma_archive_status",
@@ -41,7 +41,7 @@ CURRENT_VIEWS = {
     "metadata_status",
     "pending_export_targets",
     "reference_application_status",
-    "sample_export_summary",
+    "export_summary",
     "sample_summary",
     "target_notes",
     "target_summary",

@@ -6,13 +6,16 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..catalogs.associations import resolved_ambiguous_catalog_results
 from ..catalogs.results import effective_catalog_results
 from ..dirty import pending_export_targets
+from ..fitting_groups import fitting_group_report
+from ..package_export import fit_package_target_ids
 from ..models.curated import CuratedRecord, DatasetRevision
 from ..models.identity import ExternalIdentifier
 from ..models.catalogs import IrasDetectionFamily
 from ..models.metadata import MetadataRun
-from ..models.samples import Sample, SampleExportRun
+from ..models.samples import Sample
 from .service import SampleService
 from ..identifiers import normalize_identifier
 from ..photometry.state import load_system_photometry_state
@@ -68,6 +71,9 @@ class ReadinessService:
             effective_results = effective_catalog_results(
                 session, members_by_id, providers=catalog_providers,
             )
+            component_resolutions = resolved_ambiguous_catalog_results(
+                session, effective_results,
+            )
             measurements_by_target: dict[int, dict[int, object]] = defaultdict(dict)
             for encounter in photometry_state.encounters:
                 measurements_by_target[encounter.target_id][
@@ -85,7 +91,10 @@ class ReadinessService:
                             "blocker", "missing_provider", target, provider,
                             "no current provider result",
                         ))
-                    elif run.status in PROVIDER_REVIEW_STATUSES:
+                    elif (
+                        run.status in PROVIDER_REVIEW_STATUSES
+                        and (target.id, provider) not in component_resolutions
+                    ):
                         issues.append(self._issue(
                             "blocker", "provider_result", target, provider,
                             run.status, error=run.error,
@@ -123,26 +132,26 @@ class ReadinessService:
                         "blocker", "iras_family_review", target, "iras",
                         "unresolved PSC/FSC association", count=iras_review,
                     ))
-            latest_export = session.scalar(
-                select(SampleExportRun)
-                .where(SampleExportRun.sample_id == sample.id)
-                .order_by(SampleExportRun.id.desc())
-                .limit(1)
-            )
-            if latest_export is not None and latest_export.status in {"partial", "running"}:
-                issues.append({
-                    "severity": "blocker",
-                    "kind": "sample_export",
-                    "run_id": latest_export.id,
-                    "detail": f"latest sample export is {latest_export.status}",
-                })
             sample_unresolved_curated, unresolved_curated = (
                 self._curated_readiness(
                     session, members_by_id, issues,
                 )
             )
 
-        pending = pending_export_targets(self.sessions, sample=sample_name)
+        package_report = fitting_group_report(
+            self.sessions, sample=sample_name,
+        )
+        try:
+            package_target_ids = fit_package_target_ids(package_report)
+        except ValueError:
+            # An unresolved composite is itself review work; readiness should
+            # still report its direct pending state rather than fail to load.
+            package_target_ids = set()
+        relevant_target_ids = set(members_by_id) | package_target_ids
+        pending = [
+            row for row in pending_export_targets(self.sessions)
+            if row[0].id in relevant_target_ids
+        ]
         for target, event_count, dirty_since in pending:
             issues.append(self._issue(
                 "warning", "pending_export", target, None,

@@ -16,6 +16,43 @@ _SCOPE_FLAGS = {
 }
 
 
+def assignment_review_measurement_ids(
+    graph: dict[str, object],
+) -> set[int]:
+    """Return measurements whose current ownership still needs operator work.
+
+    This is the measurement-level counterpart of the assignment states used by
+    the review dashboard: scope/contributor blockers, unassigned detections,
+    and detections whose bands have mixed ownership.
+    """
+    measurements = list(graph["measurements"])
+    review_ids = {
+        int(row["measurement_id"])
+        for row in measurements
+        if (
+            _SCOPE_FLAGS & set(row["review_flags"])
+            or not row["assignments"]
+        )
+    }
+
+    measurements_by_detection: dict[int, list[dict[str, object]]] = defaultdict(
+        list
+    )
+    for row in measurements:
+        measurements_by_detection[int(row["detection_id"])].append(row)
+    for rows in measurements_by_detection.values():
+        signatures = {
+            tuple(sorted(
+                (int(value["target_id"]), str(value["role"]))
+                for value in row["assignments"]
+            ))
+            for row in rows
+        }
+        if len(signatures) > 1:
+            review_ids.update(int(row["measurement_id"]) for row in rows)
+    return review_ids
+
+
 def assignment_readiness_report(
     session_factory: sessionmaker[Session],
     *,

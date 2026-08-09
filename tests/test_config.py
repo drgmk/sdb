@@ -67,6 +67,18 @@ def test_catalog_provider_configuration_can_select_a_subset(tmp_path):
     ) == ("2mass", "tycho2")
 
 
+def test_export_root_can_come_from_config_or_environment(tmp_path, monkeypatch):
+    config = tmp_path / "export.toml"
+    configured = tmp_path / "configured"
+    overridden = tmp_path / "overridden"
+    config.write_text(f'[export]\nroot = "{configured}"\n')
+
+    value = load_config(config)
+    assert value.export_root() == configured
+    monkeypatch.setenv("SDB_EXPORT_ROOT", str(overridden))
+    assert value.export_root() == overridden
+
+
 def test_reference_ensure_fetches_only_missing_and_stale():
     now = datetime(2026, 7, 27, tzinfo=timezone.utc)
 

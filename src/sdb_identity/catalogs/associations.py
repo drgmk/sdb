@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .policy import (
@@ -14,7 +14,7 @@ from .policy import (
 )
 from ..astrometry import angular_separation_arcsec
 from .measurements import current_catalog_detection_target_pairs
-from .results import effective_catalog_results
+from .results import EffectiveCatalogResult, effective_catalog_results
 from ..models.identity import ExternalIdentifier, Target
 from ..models.catalogs import (
     CatalogDetection,
@@ -24,13 +24,211 @@ from ..models.catalogs import (
     NormalizedMeasurement,
     RawCatalogRow,
 )
+from ..models.hierarchy import TargetLifecycleAction, TargetSystemMember
 from ..providers import Astrometry
 from ..target_astrometry import best_target_astrometry_map
-from ..vocabulary import PROVIDER_FAILURE_STATUSES
+from ..vocabulary import (
+    INACTIVE_TARGET_STATES,
+    PROVIDER_FAILURE_STATUSES,
+    ProviderRunStatus,
+    TargetRole,
+)
 
 
 DEFAULT_CATALOG_MATCH_RADIUS_ARCSEC = 2.0
 DEFAULT_CATALOG_REVIEW_RADIUS_ARCSEC = 15.0
+
+
+def resolved_ambiguous_catalog_results(
+    session: Session,
+    results: Mapping[tuple[int, str], EffectiveCatalogResult],
+) -> dict[tuple[int, str], dict[str, object]]:
+    """Resolve composite-query ambiguity through physical system members.
+
+    Catalog runs are immutable evidence about one target query.  A query for a
+    composite can therefore remain natively ambiguous even after every
+    candidate has been associated with an explicit physical component.  This
+    projection keeps the stored run unchanged while identifying those cases as
+    complete for operator review.
+
+    The rule is intentionally conservative: the queried target must currently
+    be a composite, every distinct candidate detection must have an effective
+    association with an active physical member of one of the same explicit
+    systems, and an unresolved candidate keeps the result ambiguous.
+    """
+    ambiguous = {
+        key: value
+        for key, value in results.items()
+        if value.status == ProviderRunStatus.AMBIGUOUS
+    }
+    if not ambiguous:
+        return {}
+
+    target_ids = {target_id for target_id, _provider in ambiguous}
+    lifecycle = _latest_lifecycle_actions(session, target_ids)
+    composite_ids = {
+        target_id
+        for target_id, action in lifecycle.items()
+        if action.role == TargetRole.COMPOSITE
+        and action.state not in INACTIVE_TARGET_STATES
+    }
+    if not composite_ids:
+        return {}
+
+    memberships = list(session.scalars(
+        select(TargetSystemMember)
+        .where(TargetSystemMember.target_id.in_(composite_ids))
+        .order_by(TargetSystemMember.id)
+    ))
+    systems_by_target: dict[int, set[int]] = {}
+    for membership in memberships:
+        systems_by_target.setdefault(membership.target_id, set()).add(
+            membership.system_id
+        )
+    system_ids = {
+        system_id for values in systems_by_target.values() for system_id in values
+    }
+    if not system_ids:
+        return {}
+
+    system_members = list(session.scalars(
+        select(TargetSystemMember)
+        .where(TargetSystemMember.system_id.in_(system_ids))
+        .order_by(TargetSystemMember.id)
+    ))
+    member_ids = {member.target_id for member in system_members}
+    member_lifecycle = _latest_lifecycle_actions(session, member_ids)
+    physical_member_ids = {
+        target_id
+        for target_id, action in member_lifecycle.items()
+        if action.role == TargetRole.PHYSICAL
+        and action.state not in INACTIVE_TARGET_STATES
+    }
+    if not physical_member_ids:
+        return {}
+
+    targets = {
+        target.id: target
+        for target in session.scalars(
+            select(Target).where(Target.id.in_(physical_member_ids))
+        )
+    }
+    physical_by_system: dict[int, set[int]] = {}
+    labels_by_system_target: dict[tuple[int, int], set[str]] = {}
+    for member in system_members:
+        if member.target_id not in physical_member_ids:
+            continue
+        physical_by_system.setdefault(member.system_id, set()).add(
+            member.target_id
+        )
+        if member.component_label:
+            labels_by_system_target.setdefault(
+                (member.system_id, member.target_id), set()
+            ).add(member.component_label)
+
+    run_ids = {value.run.id for value in ambiguous.values()}
+    candidates_by_run: dict[int, dict[int, RawCatalogRow]] = {}
+    for raw_row in session.scalars(
+        select(RawCatalogRow)
+        .where(RawCatalogRow.run_id.in_(run_ids))
+        .order_by(RawCatalogRow.id)
+    ):
+        candidates_by_run.setdefault(raw_row.run_id, {}).setdefault(
+            raw_row.detection_id, raw_row,
+        )
+    detection_ids = {
+        detection_id
+        for rows in candidates_by_run.values()
+        for detection_id in rows
+    }
+    associated_targets_by_detection: dict[int, set[int]] = {}
+    for detection_id, target_id in current_catalog_detection_target_pairs(
+        session, detection_ids,
+    ):
+        associated_targets_by_detection.setdefault(detection_id, set()).add(
+            target_id
+        )
+
+    resolved = {}
+    for key, result in ambiguous.items():
+        target_id, provider = key
+        if target_id not in composite_ids:
+            continue
+        target_system_ids = systems_by_target.get(target_id, set())
+        eligible_member_ids = {
+            member_id
+            for system_id in target_system_ids
+            for member_id in physical_by_system.get(system_id, set())
+        }
+        candidates = candidates_by_run.get(result.run.id, {})
+        if not candidates or not eligible_member_ids:
+            continue
+        associations = []
+        unresolved = False
+        for detection_id, raw_row in candidates.items():
+            associated_member_ids = sorted(
+                associated_targets_by_detection.get(detection_id, set())
+                & eligible_member_ids
+            )
+            if not associated_member_ids:
+                unresolved = True
+                break
+            association_targets = []
+            for member_id in associated_member_ids:
+                labels = sorted({
+                    label
+                    for system_id in target_system_ids
+                    for label in labels_by_system_target.get(
+                        (system_id, member_id), set()
+                    )
+                })
+                association_targets.append({
+                    "target_id": member_id,
+                    "sdbid": targets[member_id].sdbid,
+                    "component_labels": labels,
+                })
+            associations.append({
+                "detection_id": detection_id,
+                "source_id": raw_row.source_id,
+                "targets": association_targets,
+            })
+        if unresolved:
+            continue
+        resolved[key] = {
+            "target_id": target_id,
+            "provider": provider,
+            "run_id": result.run.id,
+            "status": "resolved_by_components",
+            "candidate_count": len(candidates),
+            "associations": associations,
+        }
+    return resolved
+
+
+def _latest_lifecycle_actions(
+    session: Session,
+    target_ids: Iterable[int],
+) -> dict[int, TargetLifecycleAction]:
+    ids = tuple(dict.fromkeys(int(value) for value in target_ids))
+    if not ids:
+        return {}
+    latest = (
+        select(
+            TargetLifecycleAction.target_id,
+            func.max(TargetLifecycleAction.id).label("action_id"),
+        )
+        .where(TargetLifecycleAction.target_id.in_(ids))
+        .group_by(TargetLifecycleAction.target_id)
+        .subquery()
+    )
+    return {
+        action.target_id: action
+        for action in session.scalars(
+            select(TargetLifecycleAction).join(
+                latest, TargetLifecycleAction.id == latest.c.action_id,
+            )
+        )
+    }
 
 
 def catalog_coverage_by_target(
@@ -72,6 +270,9 @@ def catalog_coverage_by_target(
     }
     current_by_pair = effective_catalog_results(
         session, ids, providers=expected,
+    )
+    component_resolutions = resolved_ambiguous_catalog_results(
+        session, current_by_pair,
     )
     normalization_by_target: dict[int, dict[int, CatalogDetection]] = {}
     for detection, run in session.execute(
@@ -142,8 +343,17 @@ def catalog_coverage_by_target(
                 provider for provider in missing if provider not in failed
             ],
             "current_status_by_provider": {
-                provider: current_by_pair[(target.id, provider)].status.value
+                provider: (
+                    component_resolutions[(target.id, provider)]["status"]
+                    if (target.id, provider) in component_resolutions
+                    else current_by_pair[(target.id, provider)].status.value
+                )
                 for provider in current
+            },
+            "component_resolutions_by_provider": {
+                provider: component_resolutions[(target.id, provider)]
+                for provider in current
+                if (target.id, provider) in component_resolutions
             },
             "latest_failure_by_provider": {
                 provider: latest_by_pair[(target.id, provider)].error

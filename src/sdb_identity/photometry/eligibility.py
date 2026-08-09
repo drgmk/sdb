@@ -14,7 +14,7 @@ from ..catalogs.measurements import (
 )
 from ..models.catalogs import (
     IrasBandSelection,
-    IrasDetectionFamily,
+    IrasSourceFamily,
     NormalizedMeasurement,
 )
 from ..models.photometry import MeasurementEligibilityAction
@@ -96,12 +96,8 @@ def effective_measurement_eligibility(
     iras_alternate_ids = set(session.scalars(
         select(IrasBandSelection.alternate_measurement_id)
         .join(
-            IrasDetectionFamily,
-            IrasDetectionFamily.id == IrasBandSelection.family_id,
-        )
-        .where(
-            IrasDetectionFamily.is_current.is_(True),
-            IrasDetectionFamily.status == "associated",
+            IrasSourceFamily,
+            IrasSourceFamily.id == IrasBandSelection.family_id,
         )
     ))
 

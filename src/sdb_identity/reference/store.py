@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from astropy.table import Table
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, or_, select, update
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, func, or_, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from ..cache_store import CachedSnapshotData, SnapshotCache
@@ -99,6 +99,46 @@ class ReferenceAlias(ReferenceBase):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     row_id: Mapped[int] = mapped_column(ForeignKey("reference_rows.id"), nullable=False, index=True)
     normalized_identifier: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+
+
+class ReferenceCrossIdentifier(ReferenceBase):
+    """A catalogue-published identifier link attached to a science row."""
+
+    __tablename__ = "reference_cross_identifiers"
+    __table_args__ = (
+        UniqueConstraint("row_id", "relationship", "normalized_identifier"),
+        Index(
+            "ix_reference_cross_identifier_lookup",
+            "normalized_identifier",
+            "row_id",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    row_id: Mapped[int] = mapped_column(
+        ForeignKey("reference_rows.id"), nullable=False, index=True
+    )
+    relationship: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    identifier: Mapped[str] = mapped_column(String(200), nullable=False)
+    normalized_identifier: Mapped[str] = mapped_column(
+        String(200), nullable=False, index=True
+    )
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ReferenceDerivedIndex(ReferenceBase):
+    """Marker for an idempotently materialized snapshot-derived index."""
+
+    __tablename__ = "reference_derived_indexes"
+    __table_args__ = (UniqueConstraint("snapshot_id", "name"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("reference_snapshots.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class ReferenceRelationship(ReferenceBase):
@@ -509,6 +549,126 @@ class ReferenceStore:
 
     def fetch_v70a(self, client: SnapshotClient | None = None) -> SnapshotResult:
         return self.fetch("v70a", client)
+
+    def materialize_cross_identifiers(self, adapter: str) -> int:
+        """Build declared provider-native cross-identifier indexes."""
+        definition = SNAPSHOT_CATALOGS[adapter]
+        if not definition.cross_identifiers:
+            return 0
+        with self.sessions() as session, session.begin():
+            snapshot = session.scalar(select(ReferenceSnapshot).where(
+                ReferenceSnapshot.adapter == adapter,
+                ReferenceSnapshot.is_current.is_(True),
+            ))
+            if snapshot is None:
+                return 0
+            main = session.scalar(select(ReferenceTable).where(
+                ReferenceTable.snapshot_id == snapshot.id,
+                ReferenceTable.name == definition.main_table,
+            ))
+            if main is None:
+                return 0
+            main_rows = {
+                str(source): row_id
+                for source, row_id in session.execute(select(
+                    ReferenceRow.source_identifier,
+                    ReferenceRow.id,
+                ).where(ReferenceRow.table_id == main.id))
+                if source
+            }
+            total = 0
+            for cross in definition.cross_identifiers:
+                marker = session.scalar(select(ReferenceDerivedIndex).where(
+                    ReferenceDerivedIndex.snapshot_id == snapshot.id,
+                    ReferenceDerivedIndex.name == cross.index_name,
+                ))
+                if marker is not None:
+                    total += marker.row_count
+                    continue
+                assoc = session.scalar(select(ReferenceTable).where(
+                    ReferenceTable.snapshot_id == snapshot.id,
+                    ReferenceTable.name == cross.association_table,
+                ))
+                if assoc is None:
+                    session.add(ReferenceDerivedIndex(
+                        snapshot_id=snapshot.id,
+                        name=cross.index_name,
+                        row_count=0,
+                    ))
+                    continue
+                count = 0
+                pending: list[ReferenceCrossIdentifier] = []
+                assoc_payloads = session.scalars(
+                    select(ReferenceRow.payload_json).where(
+                        ReferenceRow.table_id == assoc.id,
+                        func.json_extract(
+                            ReferenceRow.payload_json,
+                            f"$.{cross.discriminator_column}",
+                        ) == cross.discriminator_value,
+                    )
+                )
+                for payload_json in assoc_payloads:
+                    payload = json.loads(payload_json)
+                    science_key = row_text(
+                        payload, cross.science_key_column
+                    )
+                    identifier_value = row_text(
+                        payload, cross.identifier_column
+                    )
+                    row_id = main_rows.get(science_key or "")
+                    if row_id is None or not identifier_value:
+                        continue
+                    identifier = (
+                        f"{cross.identifier_prefix} {identifier_value}"
+                        if cross.identifier_prefix else identifier_value
+                    )
+                    normalized = _star_identifier(identifier)
+                    if not normalized:
+                        continue
+                    pending.append(ReferenceCrossIdentifier(
+                        row_id=row_id,
+                        relationship=cross.relationship,
+                        identifier=identifier,
+                        normalized_identifier=normalized,
+                        metadata_json=_safe_json({
+                            key: payload.get(key)
+                            for key in cross.metadata_columns
+                        }),
+                    ))
+                    count += 1
+                    if len(pending) < 1000:
+                        continue
+                    session.add_all(pending)
+                    session.flush()
+                    pending.clear()
+                if pending:
+                    session.add_all(pending)
+                    session.flush()
+                session.add(ReferenceDerivedIndex(
+                    snapshot_id=snapshot.id,
+                    name=cross.index_name,
+                    row_count=count,
+                ))
+                total += count
+            return total
+
+    def cross_identifiers(
+        self,
+        row_id: int,
+    ) -> list[dict[str, object]]:
+        with self.sessions() as session:
+            return [{
+                "relationship": value.relationship,
+                "identifier": value.identifier,
+                "metadata": json.loads(value.metadata_json),
+            } for value in session.scalars(
+                select(ReferenceCrossIdentifier)
+                .where(ReferenceCrossIdentifier.row_id == row_id)
+                .order_by(
+                    ReferenceCrossIdentifier.relationship,
+                    ReferenceCrossIdentifier.identifier,
+                )
+            )]
 
     def current_snapshot(self, adapter: str) -> ReferenceSnapshot | None:
         with self.sessions() as session:

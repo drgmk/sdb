@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import json
 import math
-import os
 from collections import defaultdict
 from importlib.resources import files
 from string import Template
@@ -307,7 +306,12 @@ def _target_external_resources(
     return resources
 
 
-def render_target_page(workspace: TargetWorkspace) -> str:
+def render_target_page(
+    workspace: TargetWorkspace,
+    *,
+    default_actor: str = "",
+    review_session_id: str = "",
+) -> str:
     sdbid = workspace.sdbid
     readiness = workspace.readiness
     graph = workspace.fitting_graph
@@ -319,7 +323,6 @@ def render_target_page(workspace: TargetWorkspace) -> str:
     catalog_update_available = workspace.catalog_update_available
     nearby_import_available = workspace.nearby_import_available
     target_position = workspace.target_position
-    default_actor = os.environ.get("SDB_ACTOR", "").strip()
     target = next(
         (row for row in graph["targets"] if row["sdbid"] == sdbid),
         None,
@@ -379,17 +382,39 @@ def render_target_page(workspace: TargetWorkspace) -> str:
         coverage_label += f" · {coverage_normalization} to normalize"
     detection_rows: dict[int, list[dict[str, object]]] = defaultdict(list)
     for measurement in graph["measurements"]:
-        detection_rows[int(measurement["detection_id"])].append(measurement)
+        family_detection_ids = measurement.get("iras_family_detection_ids") or []
+        editor_id = (
+            min(int(value) for value in family_detection_ids)
+            if family_detection_ids
+            else int(measurement["detection_id"])
+        )
+        detection_rows[editor_id].append(measurement)
     cards = []
     for detection_id, measurements in sorted(
         detection_rows.items(),
         key=lambda item: (item[1][0]["provider"], item[1][0]["source_id"]),
     ):
         first = measurements[0]
-        source = source_html(
-            first.get("source_display_name") or first["source_id"],
-            list(first.get("provenance") or []),
-        )
+        family_rows = {
+            int(row["detection_id"]): row for row in measurements
+        }
+        if first.get("iras_family_id") is not None:
+            source = " / ".join(
+                f"{_e(row['provider'])} " + source_html(
+                    row.get("source_display_name") or row["source_id"],
+                    list(row.get("provenance") or []),
+                )
+                for row in sorted(
+                    family_rows.values(), key=lambda value: value["provider"]
+                )
+            )
+            source_heading = f"IRAS family · {source}"
+        else:
+            source = source_html(
+                first.get("source_display_name") or first["source_id"],
+                list(first.get("provenance") or []),
+            )
+            source_heading = f"{_e(first['provider'])} · {source}"
         current_contributors = set.intersection(*(
             set(row["contributor_sdbids"]) for row in measurements
         ))
@@ -453,8 +478,9 @@ def render_target_page(workspace: TargetWorkspace) -> str:
             if has_combined_system
             else ""
         )
-        band_rows = []
-        for row in measurements:
+        def eligibility_row(
+            row: dict[str, object], *, assignment_checkbox: bool,
+        ) -> str:
             excluded = bool(row["fit_excluded"])
             basis = str(row["exclusion_basis"] or "")
             status = "Excluded from fit" if excluded else "Included in fit"
@@ -468,10 +494,15 @@ def render_target_page(workspace: TargetWorkspace) -> str:
             }.get(basis, "")
             if basis_label:
                 status += f" · {basis_label}"
-            band_rows.append(
-                f"<div class='band-row'><label><input type='checkbox' "
-                f"class='measurement' value='{row['measurement_id']}' checked> "
-                f"{_e(row['band'])}: {_display_number(row['value'])} ± "
+            assignment = (
+                f"<input type='checkbox' class='measurement' "
+                f"value='{row['measurement_id']}' checked> "
+                if assignment_checkbox else ""
+            )
+            return (
+                f"<div class='band-row'><label>{assignment}"
+                f"{_e(row['provider'])} {_e(row['band'])}: "
+                f"{_display_number(row['value'])} ± "
                 f"{_display_number(row['error'])} {_e(row['unit'])}</label>"
                 f"<span class='eligibility-state {'excluded' if excluded else 'included'}'"
                 f" data-current-label='{_e(status)}'>{_e(status)}</span>"
@@ -482,7 +513,52 @@ def render_target_page(workspace: TargetWorkspace) -> str:
                 f"aria-pressed='false'>"
                 f"{'Include in fit' if excluded else 'Exclude from fit'}</button></div>"
             )
-        bands = "".join(band_rows)
+
+        if first.get("iras_family_id") is not None:
+            rows_by_band: dict[str, list[dict[str, object]]] = defaultdict(list)
+            for row in measurements:
+                rows_by_band[str(row["band"])].append(row)
+
+            def iras_band_order(band: str) -> tuple[float, str]:
+                try:
+                    return float(band.removeprefix("IRAS")), band
+                except ValueError:
+                    return float("inf"), band
+
+            band_rows = []
+            for band in sorted(rows_by_band, key=iras_band_order):
+                rows = sorted(
+                    rows_by_band[band], key=lambda value: value["provider"]
+                )
+                selected = next(
+                    (
+                        row for row in rows
+                        if row.get("iras_selected_for_band") is True
+                    ),
+                    rows[0],
+                )
+                selected_provider = str(selected["provider"]).removeprefix(
+                    "iras_"
+                ).upper()
+                detail_rows = "".join(
+                    eligibility_row(row, assignment_checkbox=False)
+                    for row in rows
+                )
+                band_rows.append(
+                    "<div class='family-band-row'>"
+                    f"<label><input type='checkbox' class='measurement' "
+                    f"value='{selected['measurement_id']}' checked> "
+                    f"{_e(band)} attribution · {selected_provider} selected"
+                    "</label>"
+                    "<details><summary>PSC/FSC values and fit eligibility</summary>"
+                    f"{detail_rows}</details></div>"
+                )
+            bands = "".join(band_rows)
+        else:
+            bands = "".join(
+                eligibility_row(row, assignment_checkbox=True)
+                for row in measurements
+            )
         contributor_editor = (
             f"<h4>Contributors</h4><div class='choices'>{target_choices}</div>"
             f"{combined_system_control}"
@@ -519,7 +595,7 @@ def render_target_page(workspace: TargetWorkspace) -> str:
             )
         cards.append(f"""
 <section class="detection" data-detection="{detection_id}">
-  <h3>{_e(first['provider'])} · {source}</h3>
+  <h3>{source_heading}</h3>
   <div class="bands">{bands}</div>
   {"<p class='warning'>Bands currently have different assignments. Their common assignments are selected below; preview carefully before applying.</p>" if mixed_assignments else ""}
   {attribution}
@@ -584,6 +660,8 @@ def render_target_page(workspace: TargetWorkspace) -> str:
         sdbid=_e(sdbid),
         quoted_sdbid=quote(sdbid),
         default_actor=_e(default_actor),
+        default_actor_json=json.dumps(default_actor),
+        review_session_id_json=json.dumps(review_session_id),
         detection_cards="".join(cards) or "<p>No current measurements.</p>",
         requested_target_label=_e(requested_target_label),
         physical_checked=(

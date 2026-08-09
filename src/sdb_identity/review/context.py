@@ -14,6 +14,8 @@ from ..service import IdentityService
 class ReviewWebContext:
     session_factory: sessionmaker[Session]
     sample: str | None = None
+    default_actor: str = ""
+    review_session_id: str = ""
     identity_service_factory: Callable[[], IdentityService] | None = None
     catalog_service_factory: Callable[[str, str], object] | None = None
     catalog_coverage_providers: tuple[str, ...] | None = None

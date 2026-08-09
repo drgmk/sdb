@@ -37,7 +37,6 @@ def is_json_record_stream(args) -> bool:
         "attributes",
         "catalog-status",
         "dirty",
-        "export-dirty",
         "metadata-status",
         "review",
     }:

@@ -368,8 +368,8 @@ def test_review_sky_view_uses_simbad_metadata_pm_when_canonical_pm_is_missing(
     assert "using target PM as counterpart hypothesis" in catalog_point.note
 
     html = render_review_sky_html(view)
-    assert "catalog epoch to 2000" in html
-    assert "proper motion \\u002f 10.00 yr" in html
+    assert '"name":"catalog to 2000"' in html
+    assert '"name":"PM"' in html
 
 
 def test_review_sky_html_has_annotation_toggle_and_embedded_data(session_factory):
@@ -379,7 +379,10 @@ def test_review_sky_html_has_annotation_toggle_and_embedded_data(session_factory
     html = render_review_sky_html(view)
 
     assert "toggle-annotations" in html
-    assert "Hide target labels" in html
+    assert "Show target labels" in html
+    assert "let annotationsVisible = false" in html
+    assert 'id="toggle-positional-uncertainties"' in html
+    assert "Hide positional uncertainties" in html
     assert "Plotly.newPlot" in html
     assert "{{responsive" not in html
     assert '"responsive": false' in html
@@ -477,7 +480,7 @@ def test_review_sky_html_renders_pm_vectors_as_plotly_trace():
 
     html = render_review_sky_html(view)
 
-    assert "proper motion \\u002f 10.00 yr" in html
+    assert '"name":"PM"' in html
     assert "pmRA*=" in html
     assert "circle" in html
     assert "arrowAnnotations" not in html
@@ -715,7 +718,7 @@ def test_review_sky_view_displays_catalog_positions_at_epoch_2000_when_target_pm
     assert point.pm_source == "assumed target PM (gaia_dr3)"
 
     html = render_review_sky_html(view)
-    assert "catalog epoch to 2000" in html
+    assert '"name":"catalog to 2000"' in html
     assert "proper_motion" in html
 
 
@@ -922,7 +925,8 @@ def test_review_sky_view_includes_hierarchy_candidates_and_geometry(session_fact
     assert view.segments[0].relation_type == "group"
 
     html = render_review_sky_html(view)
-    assert "hierarchy group" in html
+    assert '"name":"hierarchy"' in html
+    assert '"relation_type":"group"' in html
     assert "hierarchy-tree" in html
     assert (
         "https://vizier.cds.unistra.fr/viz-bin/VizieR-5?"
@@ -934,6 +938,8 @@ def test_review_sky_view_includes_hierarchy_candidates_and_geometry(session_fact
     assert '"system_context"' in html
     assert "System photometry matrix" in html
     assert "assignment-matrix" in html
+    assert "matrix-detection needs-review" in html
+    assert "--review-cell: #fff1f2" in html
     assert 'id="toggle-review-drawer"' in html
     assert "Show review tools" in html
     assert "Hide review tools" in html
@@ -980,7 +986,8 @@ def test_review_sky_view_uses_persisted_hierarchy_graph_overrides(session_factor
 
     html = render_review_sky_html(view)
     assert "exercise graph override in review" in html
-    assert "hierarchy cross_link" in html
+    assert '"name":"hierarchy"' in html
+    assert '"relation_type":"cross_link"' in html
 
 
 def test_review_sky_view_places_hierarchy_candidate_at_nearest_component_endpoint(session_factory, tmp_path):

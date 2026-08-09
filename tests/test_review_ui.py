@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import CatalogCandidate, MeasurementValue
+from sdb_identity.cli import parser
 from sdb_identity.catalogs.decisions import CatalogDecisionService
 from sdb_identity.catalogs.normalization import CatalogNormalizationService
 from sdb_identity.models.catalogs import (
@@ -173,6 +174,9 @@ def test_review_ui_queue_preview_and_apply(session_factory, monkeypatch):
     assert "Accept for this target" in workspace.text
     assert "Reject for this target" in workspace.text
     assert 'id="actor" value="browser reviewer"' in workspace.text
+    assert "localStorage.getItem('sdb-review-actor')" in workspace.text
+    assert "rememberActor(document.getElementById('actor').value)" in workspace.text
+    assert "confirm(" not in workspace.text
     assert "prefillReason('reason',currentPreview)" in workspace.text
     assert 'placeholder="Preview suggests a reason"' in workspace.text
     assert "<code>HD TEST A</code> (physical)" in workspace.text
@@ -929,3 +933,11 @@ def test_review_ui_refuses_non_local_bind(session_factory):
         assert "localhost only" in str(error)
     else:  # pragma: no cover - explicit failure is more informative than pytest helper
         raise AssertionError("non-local review bind was accepted")
+
+
+def test_review_serve_accepts_actor_preset():
+    args = parser().parse_args([
+        "review", "serve", "--sample", "rehearsal", "--actor", "Grant",
+    ])
+
+    assert args.actor == "Grant"

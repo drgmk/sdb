@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..catalogs.policy import catalog_source_display_name
 from ..astrometry import angular_separation_arcsec
 from ..catalogs.associations import catalog_target_candidates
+from ..catalogs.iras import (
+    iras_source_family_for_detection,
+    linked_iras_detection_encounters,
+)
 from ..catalogs.measurements import current_measurement_target_ids
 from ..decisions import DecisionContext
 from ..dirty import mark_export_dirty
@@ -18,6 +22,7 @@ from ..models.catalogs import (
     CatalogDetection,
     CatalogRun,
     CatalogTargetAssociationAction,
+    IrasFamilyTargetAssociationAction,
     NormalizedMeasurement,
     RawCatalogRow,
 )
@@ -79,15 +84,38 @@ def review_catalog_target_association_decision(
         run = session.get(CatalogRun, raw.run_id)
         if run is None:
             raise KeyError(f"catalog run not found: {raw.run_id}")
-        latest = session.scalar(
-            select(CatalogTargetAssociationAction)
-            .where(
-                CatalogTargetAssociationAction.target_id == target.id,
-                CatalogTargetAssociationAction.detection_id == detection.id,
+        family_members = [
+            (detection, raw, run),
+            *linked_iras_detection_encounters(session, detection.id),
+        ]
+        source_family = iras_source_family_for_detection(session, detection.id)
+        latest_family_action = (
+            None
+            if source_family is None
+            else session.scalar(
+                select(IrasFamilyTargetAssociationAction)
+                .where(
+                    IrasFamilyTargetAssociationAction.target_id == target.id,
+                    IrasFamilyTargetAssociationAction.family_id
+                    == source_family.id,
+                )
+                .order_by(IrasFamilyTargetAssociationAction.id.desc())
+                .limit(1)
             )
-            .order_by(CatalogTargetAssociationAction.id.desc())
-            .limit(1)
         )
+        latest_by_detection = {}
+        for member_detection, _member_raw, _member_run in family_members:
+            latest_by_detection[member_detection.id] = session.scalar(
+                select(CatalogTargetAssociationAction)
+                .where(
+                    CatalogTargetAssociationAction.target_id == target.id,
+                    CatalogTargetAssociationAction.detection_id
+                    == member_detection.id,
+                )
+                .order_by(CatalogTargetAssociationAction.id.desc())
+                .limit(1)
+            )
+        latest = latest_by_detection[detection.id]
         candidate = next((
             row
             for row in catalog_target_candidates(
@@ -136,21 +164,65 @@ def review_catalog_target_association_decision(
             "reviewed_raw_row_id": raw.id,
             "latest_action_id": None if latest is None else latest.id,
             "latest_action": None if latest is None else latest.action,
+            "family_members": [
+                {
+                    "detection_id": member_detection.id,
+                    "reviewed_run_id": member_run.id,
+                    "reviewed_raw_row_id": member_raw.id,
+                    "latest_action_id": (
+                        None
+                        if latest_by_detection[member_detection.id] is None
+                        else latest_by_detection[member_detection.id].id
+                    ),
+                    "latest_action": (
+                        None
+                        if latest_by_detection[member_detection.id] is None
+                        else latest_by_detection[member_detection.id].action
+                    ),
+                }
+                for member_detection, member_raw, member_run in family_members
+            ],
             "desired_action": action,
+            "source_family_id": (
+                None if source_family is None else source_family.id
+            ),
+            "latest_family_action_id": (
+                None if latest_family_action is None else latest_family_action.id
+            ),
+            "latest_family_action": (
+                None if latest_family_action is None else latest_family_action.action
+            ),
         }
         token = hashlib.sha256(
             json.dumps(token_state, sort_keys=True).encode("utf-8")
         ).hexdigest()
         verb = "Accepted" if action == "accept" else "Rejected"
         preposition = "as" if action == "accept" else "for"
-        suggested_reason = (
-            f"{verb} {detection.provider} source {display_name} {preposition} "
-            f"{target.sdbid} ({separation:.2f} arcsec separation)"
-        )
+        if len(family_members) > 1:
+            family_sources = "; ".join(
+                f"{member_detection.provider} {member_detection.source_id}"
+                for member_detection, _member_raw, _member_run
+                in family_members
+            )
+            suggested_reason = (
+                f"{verb} native IRAS PSC/FSC family ({family_sources}) "
+                f"{preposition} {target.sdbid}"
+            )
+        else:
+            suggested_reason = (
+                f"{verb} {detection.provider} source {display_name} "
+                f"{preposition} {target.sdbid} "
+                f"({separation:.2f} arcsec separation)"
+            )
         result: dict[str, object] = {
             "mode": "preview",
             "state_token": token,
-            "has_changes": latest is None or latest.action != action,
+            "has_changes": (
+                latest_family_action is None
+                or latest_family_action.action != action
+                if source_family is not None
+                else latest is None or latest.action != action
+            ),
             "action": action,
             "target": _target_row(target),
             "detection": {
@@ -163,6 +235,14 @@ def review_catalog_target_association_decision(
                 "reviewed_run_id": run.id,
                 "reviewed_raw_row_id": raw.id,
                 "discovered_for": run.target_id,
+                "family_members": [{
+                    "id": member_detection.id,
+                    "provider": member_detection.provider,
+                    "source_id": member_detection.source_id,
+                    "reviewed_run_id": member_run.id,
+                    "reviewed_raw_row_id": member_raw.id,
+                } for member_detection, member_raw, member_run in family_members],
+                "family_id": None if source_family is None else source_family.id,
             },
             "current": (
                 None if latest is None else {
@@ -180,6 +260,10 @@ def review_catalog_target_association_decision(
                     "to this target; contributor/composite assignment remains separate"
                 ),
                 "previous association decisions remain in append-only history",
+                *(
+                    ["one IRAS family decision governs both plotted detections"]
+                    if source_family is not None else []
+                ),
             ],
         }
         if not apply:
@@ -193,21 +277,62 @@ def review_catalog_target_association_decision(
             reason=reason,
             suggested_reason=suggested_reason,
         )
-        action_id = None
-        if result["has_changes"]:
-            association = CatalogTargetAssociationAction(
+        family_action = None
+        if source_family is not None:
+            if (
+                latest_family_action is not None
+                and latest_family_action.action == action
+            ):
+                return {
+                    **result,
+                    "mode": "applied",
+                    "applied": {
+                        "actions_added": 0,
+                        "action_id": None,
+                        "action_ids": [],
+                        "family_action_id": latest_family_action.id,
+                    },
+                }
+            family_action = IrasFamilyTargetAssociationAction(
+                family_id=source_family.id,
                 target_id=target.id,
-                detection_id=detection.id,
                 action=action,
-                method="manual_review",
                 reviewed_run_id=run.id,
                 reviewed_raw_row_id=raw.id,
                 actor=decision.actor,
                 reason=decision.reason,
             )
+            session.add(family_action)
+            session.flush()
+        action_ids = []
+        for member_detection, member_raw, member_run in family_members:
+            member_latest = latest_by_detection[member_detection.id]
+            if (
+                family_action is None
+                and member_latest is not None
+                and member_latest.action == action
+            ):
+                continue
+            association = CatalogTargetAssociationAction(
+                family_action_id=(
+                    None if family_action is None else family_action.id
+                ),
+                target_id=target.id,
+                detection_id=member_detection.id,
+                action=action,
+                method=(
+                    "manual_review"
+                    if family_action is None
+                    else "iras_family_projection"
+                ),
+                reviewed_run_id=member_run.id,
+                reviewed_raw_row_id=member_raw.id,
+                actor=decision.actor,
+                reason=decision.reason,
+            )
             session.add(association)
             session.flush()
-            action_id = association.id
+            action_ids.append(association.id)
             mark_export_dirty(
                 session,
                 target.id,
@@ -219,8 +344,12 @@ def review_catalog_target_association_decision(
             **result,
             "mode": "applied",
             "applied": {
-                "actions_added": 0 if action_id is None else 1,
-                "action_id": action_id,
+                "actions_added": len(action_ids),
+                "action_id": None if not action_ids else action_ids[0],
+                "action_ids": action_ids,
+                "family_action_id": (
+                    None if family_action is None else family_action.id
+                ),
             },
         }
 
@@ -706,10 +835,23 @@ def _decision_snapshot(
             contributors.append(target)
             seen.add(target.id)
 
+    source_family = iras_source_family_for_detection(session, detection.id)
+    family_detection_ids = (
+        (detection.id,)
+        if source_family is None
+        else (
+            source_family.psc_detection_id,
+            source_family.fsc_detection_id,
+        )
+    )
     measurements = list(session.scalars(
         select(NormalizedMeasurement)
-        .where(NormalizedMeasurement.detection_id == detection.id)
-        .order_by(NormalizedMeasurement.band, NormalizedMeasurement.id)
+        .where(NormalizedMeasurement.detection_id.in_(family_detection_ids))
+        .order_by(
+            NormalizedMeasurement.band,
+            NormalizedMeasurement.provider,
+            NormalizedMeasurement.id,
+        )
     ))
     if measurement_ids is not None:
         selected = {int(value) for value in measurement_ids}
@@ -717,9 +859,21 @@ def _decision_snapshot(
         missing = selected - available
         if missing:
             raise ValueError(
-                f"measurements do not belong to detection {detection.id}: {sorted(missing)}"
+                "measurements do not belong to this catalog source"
+                f"{' family' if source_family is not None else ''}: "
+                f"{sorted(missing)}"
             )
-        measurements = [value for value in measurements if value.id in selected]
+        selected_bands = {
+            value.band for value in measurements if value.id in selected
+        }
+        measurements = [
+            value for value in measurements
+            if (
+                value.band in selected_bands
+                if source_family is not None
+                else value.id in selected
+            )
+        ]
     if not measurements:
         raise ValueError("select at least one measurement from the detection")
     raw = (
@@ -890,6 +1044,8 @@ def _decision_snapshot(
             "ra_deg": detection.ra_deg,
             "dec_deg": detection.dec_deg,
             "epoch": detection.epoch,
+            "family_id": None if source_family is None else source_family.id,
+            "family_detection_ids": list(family_detection_ids),
         },
         "scope_target": _target_row(scope_target),
         "measurements": [{
@@ -929,11 +1085,19 @@ def _decision_snapshot(
         "has_changes": bool(add_pairs or remove_rows or lifecycle_change),
         "suggested_reason": "; ".join(reason_parts),
         "notes": [
-            "selected bands from one canonical catalog detection are reviewed together",
+            (
+                "selected bands from both IRAS family detections are reviewed together"
+                if source_family is not None
+                else "selected bands from one canonical catalog detection are reviewed together"
+            ),
             "unambiguous accepted source associations supply the ordinary default",
             "explicit rows are stored only when the reviewed attribution differs",
             "provider exclusions are preserved independently of ownership assignments",
-            "apply replaces current assignments for only the selected measurements",
+            (
+                "apply replaces assignments for both PSC/FSC measurements in each selected band"
+                if source_family is not None
+                else "apply replaces current assignments for only the selected measurements"
+            ),
         ],
     }
 

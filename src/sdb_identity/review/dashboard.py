@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..catalogs.associations import resolved_ambiguous_catalog_results
 from ..catalogs.results import effective_catalog_results
 from ..photometry.readiness import assignment_readiness_report
 from ..fitting_groups import fitting_group_report
@@ -176,6 +177,9 @@ def _catalog_review_by_target(
             target_ids,
             providers=configured,
         )
+        component_resolutions = resolved_ambiguous_catalog_results(
+            session, results,
+        )
         providers_by_target: dict[int, set[str]] = defaultdict(set)
         if configured is None:
             for target_id, provider in results:
@@ -193,7 +197,10 @@ def _catalog_review_by_target(
                         "status": "missing",
                         "error": None,
                     })
-                elif result.status in PROVIDER_REVIEW_STATUSES:
+                elif (
+                    result.status in PROVIDER_REVIEW_STATUSES
+                    and (target_id, provider) not in component_resolutions
+                ):
                     review[target_id].append({
                         "provider": provider,
                         "status": str(result.status),

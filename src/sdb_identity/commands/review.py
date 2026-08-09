@@ -37,6 +37,13 @@ def register_review_parsers(commands, add_parser) -> None:
         help="sample readiness queue shown by review serve",
     )
     review.add_argument(
+        "--actor",
+        help=(
+            "initial review UI actor; defaults to SDB_ACTOR and is remembered "
+            "by the browser after use"
+        ),
+    )
+    review.add_argument(
         "--host",
         default="127.0.0.1",
         help="review serve bind host (localhost only)",
@@ -142,6 +149,7 @@ def _run_review_server(context: CliContext) -> int:
         serve_review_ui(
             sessions,
             sample=args.sample,
+            default_actor=args.actor,
             host=args.host,
             port=args.port,
             open_browser=args.open,
@@ -192,7 +200,7 @@ def _write_iras_families(context: CliContext, session) -> None:
     for family, target in session.execute(query.order_by(IrasDetectionFamily.id)):
         selections = list(session.scalars(
             select(IrasBandSelection)
-            .where(IrasBandSelection.family_id == family.id)
+            .where(IrasBandSelection.family_id == family.source_family_id)
             .order_by(IrasBandSelection.band)
         ))
         effective = effective_catalog_results(

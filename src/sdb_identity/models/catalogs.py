@@ -166,7 +166,33 @@ class NormalizedMeasurement(Base):
         return self.raw_row_id
 
 
+class IrasSourceFamily(Base):
+    """One confidently identified astrophysical IRAS PSC/FSC source pair."""
+
+    __tablename__ = "iras_source_families"
+    __table_args__ = (
+        UniqueConstraint("psc_detection_id"),
+        UniqueConstraint("fsc_detection_id"),
+        UniqueConstraint("psc_detection_id", "fsc_detection_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    psc_detection_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_detections.id"), nullable=False, index=True,
+    )
+    fsc_detection_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_detections.id"), nullable=False, index=True,
+    )
+    method: Mapped[str] = mapped_column(String(40), nullable=False)
+    normalized_separation: Mapped[float | None] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False,
+    )
+
+
 class IrasDetectionFamily(Base):
+    """Target-scoped reconciliation of PSC/FSC catalog-run results."""
+
     __tablename__ = "iras_detection_families"
     __table_args__ = (UniqueConstraint("psc_run_id", "fsc_run_id"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -178,13 +204,16 @@ class IrasDetectionFamily(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    source_family_id: Mapped[int | None] = mapped_column(
+        ForeignKey("iras_source_families.id"), index=True,
+    )
 
 
 class IrasBandSelection(Base):
     __tablename__ = "iras_band_selections"
     __table_args__ = (UniqueConstraint("family_id", "band"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    family_id: Mapped[int] = mapped_column(ForeignKey("iras_detection_families.id"), nullable=False, index=True)
+    family_id: Mapped[int] = mapped_column(ForeignKey("iras_source_families.id"), nullable=False, index=True)
     band: Mapped[str] = mapped_column(String(30), nullable=False)
     selected_measurement_id: Mapped[int] = mapped_column(ForeignKey("normalized_measurements.id"), nullable=False)
     alternate_measurement_id: Mapped[int] = mapped_column(ForeignKey("normalized_measurements.id"), nullable=False, index=True)
@@ -258,6 +287,36 @@ class CatalogTargetAssociationAction(AuditedActionMixin, Base):
     method: Mapped[str] = mapped_column(
         String(40), default="manual_review", nullable=False,
     )
+    reviewed_run_id: Mapped[int] = mapped_column(
+        ForeignKey("catalog_runs.id"), nullable=False, index=True,
+    )
+    reviewed_raw_row_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_catalog_rows.id"), nullable=False, index=True,
+    )
+    family_action_id: Mapped[int | None] = mapped_column(
+        ForeignKey("iras_family_target_association_actions.id"), index=True,
+    )
+
+
+class IrasFamilyTargetAssociationAction(AuditedActionMixin, Base):
+    """One operator decision applying to both detections in an IRAS family."""
+
+    __tablename__ = "iras_family_target_association_actions"
+    __table_args__ = (
+        Index(
+            "ix_iras_family_target_association_actions_pair",
+            "target_id",
+            "family_id",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    family_id: Mapped[int] = mapped_column(
+        ForeignKey("iras_source_families.id"), nullable=False, index=True,
+    )
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id"), nullable=False, index=True,
+    )
+    action: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     reviewed_run_id: Mapped[int] = mapped_column(
         ForeignKey("catalog_runs.id"), nullable=False, index=True,
     )

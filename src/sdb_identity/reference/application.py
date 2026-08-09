@@ -69,7 +69,14 @@ class ReferenceApplicationService:
                 (run.target_id for run in current_runs),
                 providers=(adapter.name,),
             )
-        already_applied = {run.target_id for run in current_runs}
+        already_applied = {
+            run.target_id
+            for run in current_runs
+            if (
+                adapter.application_revision is None
+                or run.release.endswith(f"+{adapter.application_revision}")
+            )
+        }
         new_targets = target_ids - already_applied
 
         if (

@@ -57,6 +57,21 @@ class RelationshipDefinition:
 
 
 @dataclass(frozen=True)
+class CrossIdentifierDefinition:
+    """A catalogue-published identifier relation stored in an auxiliary table."""
+
+    index_name: str
+    relationship: str
+    association_table: str
+    science_key_column: str
+    discriminator_column: str
+    discriminator_value: object
+    identifier_column: str
+    identifier_prefix: str | None = None
+    metadata_columns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class IdentifierAuditPolicy:
     simbad_patterns: tuple[str, ...]
     description: str
@@ -87,7 +102,9 @@ class SnapshotCatalogDefinition:
     band_wavelengths_micron: tuple[tuple[str, float], ...] = ()
     match_tables: tuple[str, ...] = ()
     relationships: tuple[RelationshipDefinition, ...] = ()
+    cross_identifiers: tuple[CrossIdentifierDefinition, ...] = ()
     identifier_audit: IdentifierAuditPolicy | None = None
+    application_revision: str | None = None
 
     @property
     def tables_for_matching(self) -> tuple[str, ...]:
@@ -116,6 +133,12 @@ class SnapshotCatalogDefinition:
 
     def identifiers(self, payload: dict[str, object]) -> tuple[str, ...]:
         result = self._base_identifiers(payload)
+        native = tuple(
+            str(row.get("identifier") or "").strip()
+            for row in payload.get("_sdb_native_identifiers", ())
+            if isinstance(row, dict) and row.get("identifier")
+        )
+        result = tuple(dict.fromkeys((*result, *native)))
         if self.adapter == "v70a":
             return v70a_component_identifiers(result, payload)
         if self.adapter == "ubvmeans":
@@ -286,10 +309,24 @@ IRAS_FSC_DEFINITION = SnapshotCatalogDefinition(
         ("IRAS60", 59.3524),
         ("IRAS100", 100.3468),
     ),
+    cross_identifiers=(CrossIdentifierDefinition(
+        index_name="iras_fsc_psc_catalog_42",
+        relationship="iras_fsc_to_psc",
+        association_table=f"{IRAS_FSC_CATALOG}/assoc",
+        science_key_column="IRAS",
+        discriminator_column="catID",
+        discriminator_value=42,
+        identifier_column="Source",
+        identifier_prefix="IRAS",
+        metadata_columns=(
+            "Dist", "Field1", "Field2", "Field3", "dMaj", "dMin", "dPA",
+        ),
+    ),),
     identifier_audit=IdentifierAuditPolicy(
         simbad_patterns=(r"^IRAS\s+F",),
         description="SIMBAD IRAS Faint Source Catalog identifiers",
     ),
+    application_revision="native-psc-links-v1",
 )
 
 HIP2_DEFINITION = SnapshotCatalogDefinition(

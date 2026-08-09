@@ -78,6 +78,17 @@ class SdbConfig:
             )
         return clean
 
+    def export_root(self) -> Path | None:
+        """Return the default canonical fit-package root, when configured."""
+        value = os.environ.get("SDB_EXPORT_ROOT")
+        if value is None:
+            value = self.section("export").get("root")
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("export.root must be a non-empty path string")
+        return Path(value).expanduser()
+
     def apply_environment_defaults(self) -> None:
         mirrors = self.section("mirrors")
         operator = self.section("operator")

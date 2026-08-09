@@ -134,6 +134,98 @@ def test_target_lifecycle_defaults_and_append_only_changes(session_factory):
     assert len(target_lifecycle_history(session_factory, system.sdbid)) == 2
 
 
+def test_review_proposals_use_effective_manual_fit_exclusion(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    CatalogAcquisitionService(
+        session_factory, {"allwise": _wise_catalog()}
+    ).refresh(target.sdbid, "allwise")
+    with session_factory() as session:
+        measurement_id = session.scalar(select(NormalizedMeasurement.id))
+        assert measurement_id is not None
+    set_measurement_eligibility(
+        session_factory,
+        measurement_id,
+        excluded=True,
+        actor="reviewer",
+        reason="exclude after SED inspection",
+    )
+
+    proposal = measurement_assignment_proposals(
+        session_factory, target.sdbid,
+    )[0]
+
+    assert proposal["excluded"] is True
+    assert proposal["exclusion_basis"] == "manual_exclude_action"
+    assert proposal["exclusion_reason"] == "exclude after SED inspection"
+
+
+def test_review_sed_candidates_follow_effective_catalog_status(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    values = [
+        MeasurementValue(
+            band="VJ", value=value, error=0.02, systematic_error=0.0,
+            unit="mag", bibcode="test",
+        )
+        for value in (8.0, 8.2)
+    ]
+    CatalogAcquisitionService(session_factory, {
+        "ubvmeans": FakeCatalog(
+            [
+                candidate("candidate-a", measurements=[values[0]]),
+                candidate("candidate-b", measurements=[values[1]]),
+            ],
+            name="ubvmeans",
+            release="test",
+        ),
+    }).refresh(target.sdbid, "ubvmeans")
+
+    review = build_measurement_assignment_review(
+        session_factory, target.sdbid,
+    )
+    assert {
+        (row["source_id"], row["band"])
+        for row in review.ambiguous_photometry
+    } == {("candidate-a", "VJ"), ("candidate-b", "VJ")}
+
+    with session_factory() as session:
+        raw = session.scalar(
+            select(RawCatalogRow).where(
+                RawCatalogRow.source_id == "candidate-a"
+            )
+        )
+        assert raw is not None
+    preview = review_catalog_target_association_decision(
+        session_factory,
+        target_reference=target.sdbid,
+        detection_id=raw.detection_id,
+        action="accept",
+        reviewed_raw_row_id=raw.id,
+    )
+    review_catalog_target_association_decision(
+        session_factory,
+        target_reference=target.sdbid,
+        detection_id=raw.detection_id,
+        action="accept",
+        reviewed_raw_row_id=raw.id,
+        apply=True,
+        actor="reviewer",
+        reason="select the current catalog candidate",
+        expected_token=preview["state_token"],
+    )
+
+    accepted_review = build_measurement_assignment_review(
+        session_factory, target.sdbid,
+    )
+    assert accepted_review.ambiguous_photometry == []
+    assert {
+        proposal["source_id"] for proposal in accepted_review.proposals
+    } == {"candidate-a"}
+
+
 def test_measurement_contributors_are_many_to_many_and_audited_without_changing_export(
     session_factory,
     tmp_path,
@@ -285,6 +377,7 @@ def test_blended_system_proposal_includes_physical_components_and_composite_scop
         "allwise", "WISE3P4", "system",
     )
     assert row["band_count"] == 1
+    assert row["needs_review"] is True
     assert [band["band"] for band in row["bands"]] == ["WISE3P4"]
     assert row["mixed_band_assignments"] is False
     assert {
@@ -377,6 +470,7 @@ def test_system_matrix_collapses_detection_bands_and_marks_mixed_assignments(
     assert matrix["summary"]["stored_measurement_count"] == 2
     assert len(matrix["rows"]) == 1
     row = matrix["rows"][0]
+    assert row["needs_review"] is True
     assert row["band_count"] == 2
     assert [band["band"] for band in row["bands"]] == [
         "WISE3P4", "WISE22",

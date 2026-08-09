@@ -11,8 +11,14 @@ from ..catalogs.policy import (
     catalog_source_display_name,
     catalog_source_id_matches_identifiers,
 )
+from ..catalogs.results import effective_catalog_results
 from ..models.identity import AstrometricSolution, ExternalIdentifier, Target
-from ..models.catalogs import NormalizedMeasurement, RawCatalogRow
+from ..models.catalogs import (
+    IrasBandSelection,
+    IrasDetectionFamily,
+    NormalizedMeasurement,
+    RawCatalogRow,
+)
 from ..providers import Astrometry
 from .state import (
     SystemPhotometryState,
@@ -96,6 +102,58 @@ def measurement_assignment_proposals(
             for detection_id, rows
             in photometry_state.catalog_provenance.items()
         }
+        iras_family_by_measurement: dict[int, dict[str, object]] = {}
+        iras_results = effective_catalog_results(
+            session,
+            target_ids,
+            providers=("iras_psc", "iras_fsc"),
+        )
+        measurements_by_detection: dict[int, list[int]] = {}
+        for measurement in measurements_by_id.values():
+            measurements_by_detection.setdefault(
+                measurement.detection_id, []
+            ).append(measurement.id)
+        families = list(session.scalars(select(IrasDetectionFamily).where(
+            IrasDetectionFamily.target_id.in_(target_ids),
+            IrasDetectionFamily.is_current.is_(True),
+            IrasDetectionFamily.status == "associated",
+        )))
+        for family in families:
+            psc_result = iras_results.get((family.target_id, "iras_psc"))
+            fsc_result = iras_results.get((family.target_id, "iras_fsc"))
+            if (
+                psc_result is None
+                or fsc_result is None
+                or psc_result.run.id != family.psc_run_id
+                or fsc_result.run.id != family.fsc_run_id
+                or family.source_family_id is None
+                or psc_result.selected_detection is None
+                or fsc_result.selected_detection is None
+            ):
+                continue
+            detection_ids = tuple(sorted((
+                psc_result.selected_detection.id,
+                fsc_result.selected_detection.id,
+            )))
+            family_key = "iras:" + ":".join(
+                str(value) for value in detection_ids
+            )
+            selected_ids = set(session.scalars(
+                select(IrasBandSelection.selected_measurement_id).where(
+                    IrasBandSelection.family_id == family.source_family_id
+                )
+            ))
+            for detection_id in detection_ids:
+                for measurement_id in measurements_by_detection.get(
+                    detection_id, ()
+                ):
+                    iras_family_by_measurement[measurement_id] = {
+                        "key": family_key,
+                        "family_id": family.source_family_id,
+                        "reason": family.reason,
+                        "normalized_separation": family.normalized_separation,
+                        "selected_for_band": measurement_id in selected_ids,
+                    }
 
     semantic = system_context.get("simbad_semantic_by_target") or {}
     lifecycle = system_context.get("target_lifecycle_by_target") or {}
@@ -203,10 +261,20 @@ def measurement_assignment_proposals(
             "band": measurement.band,
             "value": measurement.value,
             "error": measurement.error,
+            "systematic_error": measurement.systematic_error,
             "unit": measurement.unit,
+            "upper_limit": measurement.upper_limit,
             "resolution_major_arcsec": measurement.resolution_major_arcsec,
             "resolution_minor_arcsec": measurement.resolution_minor_arcsec,
-            "excluded": measurement.excluded,
+            "excluded": photometry_state.eligibility[
+                measurement.id
+            ].excluded,
+            "exclusion_basis": photometry_state.eligibility[
+                measurement.id
+            ].basis,
+            "exclusion_reason": photometry_state.eligibility[
+                measurement.id
+            ].reason,
             "predicted_scope": prediction["predicted_ownership_scope"],
             "predicted_blend_state": prediction["predicted_blend_state"],
             "scope_reason": prediction["scope_reason"],
@@ -219,6 +287,7 @@ def measurement_assignment_proposals(
             "proposed_assignments": proposed,
             "current_assignments": current_rows,
             "candidate_targets": candidates,
+            "iras_family": iras_family_by_measurement.get(measurement.id),
         })
     return result
 

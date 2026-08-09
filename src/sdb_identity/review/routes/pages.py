@@ -77,7 +77,11 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
                 search=search,
                 position=position,
             )
-            return render_target_page(workspace)
+            return render_target_page(
+                workspace,
+                default_actor=context.default_actor,
+                review_session_id=context.review_session_id,
+            )
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 

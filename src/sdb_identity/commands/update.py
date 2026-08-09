@@ -1,9 +1,8 @@
-"""Provider update and optional post-update export CLI command."""
+"""Provider update CLI command."""
 
 from __future__ import annotations
 
 from dataclasses import asdict
-from pathlib import Path
 import sys
 
 from ..catalogs.registry import SNAPSHOT_CATALOG_PROVIDERS
@@ -14,11 +13,11 @@ def register_update_parser(commands, add_parser) -> None:
     update = add_parser(
         commands,
         "update",
-        "Fill missing provider results and optionally export targets.",
+        "Fill missing provider results for selected targets.",
         "Updates one target, a sample, or all targets without repeating completed "
         "current results unless --force is supplied. It can run bounded workers, "
-        "use bulk-capable stages, apply reference snapshots, and write dirty "
-        "exports.",
+        "use bulk-capable stages, and apply reference snapshots. Run `sdb "
+        "export` separately to reconcile fitting packages.",
     )
     update.add_argument("target", nargs="?")
     update.add_argument("--all", action="store_true", dest="update_all")
@@ -27,13 +26,10 @@ def register_update_parser(commands, add_parser) -> None:
     update.add_argument("--providers", default="")
     update.add_argument("--workers", type=int, default=4)
     update.add_argument("--chunk-size", type=int, default=500)
-    update.add_argument("--export-dir")
 
 
 def run_update_command(context: CliContext) -> int:
     from .services import build_update_service
-    from ..dirty import pending_export_targets
-    from ..export import export_ipac
     from ..update import DEFAULT_PROVIDERS
 
     args = context.args
@@ -92,62 +88,9 @@ def run_update_command(context: CliContext) -> int:
                     force=args.force,
                     providers=providers,
                 )
-        exports = _export_updated_targets(
-            context,
-            pending_export_targets=pending_export_targets,
-            export_ipac=export_ipac,
-        )
         result = asdict(summary)
-        result["exports"] = exports
         print(context.json(result, sort_keys=True))
         return 1 if summary.failed else 0
     except (KeyError, ValueError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 2
-
-
-def _export_updated_targets(
-    context: CliContext,
-    *,
-    pending_export_targets,
-    export_ipac,
-) -> list[str]:
-    args = context.args
-    if not args.export_dir:
-        return []
-    sessions = context.require_sessions()
-    output_dir = Path(args.export_dir)
-    if args.update_all:
-        targets = [value[0] for value in pending_export_targets(sessions)]
-    elif args.sample is not None:
-        targets = [
-            value[0]
-            for value in pending_export_targets(sessions, sample=args.sample)
-        ]
-    else:
-        from ..targets import resolve_target
-
-        with sessions() as session:
-            target = resolve_target(session, args.target)
-        dirty_ids = {
-            value[0].id for value in pending_export_targets(sessions)
-        }
-        targets = (
-            [target]
-            if target is not None and target.id in dirty_ids
-            else []
-        )
-    exports = []
-    for target in context.reporter.iter(
-        targets,
-        desc="Exporting updated targets",
-        total=len(targets),
-        unit="target",
-    ):
-        output = export_ipac(
-            sessions,
-            target.id,
-            output_dir / f"{target.sdbid}-rawphot.txt",
-        )
-        exports.append(str(output.resolve()))
-    return exports

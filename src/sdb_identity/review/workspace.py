@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..photometry.readiness import assignment_readiness_report
 from ..fitting_groups import fitting_group_report
 from ..hierarchy.system_context import HierarchySystemContextService
-from ..models.catalogs import RawCatalogRow
+from ..models.catalogs import IrasSourceFamily, RawCatalogRow
 from .dashboard import review_dashboard_report
 
 
@@ -246,8 +246,22 @@ def raw_row_detection_map(
     if not detection_ids:
         return {}
     with session_factory() as session:
+        family_representative = {
+            detection_id: min(
+                family.psc_detection_id, family.fsc_detection_id,
+            )
+            for family in session.scalars(select(IrasSourceFamily).where(
+                (IrasSourceFamily.psc_detection_id.in_(detection_ids))
+                | (IrasSourceFamily.fsc_detection_id.in_(detection_ids))
+            ))
+            for detection_id in (
+                family.psc_detection_id, family.fsc_detection_id,
+            )
+        }
         return {
-            int(raw_row_id): int(detection_id)
+            int(raw_row_id): int(family_representative.get(
+                detection_id, detection_id,
+            ))
             for raw_row_id, detection_id in session.execute(
                 select(RawCatalogRow.id, RawCatalogRow.detection_id).where(
                     RawCatalogRow.detection_id.in_(detection_ids)
