@@ -9,6 +9,7 @@ from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.photometry.readiness import assignment_readiness_report
 from sdb_identity.cli import main
 from sdb_identity.fitting_groups import fitting_group_report
+from sdb_identity.joint_fit import read_joint_fit
 from sdb_identity.models.photometry import MeasurementTargetAssociation
 from sdb_identity.models.catalogs import NormalizedMeasurement, RawCatalogRow
 from sdb_identity.photometry.assignments import (
@@ -73,7 +74,7 @@ def test_included_shared_measurement_connects_physical_targets(session_factory):
     assert target_by_sdbid[component_a.sdbid]["model_target"] is True
 
 
-def test_excluded_shared_measurement_is_context_until_manually_included(session_factory):
+def test_excluded_shared_measurement_keeps_package_topology(session_factory):
     system, component_a, component_b = _configured_system(session_factory)
     measurement = _measurement(session_factory, system, excluded=True)
     _assign_pair(session_factory, measurement, system, component_a, component_b)
@@ -82,14 +83,11 @@ def test_excluded_shared_measurement_is_context_until_manually_included(session_
         session_factory, target_reference=system.sdbid,
     )
     row = excluded["measurements"][0]
-    assert excluded["summary"]["fitting_group_count"] == 2
+    assert excluded["summary"]["fitting_group_count"] == 1
     assert row["fit_enabled"] is False
     assert row["exclusion_basis"] == "provider_excluded"
-    assert len(row["fitting_group_ids"]) == 2
-    assert all(
-        group["context_measurement_ids"] == [measurement.id]
-        for group in excluded["groups"]
-    )
+    assert row["fitting_group_ids"] == [excluded["groups"][0]["group_id"]]
+    assert excluded["groups"][0]["context_measurement_ids"] == [measurement.id]
 
     set_measurement_eligibility(
         session_factory, measurement.id,
@@ -338,7 +336,7 @@ def test_fitting_groups_requires_exactly_one_selection(session_factory):
             raise AssertionError("expected selection validation error")
 
 
-def test_joint_fit_manifest_preserves_assignments_and_target_package_export(
+def test_joint_fit_yaml_describes_only_observation_contributors(
     session_factory, db_path, tmp_path, capsys,
 ):
     system, component_a, component_b = _configured_system(session_factory)
@@ -350,18 +348,10 @@ def test_joint_fit_manifest_preserves_assignments_and_target_package_export(
         "--output-dir", str(export_root), "--workers", "1",
     ]) == 0
     capsys.readouterr()
-    package = json.loads(
-        (export_root / system.sdbid / "joint-fit.json").read_text()
+    definition = read_joint_fit(
+        export_root / system.sdbid / "joint-fit.yml"
     )
-    row = package["graph"]["measurements"][0]
-    assert package["schema_version"] == 1
-    assert [(value["sdbid"], value["role"]) for value in row["assignments"]] == [
-        (system.sdbid, "composite_scope"),
-        (component_a.sdbid, "contributor"),
-        (component_b.sdbid, "contributor"),
-    ]
-    assert row["resolution_major_arcsec"] == 12.0
-    assert package["package"]["selected_sdbids"] == [system.sdbid]
-    assert {row["sdbid"] for row in package["inputs"]} == {
-        component_a.sdbid, component_b.sdbid,
+    assert definition.version == 1
+    assert definition.observations == {
+        system.sdbid: (component_a.sdbid, component_b.sdbid),
     }

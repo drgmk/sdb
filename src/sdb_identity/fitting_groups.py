@@ -259,7 +259,7 @@ def fitting_group_report(
 
     for row in measurement_rows.values():
         contributors = row["active_model_contributor_ids"]
-        if not row["fit_enabled"] or len(contributors) < 2:
+        if not row["current_encounter"] or len(contributors) < 2:
             continue
         for target_id in contributors[1:]:
             union(contributors[0], target_id)
@@ -400,9 +400,9 @@ def fitting_group_report(
         },
         "notes": [
             "read-only graph uses explicit assignments or one accepted source association",
-            "excluded measurements remain visible but do not connect fitting groups",
+            "accepted multi-contributor scopes define package topology even when excluded",
             "hierarchy membership adds context but does not itself require joint fitting",
-            "legacy IPAC export and SDF behavior are unchanged",
+            "each measurement is exported once under its physical or composite observation scope",
         ],
     }
 
@@ -410,114 +410,3 @@ def fitting_group_report(
 def _group_id(sdbids: list[str]) -> str:
     digest = hashlib.sha256("\n".join(sdbids).encode("utf-8")).hexdigest()[:12]
     return f"fit-group-{digest}"
-
-
-def fitting_group_subgraph(
-    report: dict[str, object],
-    group_id: str,
-) -> dict[str, object]:
-    """Return the self-contained manifest graph for one fitting group.
-
-    Sample reports deliberately include neighbouring systems and every fitting
-    group reached from the selection.  A directory consumed by SDF should not:
-    its metadata must describe only the measurements and targets relevant to
-    the rawphot files in that directory.
-    """
-    try:
-        group = next(
-            row for row in report["groups"]
-            if row["group_id"] == group_id
-        )
-    except StopIteration as error:
-        raise KeyError(f"fitting group not found: {group_id}") from error
-
-    measurement_ids = set(group["fit_measurement_ids"])
-    measurement_ids.update(group["context_measurement_ids"])
-    measurements = [
-        dict(row) for row in report["measurements"]
-        if row["measurement_id"] in measurement_ids
-    ]
-    for row in measurements:
-        row["fitting_group_ids"] = [
-            value for value in row["fitting_group_ids"]
-            if value == group_id
-        ]
-
-    target_ids = set(group["target_ids"])
-    target_ids.update(group["composite_scope_target_ids"])
-    for row in measurements:
-        for key in (
-            "encounter_target_ids",
-            "contributor_target_ids",
-            "active_model_contributor_ids",
-            "composite_scope_target_ids",
-        ):
-            target_ids.update(row[key])
-        if row["origin_target_id"] is not None:
-            target_ids.add(row["origin_target_id"])
-        target_ids.update(
-            assignment["target_id"] for assignment in row["assignments"]
-        )
-    targets = [
-        row for row in report["targets"]
-        if row["target_id"] in target_ids
-    ]
-
-    unresolved = [
-        row for row in report["unresolved_composite_measurements"]
-        if row["measurement_id"] in measurement_ids
-    ]
-    scope_role_review = [
-        row for row in report["scope_role_review_measurements"]
-        if row["measurement_id"] in measurement_ids
-    ]
-    validation_errors = [
-        f"fit-enabled measurement {row['measurement_id']} does not belong "
-        f"exclusively to {group_id}"
-        for row in measurements
-        if row["fit_enabled"] and row["fitting_group_ids"] != [group_id]
-    ]
-    package_group = dict(group)
-    return {
-        "selection": dict(report["selection"]),
-        "summary": {
-            "context_target_count": len(targets),
-            "model_target_count": len(group["target_ids"]),
-            "composite_target_count": sum(
-                row["role"] == TargetRole.COMPOSITE for row in targets
-            ),
-            "fitting_group_count": 1,
-            "measurement_count": len(measurements),
-            "fit_enabled_measurement_count": sum(
-                row["fit_enabled"] for row in measurements
-            ),
-            "excluded_context_measurement_count": sum(
-                row["fit_excluded"] for row in measurements
-            ),
-            "multi_contributor_measurement_count": sum(
-                len(row["active_model_contributor_ids"]) > 1
-                for row in measurements if row["fit_enabled"]
-            ),
-            "unresolved_composite_measurement_count": len(unresolved),
-            "scope_role_review_measurement_count": len(scope_role_review),
-            "unassigned_measurement_count": sum(
-                "no_current_assignment" in row["review_flags"]
-                for row in measurements
-            ),
-        },
-        "targets": targets,
-        "groups": [package_group],
-        "measurements": measurements,
-        "unresolved_composite_measurements": unresolved,
-        "scope_role_review_measurements": scope_role_review,
-        "invariants": {
-            "valid": not validation_errors,
-            "errors": validation_errors,
-            "fit_enabled_measurements_belong_to_one_group": not validation_errors,
-            "composite_targets_are_not_model_nodes": all(
-                not row["model_target"]
-                for row in targets if row["role"] == TargetRole.COMPOSITE
-            ),
-        },
-        "notes": list(report["notes"]),
-    }

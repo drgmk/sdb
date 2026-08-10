@@ -12,6 +12,7 @@ dependencies = [
   "astropy>=6",
   "astroquery>=0.4.7",
   "plotly>=6",
+  "pyyaml>=6",
   "sqlalchemy>=2",
   "tqdm>=4",
 ]

@@ -35,8 +35,12 @@ def effective_measurement_eligibility(
 ) -> dict[int, EffectiveMeasurementEligibility]:
     """Project manual, structural, and provider-native eligibility.
 
-    Precedence is the latest manual action, then named structural safety
+    Precedence is the latest manual action, then catalog-specific duplicate
     policies, then the provider-native value stored on the measurement.
+
+    A detection associated with several targets is not itself an exclusion:
+    package export places it in one composite observation file instead of
+    copying it into each physical component's file.
     """
     ids = tuple(dict.fromkeys(int(value) for value in measurement_ids))
     if not ids:
@@ -118,14 +122,6 @@ def effective_measurement_eligibility(
             )
             continue
         targets = detection_targets.get(measurement.detection_id, set())
-        if len(targets) > 1:
-            result[measurement_id] = EffectiveMeasurementEligibility(
-                measurement_id,
-                True,
-                "shared_detection",
-                "shared catalog source; component fit/export excluded",
-            )
-            continue
         if measurement_id in iras_alternate_ids:
             result[measurement_id] = EffectiveMeasurementEligibility(
                 measurement_id,

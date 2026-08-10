@@ -18,8 +18,8 @@ from .export import (
     projection_sha256,
     write_ipac_atomic,
 )
-from .fitting_groups import fitting_group_report, fitting_group_subgraph
-from .joint_fit_manifest import write_fit_package_manifest
+from .fitting_groups import fitting_group_report
+from .joint_fit import JointFitDefinition, write_joint_fit
 from .models.exports import ExportItem, ExportRun
 from .progress import NULL_PROGRESS, ProgressReporter
 from .selection import resolve_target_selection
@@ -40,12 +40,21 @@ class PackageExportSummary:
 
 
 @dataclass(frozen=True)
+class _Observation:
+    target_id: int
+    sdbid: str
+    measurement_ids: tuple[int, ...]
+    contributor_sdbids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _FitPackage:
     package_id: str
     directory_name: str
     primary_sdbid: str
     selected_sdbids: tuple[str, ...]
-    target_rows: tuple[dict[str, object], ...]
+    model_sdbids: tuple[str, ...]
+    observations: tuple[_Observation, ...]
 
 
 class PackageExportService:
@@ -97,15 +106,20 @@ class PackageExportService:
             run_id = run.id
             started_at = run.started_at
 
-        target_rows = {
-            target["target_id"]: target
-            for package in packages for target in package.target_rows
+        observations = {
+            observation.target_id: observation
+            for package in packages for observation in package.observations
         }
         projection_by_target_id = {}
         watermark_by_target_id = {}
         with self.sessions() as session:
-            for target_id in sorted(target_rows):
-                snapshot = load_target_export_snapshot(session, target_id)
+            for target_id in sorted(observations):
+                observation = observations[target_id]
+                snapshot = load_target_export_snapshot(
+                    session,
+                    target_id,
+                    measurement_ids=observation.measurement_ids,
+                )
                 projection_by_target_id[target_id] = projection_sha256(
                     snapshot.projection
                 )
@@ -117,22 +131,21 @@ class PackageExportService:
                     target_id, export_dirty_watermark(session, target_id),
                 )
 
+        previous_inputs = _previous_export_inputs(output_dir)
         items: list[dict[str, object]] = []
         tasks = []
         package_by_target_id = {}
         for package in packages:
             package_dir = output_dir / package.directory_name
             package_dir.mkdir(parents=True, exist_ok=True)
-            previous_inputs = _previous_package_inputs(
-                package_dir / "joint-fit.json"
-            )
-            for target in package.target_rows:
-                target_id = target["target_id"]
-                sdbid = target["sdbid"]
+            for observation in package.observations:
+                target_id = observation.target_id
+                sdbid = observation.sdbid
                 package_by_target_id[target_id] = package.package_id
                 output = package_dir / f"{sdbid}-rawphot.txt"
                 projection_digest = projection_by_target_id[target_id]
-                previous = previous_inputs.get(sdbid)
+                relative_output = str(output.relative_to(output_dir))
+                previous = previous_inputs.get(relative_output)
                 status, digest, error = "exported", None, None
                 if (
                     not force
@@ -145,7 +158,11 @@ class PackageExportService:
                         status = "skipped"
                 if status == "exported":
                     tasks.append((
-                        target_id, sdbid, output, projection_digest,
+                        target_id,
+                        sdbid,
+                        output,
+                        projection_digest,
+                        observation.measurement_ids,
                     ))
                     continue
                 items.append({
@@ -160,8 +177,21 @@ class PackageExportService:
 
         database = str(self.sessions.kw["bind"].url.database)
         worker_tasks = [
-            (database, target_id, sdbid, str(output), projection_digest)
-            for target_id, sdbid, output, projection_digest in tasks
+            (
+                database,
+                target_id,
+                sdbid,
+                str(output),
+                projection_digest,
+                measurement_ids,
+            )
+            for (
+                target_id,
+                sdbid,
+                output,
+                projection_digest,
+                measurement_ids,
+            ) in tasks
         ]
         if self.workers == 1 or len(worker_tasks) < 2:
             exported_items = map(_export_target_task, worker_tasks)
@@ -204,52 +234,52 @@ class PackageExportService:
         package_rows = []
         for package in packages:
             package_items = [
-                items_by_target_id[target["target_id"]]
-                for target in package.target_rows
+                items_by_target_id[target.target_id]
+                for target in package.observations
             ]
             package_failed = any(
                 item["status"] == "failed" for item in package_items
             )
             package_dir = output_dir / package.directory_name
-            joint_fit_path = package_dir / "joint-fit.json"
+            joint_fit_path = package_dir / "joint-fit.yml"
             joint_fit = None
             if not package_failed:
-                inputs = [{
-                    "target_id": item["target_id"],
-                    "sdbid": item["sdbid"],
-                    "file": Path(item["output"]).name,
-                    "sha256": item["sha256"],
-                    "projection_sha256": item["projection_sha256"],
-                } for item in package_items]
-                package_graph = fitting_group_subgraph(
-                    report, package.package_id,
-                )
-                package_graph["selection"]["selected_sdbids"] = list(
-                    package.selected_sdbids
-                )
-                write_fit_package_manifest(
-                    joint_fit_path,
-                    package_id=package.package_id,
-                    directory_name=package.directory_name,
-                    primary_sdbid=package.primary_sdbid,
-                    selected_sdbids=package.selected_sdbids,
-                    graph=package_graph,
-                    inputs=inputs,
-                    generated_at=completed_at,
-                    database_revision=revision,
-                )
-                joint_fit = {
-                    "path": str(joint_fit_path.relative_to(output_dir)),
-                    "sha256": self._sha256(joint_fit_path),
+                expected_rawphot_names = {
+                    f"{observation.sdbid}-rawphot.txt"
+                    for observation in package.observations
                 }
+                for stale_path in package_dir.glob("*-rawphot.txt"):
+                    if stale_path.name not in expected_rawphot_names:
+                        stale_path.unlink()
+                mappings = {
+                    observation.sdbid: observation.contributor_sdbids
+                    for observation in package.observations
+                    if observation.contributor_sdbids != (
+                        observation.sdbid,
+                    )
+                }
+                if mappings:
+                    write_joint_fit(
+                        joint_fit_path,
+                        JointFitDefinition(observations=mappings),
+                    )
+                    joint_fit = {
+                        "path": str(joint_fit_path.relative_to(output_dir)),
+                        "sha256": self._sha256(joint_fit_path),
+                    }
+                else:
+                    joint_fit_path.unlink(missing_ok=True)
+                (package_dir / "joint-fit.json").unlink(missing_ok=True)
             package_rows.append({
                 "package_id": package.package_id,
                 "directory": package.directory_name,
                 "primary_sdbid": package.primary_sdbid,
                 "selected_sdbids": list(package.selected_sdbids),
                 "status": "partial" if package_failed else "completed",
-                "input_sdbids": [
-                    target["sdbid"] for target in package.target_rows
+                "model_sdbids": list(package.model_sdbids),
+                "observation_sdbids": [
+                    observation.sdbid
+                    for observation in package.observations
                 ],
                 "joint_fit": joint_fit,
             })
@@ -265,7 +295,7 @@ class PackageExportService:
             manifest_items.append(value)
         manifest = {
             "schema": "sdb-fit-package-export",
-            "schema_version": 1,
+            "schema_version": 2,
             "run_id": run_id,
             "selection": selection.as_dict(),
             "database_revision": revision,
@@ -293,9 +323,9 @@ class PackageExportService:
         }
         affected_packages_by_target_id: dict[int, set[str]] = {}
         for package in packages:
-            for target in package.target_rows:
+            for target in package.observations:
                 affected_packages_by_target_id.setdefault(
-                    target["target_id"], set(),
+                    target.target_id, set(),
                 ).add(package.package_id)
             for selected_sdbid in package.selected_sdbids:
                 try:
@@ -399,11 +429,7 @@ def _fit_packages(report: dict[str, object]) -> list[_FitPackage]:
             candidate if candidate_counts[candidate] == 1
             else sorted(group["sdbids"])[0]
         )
-        target_rows = tuple(
-            targets[target_id] for target_id in sorted(
-                group["target_ids"], key=lambda value: targets[value]["sdbid"],
-            )
-        )
+        observations = _package_observations(report, group, targets)
         group_system_ids = {
             membership["system_id"]
             for target_id in group["target_ids"]
@@ -424,18 +450,101 @@ def _fit_packages(report: dict[str, object]) -> list[_FitPackage]:
             directory_name=directory_name,
             primary_sdbid=directory_name,
             selected_sdbids=package_selected_sdbids,
-            target_rows=target_rows,
+            model_sdbids=tuple(sorted(group["sdbids"])),
+            observations=observations,
         ))
     return sorted(packages, key=lambda package: package.directory_name)
 
 
 def fit_package_target_ids(report: dict[str, object]) -> set[int]:
-    """Return physical rawphot inputs reached by a resolved selection."""
+    """Return rawphot observation targets reached by a selection."""
     return {
-        int(target["target_id"])
+        observation.target_id
         for package in _fit_packages(report)
-        for target in package.target_rows
+        for observation in package.observations
     }
+
+
+def _package_observations(
+    report: dict[str, object],
+    group: dict[str, object],
+    targets: dict[int, dict[str, object]],
+) -> tuple[_Observation, ...]:
+    """Partition a fitting group's measurements by observation scope."""
+
+    group_target_ids = set(group["target_ids"])
+    measurement_ids = {
+        *group["fit_measurement_ids"],
+        *group["context_measurement_ids"],
+    }
+    measurements = {
+        row["measurement_id"]: row for row in report["measurements"]
+        if row["measurement_id"] in measurement_ids
+    }
+    rows_by_observation: dict[int, set[int]] = {
+        target_id: set() for target_id in group_target_ids
+    }
+    contributors_by_observation: dict[int, tuple[int, ...]] = {
+        target_id: (target_id,) for target_id in group_target_ids
+    }
+
+    for measurement_id in sorted(measurements):
+        row = measurements[measurement_id]
+        if not row["current_encounter"]:
+            continue
+        contributors = tuple(sorted(
+            set(row["active_model_contributor_ids"]) & group_target_ids
+        ))
+        if not contributors:
+            continue
+        scope_ids = tuple(sorted(set(row["composite_scope_target_ids"])))
+        if len(scope_ids) > 1:
+            raise ValueError(
+                f"measurement {measurement_id} has several observation "
+                "scopes; assign one composite scope"
+            )
+        if scope_ids:
+            observation_id = scope_ids[0]
+            scope = targets.get(observation_id)
+            if scope is None or scope["role"] != "composite":
+                raise ValueError(
+                    f"measurement {measurement_id} observation scope is not "
+                    "a composite target"
+                )
+        elif len(contributors) == 1:
+            observation_id = contributors[0]
+        else:
+            raise ValueError(
+                f"measurement {measurement_id} has several contributors but "
+                "no composite observation scope"
+            )
+
+        previous = contributors_by_observation.get(observation_id)
+        if previous is not None and previous != contributors:
+            raise ValueError(
+                f"observation {targets[observation_id]['sdbid']} has "
+                "inconsistent contributor sets"
+            )
+        contributors_by_observation[observation_id] = contributors
+        rows_by_observation.setdefault(observation_id, set()).add(
+            measurement_id
+        )
+
+    observations = []
+    for target_id in sorted(
+        rows_by_observation,
+        key=lambda value: targets[value]["sdbid"],
+    ):
+        observations.append(_Observation(
+            target_id=target_id,
+            sdbid=targets[target_id]["sdbid"],
+            measurement_ids=tuple(sorted(rows_by_observation[target_id])),
+            contributor_sdbids=tuple(
+                targets[value]["sdbid"]
+                for value in contributors_by_observation[target_id]
+            ),
+        ))
+    return tuple(observations)
 
 
 def _package_directory_candidate(
@@ -464,34 +573,57 @@ def _package_directory_candidate(
     return sorted(group["sdbids"])[0]
 
 
-def _previous_package_inputs(path: Path) -> dict[str, dict[str, object]]:
-    if not path.is_file():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if payload.get("schema") != "sdb-fit-package":
-        return {}
-    rows = payload.get("inputs")
-    if not isinstance(rows, list):
-        return {}
-    return {
-        str(row["sdbid"]): row
-        for row in rows
-        if isinstance(row, dict) and row.get("sdbid")
-    }
+def _previous_export_inputs(
+    output_dir: Path,
+) -> dict[str, dict[str, object]]:
+    """Find the newest recorded state for each output in run manifests."""
+
+    result: dict[str, dict[str, object]] = {}
+    manifests = sorted(
+        output_dir.glob("export-*-manifest.json"),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )
+    for path in manifests:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("schema") != "sdb-fit-package-export":
+            continue
+        rows = payload.get("items")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if (
+                isinstance(row, dict)
+                and isinstance(row.get("output"), str)
+                and row.get("status") != "failed"
+            ):
+                result.setdefault(row["output"], row)
+    return result
 
 
 def _export_target_task(
-    task: tuple[str, int, str, str, str],
+    task: tuple[str, int, str, str, str, tuple[int, ...]],
 ) -> dict[str, object]:
-    database, target_id, sdbid, output_value, projection_digest = task
+    (
+        database,
+        target_id,
+        sdbid,
+        output_value,
+        projection_digest,
+        measurement_ids,
+    ) = task
     output = Path(output_value)
     try:
         sessions = make_session_factory(database)
         with sessions() as session:
-            snapshot = load_target_export_snapshot(session, target_id)
+            snapshot = load_target_export_snapshot(
+                session,
+                target_id,
+                measurement_ids=measurement_ids,
+            )
         write_ipac_atomic(snapshot.projection, output)
         digest = PackageExportService._sha256(output)
         projection_digest = projection_sha256(snapshot.projection)

@@ -103,7 +103,7 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
     assert rows[clean.sdbid]["priority"] == "none"
     assert (
         rows[unassigned.sdbid]["classification"]
-        == "unassigned_excluded_photometry"
+        == "unassigned_photometry"
     )
     assert rows[unassigned.sdbid]["unassigned_detection_count"] == 1
     assert rows[mixed.sdbid]["classification"] == "mixed_band_ownership"

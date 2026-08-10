@@ -10,8 +10,12 @@ from sdb_identity.catalogs.types import MeasurementValue
 from sdb_identity.cli import main
 from sdb_identity.models.catalogs import NormalizedMeasurement
 from sdb_identity.models.exports import ExportItem, ExportRun
+from sdb_identity.joint_fit import read_joint_fit
 from sdb_identity.package_export import PackageExportService
-from sdb_identity.photometry.assignments import set_measurement_eligibility
+from sdb_identity.photometry.assignments import (
+    assign_measurement_target,
+    set_measurement_eligibility,
+)
 from sdb_identity.samples.service import SampleService
 from sdb_identity.service import AddRequest, IdentityService
 from sdb_identity.target_lifecycle import set_target_lifecycle
@@ -65,24 +69,10 @@ def test_package_export_writes_manifest_and_sdf_readable_file(
     assert manifest["started_at"] and manifest["completed_at"]
     assert manifest["package_count"] == 1
     assert manifest["packages"][0]["directory"] == target.sdbid
-    joint_path = tmp_path / target.sdbid / "joint-fit.json"
-    assert manifest["packages"][0]["joint_fit"]["path"] == (
-        f"{target.sdbid}/joint-fit.json"
-    )
-    assert len(manifest["packages"][0]["joint_fit"]["sha256"]) == 64
-    joint = json.loads(joint_path.read_text())
-    assert joint["schema"] == "sdb-fit-package"
-    assert joint["schema_version"] == 1
-    assert joint["database_revision"] == manifest["database_revision"]
-    assert joint["inputs"][0]["sdbid"] == target.sdbid
-    assert joint["inputs"][0]["file"] == f"{target.sdbid}-rawphot.txt"
-    assert joint["graph"]["summary"]["unassigned_measurement_count"] == 0
-    assert joint["graph"]["summary"]["fit_enabled_measurement_count"] == 2
-    assert all(
-        row["assignments"][0]["derived"] is True
-        for row in joint["graph"]["measurements"]
-    )
-    assert joint["graph"]["invariants"]["valid"] is True
+    assert manifest["packages"][0]["joint_fit"] is None
+    assert manifest["packages"][0]["model_sdbids"] == [target.sdbid]
+    assert manifest["packages"][0]["observation_sdbids"] == [target.sdbid]
+    assert not (tmp_path / target.sdbid / "joint-fit.yml").exists()
 
     output = tmp_path / target.sdbid / f"{target.sdbid}-rawphot.txt"
     table = Table.read(output, format="ascii.ipac")
@@ -238,6 +228,40 @@ def test_package_export_packages_joint_physical_inputs_under_composite_sdbid(
     system, component_a, component_b = _configured_system(session_factory)
     measurement = _measurement(session_factory, system)
     _assign_pair(session_factory, measurement, system, component_a, component_b)
+    component_measurements = []
+    with session_factory.begin() as session:
+        for target, band, value in (
+            (component_a, "BT", 8.1),
+            (component_b, "VT", 9.2),
+        ):
+            row = NormalizedMeasurement(
+                run_id=measurement.run_id,
+                target_id=target.target_id,
+                raw_row_id=measurement.raw_row_id,
+                detection_id=measurement.detection_id,
+                measurement_key=f"fixture:{band}",
+                provider=measurement.provider,
+                source_id=measurement.source_id,
+                band=band,
+                value=value,
+                error=0.03,
+                systematic_error=0.01,
+                unit="mag",
+                bibcode="test",
+            )
+            session.add(row)
+            session.flush()
+            component_measurements.append((target, row.id))
+    for target, measurement_id in component_measurements:
+        assign_measurement_target(
+            session_factory,
+            measurement_id,
+            target.sdbid,
+            role="contributor",
+            method="test",
+            actor="test",
+            reason="component-only fixture",
+        )
     samples = SampleService(session_factory)
     samples.create("joint")
     samples.add("joint", system.sdbid, actor="test", reason="system sample")
@@ -251,30 +275,54 @@ def test_package_export_packages_joint_physical_inputs_under_composite_sdbid(
         result.target_count,
         result.package_count,
         result.failed,
-    ) == (1, 2, 1, 0)
+    ) == (1, 3, 1, 0)
     package_dir = tmp_path / system.sdbid
     expected_files = {
         f"{component_a.sdbid}-rawphot.txt",
         f"{component_b.sdbid}-rawphot.txt",
-        "joint-fit.json",
+        f"{system.sdbid}-rawphot.txt",
+        "joint-fit.yml",
     }
     assert {path.name for path in package_dir.iterdir()} == expected_files
 
-    joint = json.loads((package_dir / "joint-fit.json").read_text())
-    assert joint["package"]["primary_sdbid"] == system.sdbid
-    assert joint["package"]["selected_sdbids"] == [system.sdbid]
-    assert joint["package"]["input_sdbids"] == sorted([
-        component_a.sdbid, component_b.sdbid,
-    ])
-    assert {row["file"] for row in joint["inputs"]} == {
-        f"{component_a.sdbid}-rawphot.txt",
-        f"{component_b.sdbid}-rawphot.txt",
+    definition = read_joint_fit(package_dir / "joint-fit.yml")
+    assert definition.observations == {
+        system.sdbid: (component_a.sdbid, component_b.sdbid),
     }
-    assert joint["graph"]["summary"]["fitting_group_count"] == 1
-    assert joint["graph"]["selection"]["selected_sdbids"] == [system.sdbid]
-    assert joint["graph"]["groups"][0]["sdbids"] == sorted([
+    component_a_table = Table.read(
+        package_dir / f"{component_a.sdbid}-rawphot.txt",
+        format="ascii.ipac",
+    )
+    component_b_table = Table.read(
+        package_dir / f"{component_b.sdbid}-rawphot.txt",
+        format="ascii.ipac",
+    )
+    assert list(component_a_table["Band"]) == ["BT"]
+    assert list(component_b_table["Band"]) == ["VT"]
+    combined = Table.read(
+        package_dir / f"{system.sdbid}-rawphot.txt",
+        format="ascii.ipac",
+    )
+    assert len(combined) == 1
+    assert list(combined["Band"]) == ["WISE22"]
+    assert sum(map(len, (component_a_table, component_b_table, combined))) == 3
+    assert combined.meta["keywords"]["id"]["value"] == system.sdbid
+
+    manifest = json.loads(
+        (tmp_path / f"export-{result.run_id}-manifest.json").read_text()
+    )
+    package = manifest["packages"][0]
+    assert package["primary_sdbid"] == system.sdbid
+    assert package["selected_sdbids"] == [system.sdbid]
+    assert package["model_sdbids"] == sorted([
         component_a.sdbid, component_b.sdbid,
     ])
+    assert package["observation_sdbids"] == sorted([
+        system.sdbid, component_a.sdbid, component_b.sdbid,
+    ])
+    assert package["joint_fit"]["path"] == (
+        f"{system.sdbid}/joint-fit.yml"
+    )
 
 
 def test_package_export_rejects_composite_without_a_physical_fit_group(

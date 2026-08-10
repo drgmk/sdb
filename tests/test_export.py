@@ -55,7 +55,7 @@ def test_export_uses_only_current_successful_run(session_factory, tmp_path):
 
 
 
-def test_shared_catalog_source_is_excluded_from_component_exports(session_factory, tmp_path):
+def test_shared_catalog_source_is_not_intrinsically_excluded(session_factory, tmp_path):
     first = IdentityService(session_factory).add(AddRequest(ra_deg=10, dec_deg=-20))
     second = IdentityService(session_factory).add(AddRequest(ra_deg=10.00055, dec_deg=-20))
     adapter = FakeCatalog([candidate(measurements=[measurement("IRAS12", 1.2, 0.1)])])
@@ -65,8 +65,8 @@ def test_shared_catalog_source_is_excluded_from_component_exports(session_factor
 
     output = export_ipac(session_factory, first.sdbid, tmp_path / "shared.txt")
     table = Table.read(output, format="ascii.ipac")
-    assert list(table["exclude"]) == [1]
-    assert "shared catalog source" in table["Note2"][0]
+    assert list(table["exclude"]) == [0]
+    assert "shared catalog source" not in table["Note2"][0]
 
 
 def test_same_display_source_in_distinct_releases_is_not_shared(

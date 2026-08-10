@@ -488,7 +488,6 @@ def render_target_page(
                 "provider_excluded": "provider default",
                 "manual_exclude_action": "manual decision",
                 "manual_include_action": "manual decision",
-                "shared_detection": "shared-source safety",
                 "iras_alternate": "IRAS duplicate safety",
                 "tdsc_preferred": "TDSC preferred",
             }.get(basis, "")

@@ -60,7 +60,7 @@ def test_same_provider_and_band_measurements_are_decided_independently(
     assert eligibility[rows[1].id].basis == "included"
 
 
-def test_manual_include_overrides_shared_detection_safety(session_factory):
+def test_shared_detection_is_not_an_automatic_exclusion(session_factory):
     identity = IdentityService(session_factory)
     first = identity.add(AddRequest(ra_deg=10, dec_deg=-20))
     second = identity.add(AddRequest(ra_deg=10.0002, dec_deg=-20))
@@ -74,8 +74,8 @@ def test_manual_include_overrides_shared_detection_safety(session_factory):
         automatic = effective_measurement_eligibility(
             session, [measurement_id],
         )[measurement_id]
-    assert automatic.excluded is True
-    assert automatic.basis == "shared_detection"
+    assert automatic.excluded is False
+    assert automatic.basis == "included"
 
     set_measurement_eligibility(
         session_factory,

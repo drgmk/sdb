@@ -18,7 +18,10 @@ from .dirty import (
     export_dirty_watermark,
     mark_exported_through,
 )
-from .photometry.eligibility import EffectiveMeasurementEligibility
+from .photometry.eligibility import (
+    EffectiveMeasurementEligibility,
+    effective_measurement_eligibility,
+)
 from .models.identity import ExternalIdentifier, Target
 from .models.metadata import MetadataRun, SimbadMetadata
 from .models.catalogs import NormalizedMeasurement
@@ -158,16 +161,51 @@ def build_target_export_projection(
 def load_target_export_snapshot(
     session: Session,
     target_reference: str | int,
+    *,
+    measurement_ids: Iterable[int] | None = None,
 ) -> TargetExportSnapshot:
-    """Load one consistent export read snapshot and its dirty watermark."""
+    """Load one consistent export read snapshot and its dirty watermark.
+
+    When ``measurement_ids`` is supplied, the target identifies the
+    observation described by the rawphot header while the explicit rows define
+    its contents.  Package export uses this to keep physical and composite
+    observation scopes disjoint.
+    """
 
     _ensure_read_snapshot(session)
     target = resolve_target(session, target_reference)
     if target is None:
         raise KeyError(f"target not found: {target_reference}")
-    state = load_system_photometry_state(
-        session, [target.id], expand_context=False,
-    )
+    if measurement_ids is None:
+        state = load_system_photometry_state(
+            session, [target.id], expand_context=False,
+        )
+        measurements = [
+            encounter.measurement for encounter in state.encounters
+        ]
+        eligibility = state.eligibility
+    else:
+        ordered_ids = tuple(dict.fromkeys(
+            int(value) for value in measurement_ids
+        ))
+        by_id = {
+            row.id: row
+            for row in session.scalars(
+                select(NormalizedMeasurement).where(
+                    NormalizedMeasurement.id.in_(ordered_ids)
+                )
+            )
+        }
+        missing = set(ordered_ids) - set(by_id)
+        if missing:
+            raise KeyError(
+                "measurement not found: "
+                + ", ".join(str(value) for value in sorted(missing))
+            )
+        measurements = [by_id[value] for value in ordered_ids]
+        eligibility = effective_measurement_eligibility(
+            session, ordered_ids,
+        )
     identifiers = list(session.scalars(
         select(ExternalIdentifier)
         .where(ExternalIdentifier.target_id == target.id)
@@ -184,8 +222,8 @@ def load_target_export_snapshot(
     )
     projection = build_target_export_projection(
         target,
-        (encounter.measurement for encounter in state.encounters),
-        state.eligibility,
+        measurements,
+        eligibility,
         identifiers,
         simbad,
     )
@@ -301,8 +339,6 @@ def _ensure_read_snapshot(session: Session) -> None:
 def _eligibility_note(
     eligibility: EffectiveMeasurementEligibility,
 ) -> str | None:
-    if eligibility.basis == "shared_detection":
-        return "Blend:shared catalog source; component export excluded"
     if eligibility.basis == "iras_alternate":
         return "IRAS duplicate:alternate PSC/FSC measurement"
     if eligibility.basis == "tdsc_preferred":

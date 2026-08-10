@@ -19,7 +19,9 @@ def register_export_parsers(commands, add_parser) -> None:
         "export",
         "Export one target, a sample, or all targets as SDF fitting packages.",
         "Reconciles one directory per fitting group beneath the output root. "
-        "Each package contains its physical rawphot inputs and joint-fit.json; "
+        "Each package contains one rawphot file per observation scope and, "
+        "when needed, a small joint-fit.yml mapping combined observations to "
+        "their physical contributors; "
         "unchanged verified files are retained. Choose exactly one of TARGET, "
         "--sample, or --all.",
     )
