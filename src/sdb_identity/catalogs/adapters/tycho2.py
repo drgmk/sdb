@@ -291,6 +291,7 @@ class Tycho2Adapter(VizierConeAdapter):
                 band=band,
                 value=value,
                 error=row_float(row, error_column) or 0.0,
+                systematic_error=0.006,
                 unit="mag",
                 bibcode=cls.bibcode,
                 quality=magnitude_flag or position_flag or mean_position_flag or None,

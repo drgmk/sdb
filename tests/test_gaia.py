@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
-from sdb_identity.catalogs.adapters.gaia import GaiaDr3Adapter
+from sdb_identity.catalogs.adapters.gaia import (
+    GaiaDr3Adapter,
+    corrected_bp_rp_excess_factor,
+    corrected_bp_rp_excess_sigma,
+)
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import CatalogQueryContext
 from sdb_identity.models.catalogs import (
@@ -53,7 +58,7 @@ def gaia_row(**values):
         "o_RPmag": 25,
         "NRPcont": 0,
         "NRPblend": 0,
-        "E(BP/RP)": 1.12,
+        "E(BP/RP)": 1.19,
     }
     row.update(values)
     return row
@@ -72,6 +77,9 @@ def test_gaia_row_preserves_fluxes_and_normalizes_native_magnitudes():
     assert candidate.measurements[1].blend_state == "blended"
     assert candidate.measurements[1].blend_reason == "provider_flagged"
     assert candidate.measurements[1].excluded is False
+    assert [value.systematic_error for value in candidate.measurements] == [
+        0.01, 0.01, 0.01,
+    ]
     review = candidate.payload["_sdb_review"]
     assert review["fields"] == [{
         "key": "single_star_probability",
@@ -81,6 +89,34 @@ def test_gaia_row_preserves_fluxes_and_normalizes_native_magnitudes():
         "source_column": "PSS",
     }]
     assert review["position_uncertainty"]["major_arcsec"] == 0.00012
+
+
+def test_gaia_corrected_bp_rp_excess_uses_published_piecewise_fit():
+    assert corrected_bp_rp_excess_factor(0.0, 1.154360) == 0.0
+    assert corrected_bp_rp_excess_factor(0.5, 1.179314875) == 0.0
+    assert corrected_bp_rp_excess_factor(4.0, 1.61972) == 0.0
+    assert corrected_bp_rp_excess_factor(-1.01, 1.0) is None
+    assert corrected_bp_rp_excess_factor(7.01, 1.0) is None
+    assert corrected_bp_rp_excess_sigma(8.0) == pytest.approx(0.0060567028)
+
+
+def test_gaia_excludes_only_bp_rp_for_five_sigma_corrected_excess():
+    candidate = GaiaDr3Adapter.parse_row(gaia_row(**{"E(BP/RP)": 1.50}))
+    by_band = {value.band: value for value in candidate.measurements}
+
+    assert by_band["GAIA.G"].excluded is False
+    assert by_band["GAIA.BP"].excluded is True
+    assert by_band["GAIA.RP"].excluded is True
+    assert "5 sigma" in by_band["GAIA.BP"].exclusion_reason
+    assert "C*:" in by_band["GAIA.BP"].note2
+
+
+def test_gaia_does_not_apply_corrected_excess_cut_to_saturated_bright_source():
+    candidate = GaiaDr3Adapter.parse_row(gaia_row(
+        Gmag=3.9,
+        **{"E(BP/RP)": 1.50},
+    ))
+    assert not any(value.excluded for value in candidate.measurements)
 
 
 def test_gaia_missing_band_is_not_normalized():

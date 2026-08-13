@@ -252,7 +252,8 @@ def canonical_measurement(
         for key in (
             "provider", "source_id", "band", "value", "error",
             "systematic_error", "upper_limit", "unit", "bibcode",
-            "quality", "note1", "note2", "private",
+            "quality", "note1", "note2", "private", "excluded",
+            "exclusion_reason",
             "resolution_major_arcsec", "resolution_minor_arcsec",
             "resolution_kind", "resolution_reference",
             "ownership_scope", "blend_state", "blend_reason",

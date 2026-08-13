@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
 import re
 
 from astroquery.vizier import Vizier
@@ -21,6 +22,45 @@ from .review_metadata import add_review_metadata, PositionUncertainty, ReviewFie
 
 _GAIA_DR3_IDENTIFIER = re.compile(r"^Gaia\s+DR3\s+(\d+)$", re.IGNORECASE)
 _PROVIDER = catalog_provider("gaia_dr3")
+
+# Riello et al. (2021), table 2 and equation 21.  The corrected BP/RP
+# excess-factor relation is calibrated for -1 <= BP-RP <= 7, and the paper
+# recommends applying the scatter-based quality cut only for G > 4.
+_BP_RP_EXCESS_NSIGMA = 5.0
+
+
+def corrected_bp_rp_excess_factor(
+    bp_rp: float | None,
+    excess_factor: float | None,
+) -> float | None:
+    """Return Gaia EDR3/DR3 C* when the published colour fit is valid."""
+    if (
+        bp_rp is None
+        or excess_factor is None
+        or not math.isfinite(bp_rp)
+        or not math.isfinite(excess_factor)
+        or not -1.0 <= bp_rp <= 7.0
+    ):
+        return None
+    if bp_rp < 0.5:
+        expected = 1.154360 + 0.033772 * bp_rp + 0.032277 * bp_rp**2
+    elif bp_rp < 4.0:
+        expected = (
+            1.162004
+            + 0.011464 * bp_rp
+            + 0.049255 * bp_rp**2
+            - 0.005879 * bp_rp**3
+        )
+    else:
+        expected = 1.057572 + 0.140537 * bp_rp
+    return excess_factor - expected
+
+
+def corrected_bp_rp_excess_sigma(g_magnitude: float | None) -> float | None:
+    """Return the fitted one-sigma C* scatter from Riello et al. (2021)."""
+    if g_magnitude is None or not math.isfinite(g_magnitude) or g_magnitude <= 0:
+        return None
+    return 0.0059898 + 8.817481e-12 * g_magnitude**7.618399
 
 
 class GaiaDr3Adapter:
@@ -195,6 +235,23 @@ class GaiaDr3Adapter:
             )
 
         # Native magnitudes plus provider flux/observation/blend diagnostics.
+        g_magnitude = row_float(row, "Gmag")
+        bp_magnitude = row_float(row, "BPmag")
+        rp_magnitude = row_float(row, "RPmag")
+        bp_rp = row_float(row, "BP-RP", "bp_rp")
+        if bp_rp is None and bp_magnitude is not None and rp_magnitude is not None:
+            bp_rp = bp_magnitude - rp_magnitude
+        excess = row_float(row, "E(BP/RP)", "bp_rp_excess_factor")
+        corrected_excess = corrected_bp_rp_excess_factor(bp_rp, excess)
+        corrected_excess_sigma = corrected_bp_rp_excess_sigma(g_magnitude)
+        bp_rp_excluded = bool(
+            g_magnitude is not None
+            and g_magnitude > 4.0
+            and corrected_excess is not None
+            and corrected_excess_sigma is not None
+            and abs(corrected_excess)
+            >= _BP_RP_EXCESS_NSIGMA * corrected_excess_sigma
+        )
         measurements = []
         for (
             band,
@@ -229,17 +286,31 @@ class GaiaDr3Adapter:
             if blended is not None:
                 quality_parts.append(f"n_blend={int(blended)}")
             provider_flagged = bool((contaminated or 0) > 0 or (blended or 0) > 0)
-            excess = row_float(row, "E(BP/RP)", "bp_rp_excess_factor")
+            bp_rp_band = band in {"GAIA.BP", "GAIA.RP"}
+            excess_note = []
+            if excess is not None:
+                excess_note.append(f"BP/RP excess:{excess:.6g}")
+            if corrected_excess is not None:
+                excess_note.append(f"C*:{corrected_excess:.6g}")
+            if corrected_excess_sigma is not None:
+                excess_note.append(f"sigma_C*:{corrected_excess_sigma:.6g}")
             measurements.append(
                 MeasurementValue(
                     band=band,
                     value=magnitude,
                     error=row_float(row, error_column) or 0.0,
+                    systematic_error=0.01,
                     unit="mag",
                     bibcode=cls.bibcode,
                     quality=";".join(quality_parts) or None,
                     note1="; ".join(note_parts),
-                    note2=f"BP/RP excess:{excess:.6g}" if excess is not None else "",
+                    note2="; ".join(excess_note),
+                    excluded=bp_rp_excluded and bp_rp_band,
+                    exclusion_reason=(
+                        "Gaia DR3 corrected BP/RP flux excess is at least "
+                        f"{_BP_RP_EXCESS_NSIGMA:g} sigma"
+                        if bp_rp_excluded and bp_rp_band else None
+                    ),
                     blend_state="blended" if provider_flagged else "clear",
                     blend_reason="provider_flagged" if provider_flagged else None,
                 )

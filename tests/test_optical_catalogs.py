@@ -93,6 +93,7 @@ def test_hip2_snapshot_exports_only_native_hp(tmp_path):
     assert [(value.band, value.value) for value in candidates[0].measurements] == [
         ("HP", 7.1234),
     ]
+    assert candidates[0].measurements[0].systematic_error == 0.005
 
 
 def test_tdsc_snapshot_matches_main_and_supplement_tables(tmp_path):
@@ -116,6 +117,9 @@ def test_tdsc_snapshot_matches_main_and_supplement_tables(tmp_path):
         "tdsc", main[0].source_id, main[0].payload,
     ) == "HD 456A"
     assert [value.band for value in main[0].measurements] == ["BT", "VT"]
+    assert [value.systematic_error for value in main[0].measurements] == [
+        0.006, 0.006,
+    ]
     assert [candidate.source_id for candidate in supplement] == ["10|m_TDSC=B"]
     assert [value.band for value in supplement[0].measurements] == ["BT"]
     assert supplement[0].epoch == 2000.0
@@ -190,6 +194,9 @@ def test_tycho2_normalizes_native_bands_and_marks_photocentres():
     })
     assert candidate.source_id == "TYC 1-13-1"
     assert [value.band for value in candidate.measurements] == ["BT", "VT"]
+    assert [value.systematic_error for value in candidate.measurements] == [
+        0.006, 0.006,
+    ]
     assert all(value.ownership_scope == "system" for value in candidate.measurements)
     assert all(value.blend_state == "blended" for value in candidate.measurements)
     assert all(value.blend_reason == "provider_flagged" for value in candidate.measurements)

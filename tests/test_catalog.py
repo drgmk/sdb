@@ -91,12 +91,18 @@ def candidate(source_id="J00400000-2000000", *, ra=10.0, dec=-20.0, measurements
     )
 
 
-def measurement(band="2MJ", value=7.1, error=0.02, excluded=False):
+def measurement(
+    band="2MJ",
+    value=7.1,
+    error=0.02,
+    excluded=False,
+    systematic_error=0.01,
+):
     return MeasurementValue(
         band=band,
         value=value,
         error=error,
-        systematic_error=0.01,
+        systematic_error=systematic_error,
         unit="mag",
         bibcode="2003tmc..book.....C",
         quality="A0",
@@ -354,6 +360,48 @@ def test_refresh_keeps_history_and_replaces_current_measurements(session_factory
         assert session.query(NormalizedMeasurement).count() == 1
         assert session.query(RawCatalogRow).count() == 2
         assert first.run_id != second.run_id
+
+
+def test_refresh_updates_provider_owned_exclusion_state(session_factory):
+    target = add_target(session_factory, ra_deg=10, dec_deg=-20)
+    service = CatalogAcquisitionService(
+        session_factory,
+        {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
+    )
+    service.refresh(target.sdbid, "2mass")
+    service.adapters["2mass"] = FakeCatalog([
+        candidate(measurements=[measurement(excluded=True)])
+    ])
+
+    service.refresh(target.sdbid, "2mass")
+
+    with session_factory() as session:
+        stored = session.scalars(select(NormalizedMeasurement)).one()
+        assert stored.excluded is True
+        assert stored.exclusion_reason == "2MASS quality/contamination flags"
+
+
+def test_refresh_marks_export_dirty_when_only_systematic_error_changes(
+    session_factory,
+):
+    target = add_target(session_factory, ra_deg=10, dec_deg=-20)
+    service = CatalogAcquisitionService(
+        session_factory,
+        {"2mass": FakeCatalog([candidate(measurements=[measurement()])])},
+    )
+    service.refresh(target.sdbid, "2mass")
+    with session_factory.begin() as session:
+        session.execute(delete(ExportDirtyTarget))
+    service.adapters["2mass"] = FakeCatalog([
+        candidate(measurements=[measurement(systematic_error=0.02)])
+    ])
+
+    service.refresh(target.sdbid, "2mass")
+
+    with session_factory() as session:
+        dirty = session.scalars(select(ExportDirtyTarget)).one()
+        assert dirty.target_id == target.target_id
+        assert dirty.reason == "2mass catalog result changed"
 
 
 def test_query_coordinates_are_propagated_to_catalog_epoch(session_factory):
