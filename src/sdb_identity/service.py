@@ -19,6 +19,7 @@ from .models.identity import (
     ProviderOutcome,
     Submission,
     Target,
+    TargetDuplicateReview,
 )
 from .models.metadata import MetadataRun, SimbadMetadata
 from .decisions import DecisionContext
@@ -74,6 +75,7 @@ class AddResult:
     sdbid: str
     created: bool
     astrometry_source: str
+    possible_duplicate_sdbids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -396,8 +398,14 @@ class TargetRegistration:
 class TargetRegistrar:
     """Deduplicate and persist a resolved target and canonical astrometry."""
 
-    def __init__(self, *, duplicate_radius_arcsec: float = 0.36):
+    def __init__(
+        self,
+        *,
+        duplicate_radius_arcsec: float = 0.36,
+        duplicate_review_radius_arcsec: float = 2.0,
+    ):
         self.duplicate_radius_arcsec = duplicate_radius_arcsec
+        self.duplicate_review_radius_arcsec = duplicate_review_radius_arcsec
 
     def register_target(
         self,
@@ -542,6 +550,55 @@ class TargetRegistrar:
                 return candidate
         return None
 
+    def flag_possible_duplicates(
+        self,
+        session: Session,
+        *,
+        target: Target,
+        submission: Submission,
+        derived: Astrometry,
+    ) -> tuple[Target, ...]:
+        """Flag, rather than merge, less-certain neighbours of a coordinate import."""
+        radius_deg = self.duplicate_review_radius_arcsec / 3600.0
+        matches = []
+        nearby = session.scalars(select(Target).where(
+            Target.id != target.id,
+            Target.dec2000_deg.between(
+                derived.dec_deg - radius_deg,
+                derived.dec_deg + radius_deg,
+            ),
+        ))
+        for candidate in nearby:
+            separation = angular_separation_arcsec(
+                Astrometry(candidate.ra2000_deg, candidate.dec2000_deg),
+                derived,
+            )
+            if not (
+                self.duplicate_radius_arcsec < separation
+                <= self.duplicate_review_radius_arcsec
+            ):
+                continue
+            reason = (
+                f"coordinate import created {target.sdbid} {separation:.3f} arcsec "
+                f"from existing target {candidate.sdbid}; this is outside the "
+                f"{self.duplicate_radius_arcsec:.2f} arcsec automatic duplicate "
+                "radius but close enough to review"
+            )
+            existing = session.scalar(select(TargetDuplicateReview).where(
+                TargetDuplicateReview.target_id == target.id,
+                TargetDuplicateReview.possible_duplicate_target_id == candidate.id,
+            ))
+            if existing is None:
+                session.add(TargetDuplicateReview(
+                    target_id=target.id,
+                    possible_duplicate_target_id=candidate.id,
+                    submission_id=submission.id,
+                    separation_arcsec=separation,
+                    reason=reason,
+                ))
+            matches.append(candidate)
+        return tuple(sorted(matches, key=lambda value: value.sdbid))
+
     @staticmethod
     def target_primary_identity(
         session: Session, target: Target,
@@ -679,6 +736,7 @@ class IdentityService:
         simbad: SimbadProvider | None = None,
         gaia: GaiaProvider | None = None,
         duplicate_radius_arcsec: float = 0.36,
+        duplicate_review_radius_arcsec: float = 2.0,
         acceptance_score: float = 0.5,
         acceptance_margin: float = 0.15,
     ):
@@ -686,6 +744,7 @@ class IdentityService:
         self.simbad = simbad or NullSimbad()
         self.gaia = gaia or NullGaia()
         self.duplicate_radius_arcsec = duplicate_radius_arcsec
+        self.duplicate_review_radius_arcsec = duplicate_review_radius_arcsec
         self.acceptance_score = acceptance_score
         self.acceptance_margin = acceptance_margin
         self.resolver = IdentityResolver(
@@ -696,6 +755,7 @@ class IdentityService:
         )
         self.registrar = TargetRegistrar(
             duplicate_radius_arcsec=duplicate_radius_arcsec,
+            duplicate_review_radius_arcsec=duplicate_review_radius_arcsec,
         )
 
     def add(
@@ -753,6 +813,18 @@ class IdentityService:
 
             submission.target_id = target.id
             submission.status = "completed"
+            possible_duplicates = ()
+            if (
+                created
+                and request.name is None
+                and selected.source == "gaia_dr3"
+            ):
+                possible_duplicates = self.registrar.flag_possible_duplicates(
+                    session,
+                    target=target,
+                    submission=submission,
+                    derived=registration.derived_astrometry,
+                )
             identifiers.append((target.sdbid, "sdb"))
             if created and component_qualifier:
                 self.registrar.rehome_component_identifiers(
@@ -811,7 +883,13 @@ class IdentityService:
                     if target is None:
                         raise
                     return AddResult(target.id, target.sdbid, False, selected.source)
-            return AddResult(target.id, target.sdbid, created, selected.source)
+            return AddResult(
+                target.id,
+                target.sdbid,
+                created,
+                selected.source,
+                tuple(value.sdbid for value in possible_duplicates),
+            )
 
     def override_match(
         self,

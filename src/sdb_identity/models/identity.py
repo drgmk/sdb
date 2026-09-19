@@ -21,6 +21,37 @@ class Target(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class TargetDuplicateReview(Base):
+    """A newly imported target that may duplicate an existing target."""
+    __tablename__ = "target_duplicate_reviews"
+    __table_args__ = (
+        UniqueConstraint("target_id", "possible_duplicate_target_id"),
+        CheckConstraint(
+            "target_id != possible_duplicate_target_id",
+            name="ck_target_duplicate_reviews_distinct_targets",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    possible_duplicate_target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    separation_arcsec: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="review", server_default="review",
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False,
+    )
+
+
 class Submission(Base):
     __tablename__ = "submissions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

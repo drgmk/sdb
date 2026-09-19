@@ -241,6 +241,7 @@ def review_provider_result_command(
                 if raw is None
                 else {
                     "raw_row_id": raw.id,
+                    "detection_id": raw.detection_id,
                     "source_id": raw.source_id,
                     "separation_arcsec": raw.separation_arcsec,
                     "score": raw.score,

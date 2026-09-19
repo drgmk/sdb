@@ -6,6 +6,7 @@
     <span><strong>$actionable_target_count</strong> actionable</span>
     <span><strong>$clean_target_count</strong> clean/current</span>
     <span><strong>$scope_blocker_target_count</strong> scope blockers</span>
+    <span><strong>$possible_duplicate_target_count</strong> possible duplicates</span>
     <span><strong>$unassigned_detection_count</strong> unassigned detections</span>
     <span><strong>$mixed_detection_count</strong> mixed-ownership detections</span>
   </div>
@@ -16,11 +17,16 @@
     <label>Classification <select name="classification">$classification_options</select></label>
     <label>Provider <select name="provider">$provider_options</select></label>
     <label>Search <input name="search" value="$search" placeholder="name, target, band, action"></label>
+    <label>Rows <select name="page_size">$page_size_options</select></label>
     <div class="filter-actions"><button type="submit">Apply filters</button><a href="/">Clear</a></div>
   </form>
-  <p class="muted queue-count">Showing <strong>$shown_count</strong> of $total_count sample targets.</p>
+  <div class="queue-page-heading">
+    <p class="muted queue-count">Showing <strong>$shown_start–$shown_end</strong> of $filtered_count matching targets ($total_count total).</p>
+    $pagination
+  </div>
   <table>
     <thead><tr><th>priority</th><th>SIMBAD name</th><th>SDB ID</th><th>classification</th><th>role</th><th>detections</th><th>unassigned / mixed</th><th>providers</th><th>recommended action</th></tr></thead>
     <tbody>$rows</tbody>
   </table>
+  $pagination
 </main>

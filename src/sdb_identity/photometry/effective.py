@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Iterable
 
 from sqlalchemy import func, select
@@ -34,6 +35,8 @@ class EffectiveMeasurementAssignment:
 def effective_measurement_assignments(
     session: Session,
     measurement_ids: Iterable[int],
+    *,
+    measurement_target_ids: Mapping[int, Iterable[int]] | None = None,
 ) -> list[EffectiveMeasurementAssignment]:
     """Return explicit overrides or an unambiguous catalog-association default.
 
@@ -77,6 +80,7 @@ def effective_measurement_assignments(
             for measurement_id in ids
             if measurement_id not in explicit_measurement_ids
         ),
+        measurement_target_ids=measurement_target_ids,
     ))
     return sorted(
         result,
@@ -92,6 +96,8 @@ def effective_measurement_assignments(
 def derived_measurement_assignments(
     session: Session,
     measurement_ids: Iterable[int],
+    *,
+    measurement_target_ids: Mapping[int, Iterable[int]] | None = None,
 ) -> list[EffectiveMeasurementAssignment]:
     """Derive safe defaults while deliberately ignoring explicit overrides."""
 
@@ -99,7 +105,11 @@ def derived_measurement_assignments(
     if not ids:
         return []
     result: list[EffectiveMeasurementAssignment] = []
-    encounter_target_ids = current_measurement_target_ids(session, ids)
+    encounter_target_ids = (
+        current_measurement_target_ids(session, ids)
+        if measurement_target_ids is None
+        else measurement_target_ids
+    )
     candidates = {
         measurement_id: tuple(sorted(set(
             int(target_id)

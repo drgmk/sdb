@@ -6,10 +6,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .proposals import measurement_assignment_proposals
 from ..decisions import configured_actor, resolve_reason
-from .assignments import assign_measurement_target
+from .assignments import assign_measurement_target_in_session
 from ..progress import NULL_PROGRESS, ProgressReporter
-from ..samples.service import SampleService
-from ..targets import resolve_target
+from ..selection import resolve_target_selection
 
 
 def apply_measurement_assignment_proposals(
@@ -17,6 +16,7 @@ def apply_measurement_assignment_proposals(
     *,
     target_reference: str | int | None = None,
     sample: str | None = None,
+    all_targets: bool = False,
     apply: bool = False,
     actor: str | None = None,
     reason: str = "accepted high-confidence automatic assignment proposal",
@@ -29,17 +29,19 @@ def apply_measurement_assignment_proposals(
     service. The same canonical measurement may be encountered through several
     targets; inconsistent proposal signatures are retained as review items.
     """
-    if (target_reference is None) == (sample is None):
-        raise ValueError("specify exactly one target or --sample")
     resolved_actor = configured_actor(actor) if apply else None
     resolved_reason = resolve_reason(
         reason,
         "Accepted high-confidence automatic assignment proposals",
     )
     reporter = reporter or NULL_PROGRESS
-    references = _references(
-        session_factory, target_reference=target_reference, sample=sample
+    selection = resolve_target_selection(
+        session_factory,
+        target_reference=target_reference,
+        sample=sample,
+        all_targets=all_targets,
     )
+    references = list(selection.sdbids)
 
     by_measurement: dict[int, list[dict[str, object]]] = {}
     for reference in reporter.iter(
@@ -55,6 +57,7 @@ def apply_measurement_assignment_proposals(
 
     counts: Counter[str] = Counter()
     items = []
+    assignment_operations: list[tuple[int, int, str, str]] = []
     for measurement_id in sorted(by_measurement):
         proposals = by_measurement[measurement_id]
         signatures = {_proposal_signature(value) for value in proposals}
@@ -131,15 +134,12 @@ def apply_measurement_assignment_proposals(
         if apply:
             audit_reason = f"{resolved_reason}; {proposal['proposal_reason']}"
             for value in assignments_to_store:
-                assign_measurement_target(
-                    session_factory,
+                assignment_operations.append((
                     measurement_id,
                     int(value["target_id"]),
-                    role=str(value["role"]),
-                    method="automatic_proposal",
-                    actor=resolved_actor,
-                    reason=audit_reason,
-                )
+                    str(value["role"]),
+                    audit_reason,
+                ))
             status = "applied"
         items.append({
             **base,
@@ -154,6 +154,22 @@ def apply_measurement_assignment_proposals(
         })
         counts[f"{status}_measurements"] += 1
         counts[f"{status}_assignments"] += len(assignments_to_store)
+
+    if apply:
+        for offset in range(0, len(assignment_operations), 500):
+            with session_factory.begin() as session:
+                for measurement_id, target_id, role, audit_reason in (
+                    assignment_operations[offset:offset + 500]
+                ):
+                    assign_measurement_target_in_session(
+                        session,
+                        measurement_id,
+                        target_id,
+                        role=role,
+                        method="automatic_proposal",
+                        actor=resolved_actor,
+                        reason=audit_reason,
+                    )
 
     skipped = sum(
         value for key, value in counts.items() if key.startswith("skipped_")
@@ -170,10 +186,7 @@ def apply_measurement_assignment_proposals(
     })
     return {
         "mode": "apply" if apply else "dry_run",
-        "selection": {
-            "target": None if target_reference is None else str(target_reference),
-            "sample": sample,
-        },
+        "selection": selection.as_dict(),
         "targets_evaluated": len(references),
         "measurements_evaluated": len(by_measurement),
         "summary": {
@@ -192,21 +205,6 @@ def apply_measurement_assignment_proposals(
             "legacy per-target export behavior is unchanged",
         ],
     }
-
-
-def _references(
-    session_factory: sessionmaker[Session],
-    *,
-    target_reference: str | int | None,
-    sample: str | None,
-) -> list[str]:
-    if sample is not None:
-        return [value.sdbid for value in SampleService(session_factory).members(sample)]
-    with session_factory() as session:
-        target = resolve_target(session, target_reference)
-        if target is None:
-            raise KeyError(f"target not found: {target_reference}")
-        return [target.sdbid]
 
 
 def _proposal_signature(proposal: dict[str, object]) -> tuple[object, ...]:

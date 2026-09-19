@@ -19,6 +19,7 @@ from sdb_identity.models.identity import (
     MatchCandidate,
     Submission,
 )
+from sdb_identity.models.catalogs import RawCatalogRow
 from sdb_identity.models.metadata import MetadataRun, SimbadMetadata
 from sdb_identity.review.sky_view import (
     ReviewSkyView,
@@ -30,6 +31,7 @@ from sdb_identity.review.sky_view import (
     _offset_position,
     build_review_sky_view,
 )
+from sdb_identity.review.actions import review_catalog_target_association_decision
 from sdb_identity.review.sky_render import (
     _uncertainty_ellipse_xy,
     render_review_sky_html,
@@ -38,6 +40,7 @@ from sdb_identity.identifiers import normalize_identifier
 from sdb_identity.service import AddRequest, IdentityService
 from tests.test_catalog import FakeCatalog, candidate, measurement
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, gaia_candidate, simbad_result
+from tests.test_system_photometry_foundation import _configured_system
 
 
 def test_catalog_source_display_names_are_adapter_owned():
@@ -181,6 +184,58 @@ def test_review_sky_view_projects_reconciled_catalog_candidate_from_nearby_targe
     assert "catalog detection reconciles to" in point.note
     assert f"encountered by {catalog_target.sdbid}" in point.note
     assert "catalog query for" in html
+
+
+def test_plotted_catalog_link_does_not_label_rejected_target_accepted(
+    session_factory,
+):
+    system, component_a, component_b = _configured_system(session_factory)
+    CatalogAcquisitionService(session_factory, {
+        "gaia_dr3": FakeCatalog(
+            [candidate(
+                "source-a",
+                ra=10.0 - 0.0003,
+                dec=-20.0,
+                measurements=[measurement("GAIA.G")],
+            )],
+            name="gaia_dr3",
+            release="fake-gaia",
+            query_epoch=2016.0,
+        ),
+    }).refresh(system.sdbid, "gaia_dr3")
+    with session_factory() as session:
+        raw = session.query(RawCatalogRow).one()
+
+    for target, action in ((system, "reject"), (component_a, "accept")):
+        preview = review_catalog_target_association_decision(
+            session_factory,
+            target_reference=target.sdbid,
+            detection_id=raw.detection_id,
+            action=action,
+            reviewed_raw_row_id=raw.id,
+        )
+        review_catalog_target_association_decision(
+            session_factory,
+            target_reference=target.sdbid,
+            detection_id=raw.detection_id,
+            action=action,
+            reviewed_raw_row_id=raw.id,
+            apply=True,
+            actor="test",
+            reason=f"{action} fixture association",
+            expected_token=str(preview["state_token"]),
+        )
+
+    view = build_review_sky_view(session_factory, component_a.sdbid)
+    point = next(
+        point for point in view.points
+        if point.provider == "gaia_dr3" and point.source_id == "source-a"
+    )
+
+    assert point.status == "accepted"
+    assert point.linked_target_sdbids == (component_a.sdbid,)
+    assert system.sdbid in point.note
+    assert component_b.sdbid not in point.linked_target_sdbids
 
 
 def test_review_sky_view_marks_identity_candidate_linked_to_sibling_target(session_factory):

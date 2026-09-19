@@ -13,6 +13,8 @@ def test_import_and_coverage_previews_do_not_require_http(session_factory):
     relatives = review_relatives_command(
         session_factory,
         None,
+        None,
+        None,
         {"target": root.sdbid},
         apply=False,
     )

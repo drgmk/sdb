@@ -279,8 +279,8 @@ class CatalogAcquisitionService:
             return tuple(self.refresh(reference, provider) for reference in references)
         contexts = self._contexts(references, adapter)
         results = []
-        for offset in range(0, len(contexts), chunk_size):
-            chunk = contexts[offset:offset + chunk_size]
+
+        def refresh_chunk(chunk: tuple[CatalogQueryContext, ...]) -> None:
             with self.sessions.begin() as session:
                 request = CatalogBatchRequest(
                     provider=adapter.name,
@@ -300,13 +300,21 @@ class CatalogAcquisitionService:
                     request.status = "fallback"
                     request.error = str(error)
                     request.completed_at = datetime.now(timezone.utc)
-                results.extend(
-                    self.refresh(
-                        context.target_id, provider, batch_request_id=request_id,
-                    )
-                    for context in chunk
-                )
-                continue
+                # A timeout for a large multi-cone request should not turn a
+                # scale run into hundreds of serial network calls.  Retry as
+                # smaller bulk requests, reaching the individual adapter only
+                # when a one-target bulk request itself fails.
+                if len(chunk) > 1:
+                    middle = len(chunk) // 2
+                    refresh_chunk(chunk[:middle])
+                    refresh_chunk(chunk[middle:])
+                else:
+                    results.append(self.refresh(
+                        chunk[0].target_id,
+                        provider,
+                        batch_request_id=request_id,
+                    ))
+                return
             with self.sessions.begin() as session:
                 request = session.get(CatalogBatchRequest, request_id)
                 request.status = "completed"
@@ -324,6 +332,9 @@ class CatalogAcquisitionService:
                         preloaded_candidates=list(candidates),
                         batch_request_id=request_id,
                     ))
+
+        for offset in range(0, len(contexts), chunk_size):
+            refresh_chunk(contexts[offset:offset + chunk_size])
         return tuple(results)
 
     def _contexts(self, references, adapter) -> tuple[CatalogQueryContext, ...]:

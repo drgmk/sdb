@@ -772,16 +772,30 @@ def _propose_assignments(
                     "composite identifier and a unique simple A+B system "
                     "identify both physical contributors"
                 ), "high"
+        possible_contributors = (
+            physical
+            if beam is None
+            else [row for row in physical if row["separation_arcsec"] <= beam]
+        )
+        if not composite_scopes:
+            composite_scopes = _unique_curated_composite_scope(
+                composites,
+                possible_contributors,
+            )
         if beam is None:
             assignments = [
-                _proposal(row, "composite_scope", _identifier_evidence(row) if row["identifier_preferred"] else "origin_scope")
+                _proposal(
+                    row,
+                    "composite_scope",
+                    _composite_scope_evidence(row, origin),
+                )
                 for row in composite_scopes
             ]
             return assignments, (
                 "the composite scope is identifiable, but missing resolution prevents "
                 "selection of physical contributors"
             ), "low"
-        contributors = [row for row in physical if row["separation_arcsec"] <= beam]
+        contributors = possible_contributors
         assignments = [
             _proposal(
                 row,
@@ -795,8 +809,7 @@ def _propose_assignments(
             _proposal(
                 row,
                 "composite_scope",
-                _identifier_evidence(row)
-                if row["identifier_preferred"] else "origin_scope",
+                _composite_scope_evidence(row, origin),
             )
             for row in composite_scopes
         )
@@ -825,7 +838,7 @@ def _propose_assignments(
             f"({beam:.2f} arcsec) contribute"
         )
         if composite_scopes:
-            reason += "; the identified/origin composite is retained as measurement scope"
+            reason += "; the composite target is retained as measurement scope"
         preferred_identifiers = [*identifier_physical, *identifier_composite]
         if preferred_identifiers:
             provenance = sorted({
@@ -835,6 +848,45 @@ def _propose_assignments(
         return assignments, reason, confidence
 
     return [], f"unsupported predicted scope {scope}", "low"
+
+
+def _unique_curated_composite_scope(
+    composites: list[dict[str, object]],
+    contributors: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Return one composite sharing a curated system with every contributor."""
+    if not contributors:
+        return []
+    contributor_systems = [
+        {
+            int(membership["system_id"])
+            for membership in row.get("system_memberships") or []
+        }
+        for row in contributors
+    ]
+    shared_systems = set.intersection(*contributor_systems)
+    if not shared_systems:
+        return []
+    matches = [
+        row
+        for row in composites
+        if shared_systems.intersection(
+            int(membership["system_id"])
+            for membership in row.get("system_memberships") or []
+        )
+    ]
+    return matches if len(matches) == 1 else []
+
+
+def _composite_scope_evidence(
+    row: dict[str, object],
+    origin: Target,
+) -> str:
+    if row["identifier_preferred"]:
+        return _identifier_evidence(row)
+    if row["target_id"] == origin.id:
+        return "origin_scope"
+    return "curated_system_composite"
 
 
 def _component_label_candidates(

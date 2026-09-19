@@ -110,6 +110,8 @@ def test_query_many_groups_identifier_rows_and_uses_position_fallback():
                     "otypes": "Star",
                 },
             ]
+        if "FROM ident WHERE oidref IN" in query:
+            return [{"input_oid": 1, "id": "HD 1"}]
         if "SELECT id FROM ident" in query:
             return [{"id": "HD 1"}]
         if "SELECT otype, label, description" in query:
@@ -158,3 +160,6 @@ def test_query_many_groups_identifier_rows_and_uses_position_fallback():
     assert results[3].status == "match"
     assert results[3].candidates[0].main_id == "Positional"
     assert sum("WHERE i.id IN" in query for query in calls) == 1
+    assert sum("FROM ident WHERE oidref IN" in query for query in calls) == 1
+    assert sum("WHERE h.child IN" in query for query in calls) == 1
+    assert sum("WHERE h.parent IN" in query for query in calls) == 1

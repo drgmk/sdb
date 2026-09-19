@@ -22,6 +22,7 @@ from .fitting_groups import fitting_group_report
 from .joint_fit import JointFitDefinition, write_joint_fit
 from .models.exports import ExportItem, ExportRun
 from .progress import NULL_PROGRESS, ProgressReporter
+from .samples.service import SampleService
 from .selection import resolve_target_selection
 
 
@@ -308,6 +309,7 @@ class PackageExportService:
             "exported": sum(item["status"] == "exported" for item in items),
             "skipped": sum(item["status"] == "skipped" for item in items),
             "failed": failed,
+            "samples": _exported_sample_views(self.sessions, output_dir),
             "packages": package_rows,
             "items": manifest_items,
         }
@@ -463,6 +465,37 @@ def fit_package_target_ids(report: dict[str, object]) -> set[int]:
         for package in _fit_packages(report)
         for observation in package.observations
     }
+
+
+def _exported_sample_views(
+    session_factory: sessionmaker[Session], output_dir: Path,
+) -> list[dict[str, object]]:
+    """Project complete sample memberships represented in an export root."""
+    suffix = "-rawphot.txt"
+    exported_sdbids = {
+        path.name[:-len(suffix)]
+        for path in output_dir.glob(f"*/*{suffix}")
+        if path.is_file()
+    }
+    if not exported_sdbids:
+        return []
+
+    service = SampleService(session_factory)
+    views = []
+    for sample in service.list():
+        members = [target.sdbid for target in service.members(sample.name)]
+        if not exported_sdbids.intersection(members):
+            continue
+        views.append({
+            "name": sample.name,
+            "sample_date": (
+                sample.sample_date.isoformat()
+                if sample.sample_date is not None else None
+            ),
+            "note": sample.note,
+            "sdbids": members,
+        })
+    return views
 
 
 def _package_observations(

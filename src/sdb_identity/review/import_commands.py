@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..decisions import DecisionContext
 from ..hierarchy.system_context import HierarchySystemContextService
+from ..hierarchy.matching import HierarchyMatchingService
+from ..ingestion import TargetIngestionPlan
 from ..service import IdentityService
 from ..hierarchy.expansion import (
     import_immediate_relatives,
@@ -31,6 +33,8 @@ def _optional_text(value: object) -> str | None:
 def review_relatives_command(
     session_factory: sessionmaker[Session],
     identity_service_factory: Callable[[], IdentityService] | None,
+    update_factory: Callable[[], object] | None,
+    catalog_providers: tuple[str, ...] | None,
     payload: dict[str, object],
     *,
     apply: bool,
@@ -39,9 +43,10 @@ def review_relatives_command(
     preview = _relative_preview_payload(session_factory, target)
     if not apply:
         return preview
-    if identity_service_factory is None:
+    if identity_service_factory is None or update_factory is None:
         raise RuntimeError(
-            "relative import is unavailable in offline review mode; restart without --offline"
+            "relative import and provider follow-up are unavailable in offline "
+            "review mode; restart without --offline"
         )
     expected_token = str(payload.get("state_token") or "")
     if not expected_token or expected_token != preview["state_token"]:
@@ -64,13 +69,24 @@ def review_relatives_command(
         reason=_optional_text(payload.get("reason")),
         suggested_reason=str(preview["suggested_reason"]),
     )
+    identity_service = identity_service_factory()
+    providers = tuple(dict.fromkeys((
+        "simbad",
+        *(catalog_providers or ()),
+    )))
     result = import_immediate_relatives(
         session_factory,
         target,
-        identity_service=identity_service_factory(),
+        identity_service=identity_service,
         actor=decision.actor,
         reason=decision.reason,
         selected_relationship_ids=selected_relationship_ids,
+        followup_plan=TargetIngestionPlan(
+            identity=identity_service,
+            update=update_factory(),
+            hierarchy=HierarchyMatchingService(session_factory),
+        ),
+        providers=providers,
     ).as_dict()
     value = {
         **preview,
@@ -180,6 +196,14 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
             warnings.append(f"Import failed: {label} — {row.get('error', 'unknown error')}")
         elif row["action"] == "skipped":
             changes.append(f"No change for {label}; it was not selected.")
+    update = value.get("update_summary") or {}
+    for item in update.get("items", []):
+        if item["action"] in {"failed", "missing"}:
+            detail = f" — {item['detail']}" if item.get("detail") else ""
+            warnings.append(
+                f"{item.get('sdbid') or 'target'}: "
+                f"{item['provider']} {item['action']}{detail}"
+            )
     if value.get("mode") == "applied":
         title = (
             f"Relative import finished: {int(value.get('imported', 0))} imported, "
@@ -195,6 +219,10 @@ def _relative_summary(value: dict[str, object]) -> dict[str, object]:
         "facts": [
             f"Target: {value['target']}",
             "Only immediate stellar relatives are imported; expansion is not recursive.",
+            *(
+                ["Configured provider coverage and stored WDS/CCDM matching were run for selected relatives."]
+                if value.get("mode") == "applied" else []
+            ),
         ],
         "changes": changes or ["No immediate stellar relatives need importing or reconciliation."],
         "warnings": warnings,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from astropy.table import Table
 from sqlalchemy import select
 
@@ -544,6 +546,31 @@ def test_system_matrix_orders_catalog_detections_by_wavelength(session_factory):
     ]
 
 
+def test_curated_system_proposal_includes_unique_composite_scope(session_factory):
+    composite, component_a, component_b = _configured_system(session_factory)
+    CatalogAcquisitionService(
+        session_factory, {"allwise": _wise_catalog()}
+    ).refresh(component_a.sdbid, "allwise")
+
+    proposal = measurement_assignment_proposals(
+        session_factory, component_a.sdbid,
+    )[0]
+    assignments = {
+        (row["sdbid"], row["role"]): row
+        for row in proposal["proposed_assignments"]
+    }
+
+    assert proposal["predicted_scope"] == "system"
+    assert set(assignments) == {
+        (component_a.sdbid, "contributor"),
+        (component_b.sdbid, "contributor"),
+        (composite.sdbid, "composite_scope"),
+    }
+    assert assignments[(composite.sdbid, "composite_scope")]["evidence"] == (
+        "curated_system_composite"
+    )
+
+
 def test_resolved_source_between_two_components_remains_review_required(
     session_factory,
 ):
@@ -762,6 +789,15 @@ def test_correct_source_association_makes_photometry_current_without_assignment_
     assert sample_preview["targets_evaluated"] == 2
     assert sample_preview["measurements_evaluated"] == 1
     assert sample_preview["summary"]["already_current_assignments"] == 1
+
+    all_preview = apply_measurement_assignment_proposals(
+        session_factory, all_targets=True,
+    )
+    assert all_preview["selection"]["kind"] == "all"
+    assert all_preview["selection"]["all"] is True
+    assert all_preview["targets_evaluated"] == 3
+    assert all_preview["measurements_evaluated"] == 1
+    assert all_preview["summary"]["already_current_assignments"] == 1
 
     applied = apply_measurement_assignment_proposals(
         session_factory,
@@ -1072,6 +1108,14 @@ def test_cli_prints_read_only_measurement_assignment_proposals(tmp_path, capsys)
     assert '"skipped_not_high_confidence": 1' in output
     assert '"items"' not in output
     assert list_measurement_target_assignments(sessions, component_a.sdbid) == []
+
+    assert main([
+        "--database", str(database), "photometry", "apply-proposals", "--all",
+    ]) == 0
+    all_output = json.loads(capsys.readouterr().out)
+    assert all_output["selection"]["kind"] == "all"
+    assert all_output["selection"]["all"] is True
+    assert all_output["targets_evaluated"] == 3
 
 
 def test_proposal_compares_catalog_position_at_native_epoch(session_factory):

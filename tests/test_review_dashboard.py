@@ -9,6 +9,7 @@ from sdb_identity.models.catalogs import RawCatalogRow
 from sdb_identity.models.identity import ExternalIdentifier, Target
 from sdb_identity.photometry.assignments import assign_measurement_target
 from sdb_identity.review.dashboard import review_dashboard_report
+from sdb_identity.review.dashboard_cache import ReviewDashboardCache
 from sdb_identity.review.actions import review_catalog_target_association_decision
 from sdb_identity.review.sky_view import build_review_sky_view
 from sdb_identity.samples.service import SampleService
@@ -119,10 +120,94 @@ def test_dashboard_lists_clean_unassigned_mixed_and_no_photometry_targets(
         "no_photometry_target_count": 1,
         "catalog_review_target_count": 0,
         "catalog_review_result_count": 0,
+        "possible_duplicate_target_count": 0,
         "detection_count": 3,
         "unassigned_detection_count": 1,
         "mixed_detection_count": 1,
     }
+
+
+def test_dashboard_all_targets_is_not_limited_to_sample_members(session_factory):
+    identity = IdentityService(session_factory)
+    sample_member = identity.add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
+    other_target = identity.add(AddRequest(ra_deg=20.0, dec_deg=-30.0))
+    samples = SampleService(session_factory)
+    samples.create("subset")
+    samples.add(
+        "subset",
+        sample_member.sdbid,
+        actor="test",
+        reason="all-target review fixture",
+    )
+
+    sample_report = review_dashboard_report(session_factory, sample="subset")
+    all_report = review_dashboard_report(session_factory, all_targets=True)
+
+    assert [row["sdbid"] for row in sample_report["rows"]] == [
+        sample_member.sdbid
+    ]
+    assert {row["sdbid"] for row in all_report["rows"]} == {
+        sample_member.sdbid,
+        other_target.sdbid,
+    }
+    assert all_report["selection"]["all"] is True
+
+
+def test_dashboard_cache_refreshes_one_changed_target(session_factory):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=-20.0)
+    )
+    cache = ReviewDashboardCache(
+        session_factory,
+        sample=None,
+        all_targets=True,
+        catalog_providers=None,
+    )
+
+    before = cache.get()
+    assert before["rows"][0]["classification"] == "no_current_photometry"
+
+    measurements = _wise_measurements(
+        session_factory, target, source_id="cache-refresh-wise", ra=10.0,
+    )
+    cache.refresh_related(
+        target_references=(target.sdbid,),
+        detection_ids=(measurements[0].detection_id,),
+    )
+    after = cache.get()
+
+    assert after is not before
+    assert after["rows"][0]["classification"] == "assigned_clean"
+    assert after["summary"]["clean_target_count"] == 1
+    assert after["selection"]["selected_sdbids"] == [target.sdbid]
+
+
+def test_dashboard_prioritizes_possible_duplicate_target(session_factory):
+    identity = IdentityService(session_factory)
+    existing = identity.add(AddRequest(ra_deg=10.0, dec_deg=20.0))
+    from tests.fakes import FakeGaia, astrometry, gaia_candidate
+
+    imported = IdentityService(
+        session_factory,
+        gaia=FakeGaia([gaia_candidate(
+            "123",
+            astrometry(10.00018, 20.0, epoch=2000.0, source="gaia_dr3"),
+        )]),
+    ).add(AddRequest(ra_deg=10.00018, dec_deg=20.0))
+    samples = SampleService(session_factory)
+    samples.create("duplicates")
+    samples.add(
+        "duplicates", imported.sdbid, actor="test", reason="review fixture",
+    )
+
+    report = review_dashboard_report(session_factory, sample="duplicates")
+    row = report["rows"][0]
+
+    assert row["classification"] == "possible_duplicate_target"
+    assert row["priority"] == "highest"
+    assert existing.sdbid in row["recommended_action"]
+    assert row["possible_duplicates"][0]["other_sdbid"] == existing.sdbid
+    assert report["summary"]["possible_duplicate_target_count"] == 1
 
 
 def test_dashboard_makes_ambiguous_catalog_results_actionable(session_factory):

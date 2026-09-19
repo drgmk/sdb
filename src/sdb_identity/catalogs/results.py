@@ -20,6 +20,9 @@ from ..models.catalogs import (
 from ..vocabulary import ProviderRunStatus
 
 
+_BULK_QUERY_CHUNK_SIZE = 5_000
+
+
 @dataclass(frozen=True)
 class EffectiveCatalogResult:
     target_id: int
@@ -80,6 +83,67 @@ def effective_catalog_selected_rows(
     )
 
 
+def effective_catalog_selected_rows_by_run(
+    session: Session,
+    results: Iterable[EffectiveCatalogResult],
+) -> dict[int, tuple[tuple[RawCatalogRow, CatalogDetection], ...]]:
+    """Bulk form of :func:`effective_catalog_selected_rows`.
+
+    Queue, fitting, and export projections commonly inspect thousands of
+    effective results together.  Fetching the accepted rows and detections
+    once avoids a query (and often an identity lookup) for every result while
+    retaining the exact single-result semantics above.
+    """
+
+    values = tuple(results)
+    selected: dict[int, list[tuple[RawCatalogRow, CatalogDetection]]] = {
+        value.run.id: []
+        for value in values
+        if value.status == ProviderRunStatus.MATCH
+    }
+    ordinary_run_ids = {
+        value.run.id
+        for value in values
+        if (
+            value.status == ProviderRunStatus.MATCH
+            and value.decision is None
+            and value.association_action is None
+        )
+    }
+    for chunk in _chunks(ordinary_run_ids):
+        rows = session.execute(
+            select(RawCatalogRow, CatalogDetection)
+            .join(
+                CatalogDetection,
+                CatalogDetection.id == RawCatalogRow.detection_id,
+            )
+            .where(
+                RawCatalogRow.run_id.in_(chunk),
+                RawCatalogRow.accepted.is_(True),
+            )
+            .order_by(RawCatalogRow.id)
+        )
+        for raw_row, detection in rows:
+            selected[raw_row.run_id].append((raw_row, detection))
+
+    for value in values:
+        if (
+            value.status != ProviderRunStatus.MATCH
+            or (value.decision is None and value.association_action is None)
+            or value.selected_raw_row is None
+            or value.selected_detection is None
+        ):
+            continue
+        selected[value.run.id].append((
+            value.selected_raw_row,
+            value.selected_detection,
+        ))
+    return {
+        run_id: tuple(rows)
+        for run_id, rows in selected.items()
+    }
+
+
 def effective_catalog_results(
     session: Session,
     target_ids: Iterable[int],
@@ -113,21 +177,49 @@ def effective_catalog_results(
         )
         for decision in session.scalars(decision_query):
             decisions[decision.reviewed_run_id] = decision
-    ambiguous_rows_by_run: dict[int, list[RawCatalogRow]] = {}
+    rows_by_run: dict[int, list[RawCatalogRow]] = {}
+    raw_rows_by_id: dict[int, RawCatalogRow] = {}
     ambiguous_detection_ids: set[int] = set()
     ambiguous_runs = {
         run.id: run
         for run in runs
         if run.status == ProviderRunStatus.AMBIGUOUS
     }
-    if ambiguous_runs:
+    accepted_run_ids = {
+        run.id
+        for run in runs
+        if run.status == ProviderRunStatus.MATCH
+    }
+    for chunk in _chunks(accepted_run_ids):
         for raw_row in session.scalars(
             select(RawCatalogRow)
-            .where(RawCatalogRow.run_id.in_(ambiguous_runs))
+            .where(
+                RawCatalogRow.run_id.in_(chunk),
+                RawCatalogRow.accepted.is_(True),
+            )
             .order_by(RawCatalogRow.id)
         ):
-            ambiguous_rows_by_run.setdefault(raw_row.run_id, []).append(raw_row)
+            rows_by_run.setdefault(raw_row.run_id, []).append(raw_row)
+            raw_rows_by_id[raw_row.id] = raw_row
+    for chunk in _chunks(ambiguous_runs):
+        for raw_row in session.scalars(
+            select(RawCatalogRow)
+            .where(RawCatalogRow.run_id.in_(chunk))
+            .order_by(RawCatalogRow.id)
+        ):
+            rows_by_run.setdefault(raw_row.run_id, []).append(raw_row)
+            raw_rows_by_id[raw_row.id] = raw_row
             ambiguous_detection_ids.add(raw_row.detection_id)
+    decision_raw_row_ids = {
+        decision.reviewed_raw_row_id
+        for decision in decisions.values()
+        if decision.reviewed_raw_row_id is not None
+    } - set(raw_rows_by_id)
+    for chunk in _chunks(decision_raw_row_ids):
+        for raw_row in session.scalars(
+            select(RawCatalogRow).where(RawCatalogRow.id.in_(chunk))
+        ):
+            raw_rows_by_id[raw_row.id] = raw_row
     latest_association_actions: dict[
         tuple[int, int], CatalogTargetAssociationAction
     ] = {}
@@ -145,6 +237,22 @@ def effective_catalog_results(
             latest_association_actions[(
                 action.target_id, action.detection_id,
             )] = action
+    detection_ids = {
+        raw_row.detection_id for raw_row in raw_rows_by_id.values()
+    } | {
+        decision.accepted_detection_id
+        for decision in decisions.values()
+        if decision.accepted_detection_id is not None
+    }
+    detections: dict[int, CatalogDetection] = {}
+    for chunk in _chunks(detection_ids):
+        detections.update({
+            detection.id: detection
+            for detection in session.scalars(
+                select(CatalogDetection).where(CatalogDetection.id.in_(chunk))
+            )
+        })
+
     result: dict[tuple[int, str], EffectiveCatalogResult] = {}
     for run in runs:
         decision = decisions.get(run.id)
@@ -159,16 +267,12 @@ def effective_catalog_results(
                 else ProviderRunStatus.NO_MATCH
             )
             if decision.reviewed_raw_row_id is not None:
-                raw_row = session.get(
-                    RawCatalogRow, decision.reviewed_raw_row_id,
-                )
+                raw_row = raw_rows_by_id.get(decision.reviewed_raw_row_id)
             if decision.accepted_detection_id is not None:
-                detection = session.get(
-                    CatalogDetection, decision.accepted_detection_id,
-                )
+                detection = detections.get(decision.accepted_detection_id)
         elif status == ProviderRunStatus.AMBIGUOUS:
             accepted_rows = []
-            for candidate_row in ambiguous_rows_by_run.get(run.id, []):
+            for candidate_row in rows_by_run.get(run.id, []):
                 action = latest_association_actions.get((
                     run.target_id, candidate_row.detection_id,
                 ))
@@ -182,21 +286,16 @@ def effective_catalog_results(
                 raw_row, association_action = max(
                     accepted_rows, key=lambda value: value[1].id,
                 )
-                detection = session.get(
-                    CatalogDetection, raw_row.detection_id,
-                )
+                detection = detections.get(raw_row.detection_id)
                 status = ProviderRunStatus.MATCH
         elif status == ProviderRunStatus.MATCH:
-            raw_row = session.scalar(
-                select(RawCatalogRow)
-                .where(
-                    RawCatalogRow.run_id == run.id,
-                    RawCatalogRow.accepted.is_(True),
-                )
-                .order_by(RawCatalogRow.id)
-                .limit(1)
+            accepted_rows = rows_by_run.get(run.id, [])
+            raw_row = accepted_rows[0] if accepted_rows else None
+            detection = (
+                None
+                if raw_row is None
+                else detections.get(raw_row.detection_id)
             )
-            detection = None if raw_row is None else session.get(CatalogDetection, raw_row.detection_id)
         result[(run.target_id, run.provider)] = EffectiveCatalogResult(
             run.target_id,
             run.provider,
@@ -208,6 +307,12 @@ def effective_catalog_results(
             association_action,
         )
     return result
+
+
+def _chunks(values: Iterable[int]) -> Iterable[tuple[int, ...]]:
+    values = tuple(values)
+    for start in range(0, len(values), _BULK_QUERY_CHUNK_SIZE):
+        yield values[start:start + _BULK_QUERY_CHUNK_SIZE]
 
 
 def catalog_run_signature(

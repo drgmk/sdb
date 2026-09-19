@@ -58,6 +58,7 @@ def assignment_readiness_report(
     *,
     target_reference: str | int | None = None,
     sample: str | None = None,
+    all_targets: bool = False,
     graph: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Group accepted scope-assignment blockers into target-level review rows."""
@@ -66,6 +67,7 @@ def assignment_readiness_report(
             session_factory,
             target_reference=target_reference,
             sample=sample,
+            all_targets=all_targets,
         )
     targets = {row["target_id"]: row for row in graph["targets"]}
     physical_by_system = _physical_targets_by_system(graph["targets"])

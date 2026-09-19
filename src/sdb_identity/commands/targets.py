@@ -213,6 +213,7 @@ def _run_add(context: CliContext) -> int:
 
 def _run_status(context: CliContext) -> int:
     from ..hierarchy.target_context import HierarchyTargetContextService
+    from ..identity_duplicates import target_duplicate_reviews
     from ..models.identity import AstrometricSolution
     from ..target_lifecycle import target_lifecycle_status
     from ..targets import resolve_targets
@@ -249,6 +250,9 @@ def _run_status(context: CliContext) -> int:
             payload["hierarchy"] = HierarchyTargetContextService(
                 sessions,
             ).target_context_summary(target.sdbid)
+            payload["possible_duplicates"] = target_duplicate_reviews(
+                session, [target.id],
+            ).get(target.id, [])
             print(context.json(payload, sort_keys=True))
     return 0
 

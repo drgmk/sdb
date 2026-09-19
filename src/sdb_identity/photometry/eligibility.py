@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Iterable
 
 from sqlalchemy import select
@@ -32,6 +33,8 @@ class EffectiveMeasurementEligibility:
 def effective_measurement_eligibility(
     session: Session,
     measurement_ids: Iterable[int],
+    *,
+    detection_target_ids: Mapping[int, Iterable[int]] | None = None,
 ) -> dict[int, EffectiveMeasurementEligibility]:
     """Project manual, structural, and provider-native eligibility.
 
@@ -60,12 +63,18 @@ def effective_measurement_eligibility(
             + ", ".join(str(value) for value in sorted(missing))
         )
 
-    detection_targets: dict[int, set[int]] = {}
-    for detection_id, target_id in current_catalog_detection_target_pairs(
-        session,
-        {measurement.detection_id for measurement in measurements.values()},
-    ):
-        detection_targets.setdefault(detection_id, set()).add(target_id)
+    if detection_target_ids is None:
+        detection_targets: dict[int, set[int]] = {}
+        for detection_id, target_id in current_catalog_detection_target_pairs(
+            session,
+            {measurement.detection_id for measurement in measurements.values()},
+        ):
+            detection_targets.setdefault(detection_id, set()).add(target_id)
+    else:
+        detection_targets = {
+            int(detection_id): {int(target_id) for target_id in target_ids}
+            for detection_id, target_ids in detection_target_ids.items()
+        }
 
     relevant_target_ids = {
         target_id

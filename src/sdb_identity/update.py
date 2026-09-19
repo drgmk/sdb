@@ -314,29 +314,33 @@ class UpdateService:
         if not pending:
             return items
         self.reporter.step(f"{provider}: bulk metadata refresh for {len(pending)} targets")
-        service = self.metadata_factory()
-        try:
-            refreshed = service.refresh_many([target_id for target_id, _sdbid in pending])
-        except Exception as error:
-            items.extend(UpdateItem(
-                target_id, sdbid, provider, "failed", "failed", str(error)
-            ) for target_id, sdbid in pending)
-            return items
         sdbid_by_target = dict(pending)
-        for result in refreshed:
-            action = (
-                "failed"
-                if result.status in PROVIDER_FAILURE_STATUSES
-                else "refreshed"
-            )
-            items.append(UpdateItem(
-                result.target_id,
-                sdbid_by_target.get(result.target_id),
-                provider,
-                action,
-                result.status,
-                result.error,
-            ))
+        for offset in range(0, len(pending), self.bulk_chunk_size):
+            chunk = pending[offset:offset + self.bulk_chunk_size]
+            service = self.metadata_factory()
+            try:
+                refreshed = service.refresh_many(
+                    [target_id for target_id, _sdbid in chunk]
+                )
+            except Exception as error:
+                items.extend(UpdateItem(
+                    target_id, sdbid, provider, "failed", "failed", str(error)
+                ) for target_id, sdbid in chunk)
+                continue
+            for result in refreshed:
+                action = (
+                    "failed"
+                    if result.status in PROVIDER_FAILURE_STATUSES
+                    else "refreshed"
+                )
+                items.append(UpdateItem(
+                    result.target_id,
+                    sdbid_by_target.get(result.target_id),
+                    provider,
+                    action,
+                    result.status,
+                    result.error,
+                ))
         return items
 
     def _ordinary_update_jobs(

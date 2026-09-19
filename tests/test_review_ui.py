@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sdb_identity.catalogs.adapters.allwise import AllWiseAdapter
 from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.types import CatalogCandidate, MeasurementValue
-from sdb_identity.cli import parser
+from sdb_identity.cli import main, parser
 from sdb_identity.catalogs.decisions import CatalogDecisionService
 from sdb_identity.catalogs.normalization import CatalogNormalizationService
 from sdb_identity.models.catalogs import (
@@ -45,6 +45,8 @@ def test_catalog_overview_routes_are_structured_and_expandable(session_factory):
     assert response.status_code == 200
     assert response.json()["provider_count"] == 13
     assert response.json()["remote_count"] == 4
+    assert response.json()["stored_current_result_count"] == 0
+    assert response.json()["stored_measurement_count"] == 0
 
     page = client.get("/catalogs")
     assert page.status_code == 200
@@ -52,6 +54,7 @@ def test_catalog_overview_routes_are_structured_and_expandable(session_factory):
     assert "class='catalog-provider'" in page.text
     assert "queried on demand" in page.text
     assert "local snapshots" in page.text
+    assert "data already stored in this SDB database" in page.text
     assert "Component handling" in page.text
     assert "I/259/suppl_2 is retained" in page.text
 
@@ -425,9 +428,26 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
             ),
         }),
     )
+    update_calls = []
+
+    class FakeRelativeUpdateService:
+        def update_targets(self, targets, *, providers, force):
+            references = tuple(targets)
+            update_calls.append((references, tuple(providers), force))
+            return UpdateSummary(
+                target_count=len(references),
+                refreshed=0,
+                skipped=0,
+                missing=0,
+                failed=0,
+                items=(),
+            )
+
     client = TestClient(create_review_app(
         session_factory,
         identity_service_factory=lambda: identity,
+        catalog_coverage_providers=("gaia_dr3", "2mass"),
+        catalog_update_factory=FakeRelativeUpdateService,
     ))
 
     preview = client.post("/api/relatives/preview", json={"target": root.sdbid})
@@ -466,6 +486,20 @@ def test_review_ui_previews_and_imports_immediate_simbad_relatives(session_facto
     assert result["failed"] == 0
     assert result["human_summary"]["title"].startswith("Relative import finished")
     assert any("Imported HD 1B" in row for row in result["human_summary"]["changes"])
+    imported_sdbid = next(
+        row["matched_sdbid"] for row in result["relatives"]
+        if row["action"] == "imported"
+    )
+    assert update_calls == [(
+        (imported_sdbid,),
+        ("simbad", "gaia_dr3", "2mass"),
+        False,
+    )]
+    assert result["update_summary"]["target_count"] == 1
+    assert any(
+        "Configured provider coverage" in fact
+        for fact in result["human_summary"]["facts"]
+    )
 
     current = client.post(
         "/api/relatives/preview", json={"target": root.sdbid},
@@ -765,7 +799,9 @@ def test_review_ui_filters_and_navigates_the_unresolved_queue(session_factory):
     client = TestClient(create_review_app(session_factory, sample="navigation"))
     queue = client.get("/")
     assert queue.status_code == 200
-    assert "Showing <strong>2</strong> of 2 sample targets" in queue.text
+    assert "Showing <strong>1–2</strong> of 2 matching targets (2 total)" in queue.text
+    assert "Page <strong>1</strong> of 1" in queue.text
+    assert 'name="page_size"' in queue.text
     assert 'name="priority"' in queue.text
     assert 'name="classification"' in queue.text
     assert 'name="provider"' in queue.text
@@ -773,7 +809,7 @@ def test_review_ui_filters_and_navigates_the_unresolved_queue(session_factory):
 
     filtered = client.get("/", params={"search": second.sdbid})
     assert filtered.status_code == 200
-    assert "Showing <strong>1</strong> of 2 sample targets" in filtered.text
+    assert "Showing <strong>1–1</strong> of 1 matching targets (2 total)" in filtered.text
     assert second.sdbid in filtered.text
     assert first.sdbid not in filtered.text
 
@@ -941,3 +977,45 @@ def test_review_serve_accepts_actor_preset():
     ])
 
     assert args.actor == "Grant"
+
+
+def test_review_serve_all_selects_all_targets(
+    session_factory, db_path, monkeypatch,
+):
+    identity = IdentityService(session_factory)
+    first = identity.add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
+    second = identity.add(AddRequest(ra_deg=20.0, dec_deg=-30.0))
+    args = parser().parse_args(["review", "serve", "--all"])
+
+    served = {}
+
+    def fake_serve_review_ui(_sessions, **kwargs):
+        served.update(kwargs)
+
+    monkeypatch.setattr(
+        "sdb_identity.review.app.serve_review_ui",
+        fake_serve_review_ui,
+    )
+    exit_code = main([
+        "--database", str(db_path), "--offline", "review", "serve", "--all",
+    ])
+
+    client = TestClient(create_review_app(session_factory, all_targets=True))
+    report = client.get("/api/readiness")
+    page = client.get("/", params={"view": "all"})
+
+    assert args.review_all is True
+    assert args.sample is None
+    assert exit_code == 0
+    assert served["sample"] is None
+    assert served["all_targets"] is True
+    assert report.status_code == 200
+    assert report.json()["selection"]["all"] is True
+    assert {row["sdbid"] for row in report.json()["rows"]} == {
+        first.sdbid,
+        second.sdbid,
+    }
+    assert page.status_code == 200
+    assert "SDB review: all targets" in page.text
+    assert first.sdbid in page.text
+    assert second.sdbid in page.text

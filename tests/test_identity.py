@@ -15,6 +15,7 @@ from sdb_identity.models.identity import (
     ProviderOutcome,
     Submission,
     Target,
+    TargetDuplicateReview,
 )
 from sdb_identity.service import AddRequest, IdentityService, UnresolvedTarget
 from tests.fakes import FakeGaia, FakeSimbad, astrometry, gaia_candidate, simbad_result
@@ -188,6 +189,31 @@ def test_nearby_source_is_deduplicated(session_factory):
     first = svc.add(AddRequest(ra_deg=10, dec_deg=20))
     second = svc.add(AddRequest(ra_deg=10.00001, dec_deg=20))
     assert first.target_id == second.target_id
+
+
+def test_gaia_backed_coordinate_import_flags_less_certain_near_duplicate(
+    session_factory,
+):
+    existing = service(session_factory).add(
+        AddRequest(ra_deg=10.0, dec_deg=20.0)
+    )
+    gaia_position = astrometry(
+        10.00018, 20.0, epoch=2000.0, source="gaia_dr3",
+    )
+    imported = service(
+        session_factory,
+        gaia=FakeGaia([gaia_candidate("123", gaia_position)]),
+    ).add(AddRequest(ra_deg=10.00018, dec_deg=20.0))
+
+    assert imported.created is True
+    assert imported.target_id != existing.target_id
+    assert imported.possible_duplicate_sdbids == (existing.sdbid,)
+    with session_factory() as session:
+        review = session.scalar(select(TargetDuplicateReview))
+        assert review.target_id == imported.target_id
+        assert review.possible_duplicate_target_id == existing.target_id
+        assert review.status == "review"
+        assert 0.36 < review.separation_arcsec < 2.0
 
 
 def test_nearby_simbad_component_is_not_collapsed_by_shared_system_aliases(session_factory):

@@ -60,7 +60,7 @@ def test_package_export_writes_manifest_and_sdf_readable_file(
     manifest = json.loads((tmp_path / f"export-{result.run_id}-manifest.json").read_text())
     assert manifest["schema"] == "sdb-fit-package-export"
     assert manifest["selection"]["sample"] == "science"
-    assert manifest["database_revision"] == "0003_unified_exports"
+    assert manifest["database_revision"] == "0004_target_duplicate_reviews"
     assert manifest["items"][0]["sdbid"] == target.sdbid
     assert manifest["items"][0]["output"] == (
         f"{target.sdbid}/{target.sdbid}-rawphot.txt"
@@ -68,6 +68,12 @@ def test_package_export_writes_manifest_and_sdf_readable_file(
     assert len(manifest["items"][0]["sha256"]) == 64
     assert manifest["started_at"] and manifest["completed_at"]
     assert manifest["package_count"] == 1
+    assert manifest["samples"] == [{
+        "name": "science",
+        "sample_date": "2026-07-06",
+        "note": "Acceptance sample",
+        "sdbids": [target.sdbid],
+    }]
     assert manifest["packages"][0]["directory"] == target.sdbid
     assert manifest["packages"][0]["joint_fit"] is None
     assert manifest["packages"][0]["model_sdbids"] == [target.sdbid]
@@ -168,6 +174,36 @@ def test_target_and_all_selectors_share_the_package_exporter(
     assert (
         tmp_path / "all" / second.sdbid / f"{second.sdbid}-rawphot.txt"
     ).is_file()
+
+
+def test_every_export_carries_complete_represented_sample_views(
+    session_factory, tmp_path,
+):
+    first = _sample_with_photometry(session_factory)
+    second = IdentityService(session_factory).add(
+        AddRequest(ra_deg=40, dec_deg=20)
+    )
+    unrelated = IdentityService(session_factory).add(
+        AddRequest(ra_deg=80, dec_deg=-40)
+    )
+    samples = SampleService(session_factory)
+    samples.add(
+        "science", second.sdbid, actor="grant", reason="same sample",
+    )
+    samples.create("unrelated")
+    samples.add(
+        "unrelated", unrelated.sdbid, actor="grant", reason="other sample",
+    )
+
+    result = PackageExportService(session_factory).export(
+        tmp_path, target_reference=first.sdbid,
+    )
+    manifest = json.loads(
+        (tmp_path / f"export-{result.run_id}-manifest.json").read_text()
+    )
+
+    assert [sample["name"] for sample in manifest["samples"]] == ["science"]
+    assert manifest["samples"][0]["sdbids"] == [first.sdbid, second.sdbid]
 
 
 def test_export_sample_selection_cli(session_factory, db_path, tmp_path, capsys):

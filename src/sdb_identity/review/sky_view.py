@@ -861,6 +861,7 @@ def _annotate_catalog_target_candidates(
     if not candidate_rows:
         return points
     strong_by_detection: dict[int, list[dict[str, object]]] = {}
+    accepted_by_detection: dict[int, list[dict[str, object]]] = {}
     current_target_rows: dict[int, dict[str, object]] = {}
     for row in candidate_rows:
         detection_id = int(row["detection_id"])
@@ -874,6 +875,8 @@ def _annotate_catalog_target_candidates(
         }:
             continue
         strong_by_detection.setdefault(detection_id, []).append(row)
+        if row.get("association_status") in {"current_match", "accepted"}:
+            accepted_by_detection.setdefault(detection_id, []).append(row)
 
     annotated = []
     existing_detection_ids = set()
@@ -893,8 +896,21 @@ def _annotate_catalog_target_candidates(
         if not associations and current_row is None:
             annotated.append(point)
             continue
+        accepted = accepted_by_detection.get(point.detection_id, [])
+        if (
+            current_row is not None
+            and current_row.get("association_status") in {"accepted", "rejected"}
+        ):
+            # An explicit decision for the page's target is the relationship
+            # the operator needs to see.  Do not label rejected or merely
+            # positional sibling candidates as accepted targets of this point.
+            linked_rows = [current_row]
+        else:
+            linked_rows = accepted or (
+                [current_row] if current_row is not None else []
+            )
         linked = tuple(dict.fromkeys(
-            str(row["target_sdbid"]) for row in associations
+            str(row["target_sdbid"]) for row in linked_rows
         ))
         reason = _catalog_candidate_reason(
             associations or ([current_row] if current_row is not None else [])

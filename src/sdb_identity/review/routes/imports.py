@@ -23,6 +23,8 @@ def register_import_routes(app: object, context: ReviewWebContext) -> None:
             return review_relatives_command(
                 context.session_factory,
                 context.identity_service_factory,
+                context.catalog_update_factory,
+                context.catalog_coverage_providers,
                 payload,
                 apply=False,
             )
@@ -32,12 +34,17 @@ def register_import_routes(app: object, context: ReviewWebContext) -> None:
     @app.post("/api/relatives/apply")
     async def relatives_apply(payload: dict[str, object]):
         try:
-            return review_relatives_command(
+            value = review_relatives_command(
                 context.session_factory,
                 context.identity_service_factory,
+                context.catalog_update_factory,
+                context.catalog_coverage_providers,
                 payload,
                 apply=True,
             )
+            if context.dashboard_cache is not None:
+                context.dashboard_cache.invalidate()
+            return value
         except (KeyError, ValueError, RuntimeError) as error:
             raise command_error(error) from error
 
@@ -58,7 +65,7 @@ def register_import_routes(app: object, context: ReviewWebContext) -> None:
     @app.post("/api/catalog-coverage/apply")
     async def catalog_coverage_apply(payload: dict[str, object]):
         try:
-            return review_catalog_coverage_command(
+            value = review_catalog_coverage_command(
                 context.session_factory,
                 context.catalog_coverage_providers,
                 context.catalog_update_factory,
@@ -66,6 +73,11 @@ def register_import_routes(app: object, context: ReviewWebContext) -> None:
                 payload,
                 apply=True,
             )
+            if context.dashboard_cache is not None:
+                context.dashboard_cache.refresh_related(
+                    target_references=(str(payload["target"]),),
+                )
+            return value
         except (KeyError, ValueError, RuntimeError) as error:
             raise command_error(error) from error
 
@@ -83,12 +95,15 @@ def register_import_routes(app: object, context: ReviewWebContext) -> None:
     @app.post("/api/nearby-import/apply")
     async def nearby_import_apply(payload: dict[str, object]):
         try:
-            return apply_nearby_import_command(
+            value = apply_nearby_import_command(
                 context.session_factory,
                 context.identity_service_factory,
                 context.catalog_update_factory,
                 context.catalog_coverage_providers,
                 payload,
             )
+            if context.dashboard_cache is not None:
+                context.dashboard_cache.invalidate()
+            return value
         except (KeyError, ValueError, RuntimeError) as error:
             raise command_error(error) from error

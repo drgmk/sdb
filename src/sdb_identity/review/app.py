@@ -13,6 +13,7 @@ from ..service import IdentityService
 
 def create_review_app(
     session_factory: sessionmaker[Session], *, sample: str | None = None,
+    all_targets: bool = False,
     default_actor: str | None = None,
     identity_service_factory: Callable[[], IdentityService] | None = None,
     catalog_service_factory: Callable[[str, str], object] | None = None,
@@ -31,11 +32,13 @@ def create_review_app(
     from .routes.imports import register_import_routes
     from .routes.pages import register_page_routes
     from .context import ReviewWebContext
+    from .dashboard_cache import ReviewDashboardCache
 
     app = FastAPI(title="SDB review", docs_url=None, redoc_url=None)
     context = ReviewWebContext(
         session_factory=session_factory,
         sample=sample,
+        all_targets=all_targets,
         default_actor=(
             str(default_actor or "").strip()
             or os.environ.get("SDB_ACTOR", "").strip()
@@ -46,6 +49,12 @@ def create_review_app(
         catalog_coverage_providers=catalog_coverage_providers,
         catalog_update_factory=catalog_update_factory,
         reference_store=reference_store,
+        dashboard_cache=ReviewDashboardCache(
+            session_factory,
+            sample=sample,
+            all_targets=all_targets,
+            catalog_providers=catalog_coverage_providers,
+        ) if sample is not None or all_targets else None,
     )
     register_page_routes(app, context)
     register_decision_routes(app, context)
@@ -57,6 +66,7 @@ def serve_review_ui(
     session_factory: sessionmaker[Session],
     *,
     sample: str | None,
+    all_targets: bool = False,
     default_actor: str | None = None,
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -80,6 +90,7 @@ def serve_review_ui(
     app = create_review_app(
         session_factory,
         sample=sample,
+        all_targets=all_targets,
         default_actor=default_actor,
         identity_service_factory=identity_service_factory,
         catalog_service_factory=catalog_service_factory,

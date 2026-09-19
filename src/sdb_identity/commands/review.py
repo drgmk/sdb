@@ -23,7 +23,8 @@ def register_review_parsers(commands, add_parser) -> None:
         "review",
         "Inspect review queues or launch the local assignment UI.",
         "Use this to inspect ambiguous identity/catalog candidates and unresolved "
-        "IRAS families, or use `review serve --sample NAME` for the localhost-only "
+        "IRAS families, or use `review serve --sample NAME` or "
+        "`review serve --all` for the localhost-only "
         "system-photometry workspace. Queue output is JSON; browser changes require "
         "preview followed by an audited apply.",
     )
@@ -31,10 +32,15 @@ def register_review_parsers(commands, add_parser) -> None:
         "kind",
         choices=["matches", "catalog-matches", "iras-families", "serve"],
     )
-    review.add_argument("--all", action="store_true", dest="review_all")
+    review.add_argument(
+        "--all",
+        action="store_true",
+        dest="review_all",
+        help="review all active targets when serving; show all IRAS families",
+    )
     review.add_argument(
         "--sample",
-        help="sample readiness queue shown by review serve",
+        help="review only targets in this sample",
     )
     review.add_argument(
         "--actor",
@@ -121,6 +127,10 @@ def _run_review_server(context: CliContext) -> int:
     args = context.args
     sessions = context.require_sessions()
     try:
+        if sum((args.sample is not None, args.review_all)) != 1:
+            raise ValueError(
+                "review serve requires exactly one of --sample or --all"
+            )
         identity_service_factory = None
         if not args.offline:
             from ..live_providers import AstroqueryGaia, AstroquerySimbad
@@ -149,6 +159,7 @@ def _run_review_server(context: CliContext) -> int:
         serve_review_ui(
             sessions,
             sample=args.sample,
+            all_targets=args.review_all,
             default_actor=args.actor,
             host=args.host,
             port=args.port,

@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..photometry.readiness import assignment_readiness_report
 from ..fitting_groups import fitting_group_report
 from ..hierarchy.system_context import HierarchySystemContextService
+from ..identity_duplicates import target_duplicate_reviews
+from ..targets import resolve_target
 from ..models.catalogs import IrasSourceFamily, RawCatalogRow
 from .dashboard import review_dashboard_report
 
@@ -29,6 +31,7 @@ class TargetWorkspace:
     target_position: dict[str, object]
     catalog_update_available: bool
     nearby_import_available: bool
+    possible_duplicates: tuple[dict[str, object], ...]
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -42,6 +45,7 @@ class TargetWorkspace:
             "simbad_main_ids": self.simbad_main_ids,
             "catalog_coverage": list(self.catalog_coverage),
             "target_position": self.target_position,
+            "possible_duplicates": list(self.possible_duplicates),
             "capabilities": {
                 "catalog_update": self.catalog_update_available,
                 "nearby_import": self.nearby_import_available,
@@ -54,11 +58,13 @@ def build_target_workspace(
     sdbid: str,
     *,
     sample: str | None = None,
+    all_targets: bool = False,
     filters: dict[str, str] | None = None,
     position: int | None = None,
     catalog_coverage_providers: tuple[str, ...] | None = None,
     catalog_update_available: bool = False,
     nearby_import_available: bool = False,
+    queue_report: dict[str, object] | None = None,
 ) -> TargetWorkspace:
     filters = filters or {}
     readiness = assignment_readiness_report(
@@ -89,10 +95,11 @@ def build_target_workspace(
 
     navigation = None
     display_name = None
-    if sample is not None:
-        queue_report = review_dashboard_report(
+    if sample is not None or all_targets:
+        queue_report = queue_report or review_dashboard_report(
             session_factory,
             sample=sample,
+            all_targets=all_targets,
             catalog_providers=catalog_coverage_providers,
         )
         display_name = next(
@@ -110,6 +117,15 @@ def build_target_workspace(
             position,
         )
     display_name = display_name or simbad_main_ids.get(sdbid)
+    with session_factory() as session:
+        requested = resolve_target(session, sdbid)
+        if requested is None:
+            raise KeyError(f"target not found: {sdbid}")
+        duplicate_rows = tuple(
+            target_duplicate_reviews(session, [requested.id]).get(
+                requested.id, []
+            )
+        )
     return TargetWorkspace(
         sdbid=sdbid,
         display_name=display_name,
@@ -125,6 +141,7 @@ def build_target_workspace(
         target_position=dict(system_context["target"]),
         catalog_update_available=catalog_update_available,
         nearby_import_available=nearby_import_available,
+        possible_duplicates=duplicate_rows,
     )
 
 

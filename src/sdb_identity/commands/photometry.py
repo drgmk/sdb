@@ -194,14 +194,21 @@ def _register_proposal_commands(subcommands, add_parser) -> None:
         subcommands,
         "apply-proposals",
         "Preview or apply conservative high-confidence photometry assignments.",
-        "Dry-run is the default and reports what would change for one target system "
-        "or sample. Use --apply with --actor to persist only missing high-confidence "
-        "assignments; existing conflicts and uncertain proposals remain untouched. "
-        "Provider-excluded measurements may be assigned, but retain their exclusion "
-        "until an audited photometry include override.",
+        "Dry-run is the default and reports what would change for one target system, "
+        "a sample, or all active targets. Use --apply with --actor to persist only "
+        "missing high-confidence assignments; existing conflicts and uncertain "
+        "proposals remain untouched. Provider-excluded measurements may be assigned, "
+        "but retain their exclusion until an audited photometry include override. "
+        "Select exactly one target set with TARGET, --sample, or --all.",
     )
-    apply.add_argument("target", nargs="?")
-    apply.add_argument("--sample")
+    apply.add_argument("target", nargs="?", help="one target or system reference")
+    apply.add_argument("--sample", help="evaluate every member of this sample")
+    apply.add_argument(
+        "--all",
+        action="store_true",
+        dest="apply_all",
+        help="evaluate all active targets",
+    )
     apply.add_argument(
         "--apply",
         action="store_true",
@@ -231,10 +238,18 @@ def _register_fitting_commands(subcommands, add_parser) -> None:
         "without changing the database. --view full (default) prints the whole "
         "projection; --view readiness summarizes system-level blockers and previews "
         "SIMBAD stellar relatives; --view assignments lists the current "
-        "contributor/composite-scope projection for one target.",
+        "contributor/composite-scope projection for one target. Full and readiness "
+        "views select exactly one target set with TARGET, --sample, or --all; the "
+        "assignments view requires TARGET.",
     )
-    fitting.add_argument("target", nargs="?")
-    fitting.add_argument("--sample")
+    fitting.add_argument("target", nargs="?", help="one target or system reference")
+    fitting.add_argument("--sample", help="report on every member of this sample")
+    fitting.add_argument(
+        "--all",
+        action="store_true",
+        dest="fitting_all",
+        help="report on all active targets",
+    )
     fitting.add_argument(
         "--view", choices=["full", "readiness", "assignments"], default="full",
     )
@@ -505,6 +520,7 @@ def _run_proposal_command(context: CliContext) -> None:
                 sessions,
                 target_reference=args.target,
                 sample=args.sample,
+                all_targets=args.apply_all,
                 apply=args.apply,
                 actor=args.actor,
                 reason=args.reason,
@@ -521,6 +537,15 @@ def _run_fitting_command(context: CliContext) -> None:
     args = context.args
     sessions = context.require_sessions()
     if args.view == "assignments":
+        if (
+            args.target is None
+            or args.sample is not None
+            or args.fitting_all
+        ):
+            raise ValueError(
+                "assignments view requires one TARGET; --sample and --all "
+                "are available for full and readiness views"
+            )
         print(context.json(
             list_measurement_target_assignments(sessions, args.target),
             sort_keys=True,
@@ -532,6 +557,7 @@ def _run_fitting_command(context: CliContext) -> None:
             sessions,
             target_reference=args.target,
             sample=args.sample,
+            all_targets=args.fitting_all,
         )
         if args.format == "table":
             print(_format_assignment_readiness_table(report["rows"]))
@@ -548,6 +574,7 @@ def _run_fitting_command(context: CliContext) -> None:
                 sessions,
                 target_reference=args.target,
                 sample=args.sample,
+                all_targets=args.fitting_all,
             ),
             sort_keys=True,
         ))

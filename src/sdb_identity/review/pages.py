@@ -51,10 +51,18 @@ def render_queue_page(
     sample: str,
     report: dict[str, object],
     filters: dict[str, str],
+    *,
+    page: int = 1,
+    page_size: int = 100,
 ) -> str:
     filtered_rows = filtered_queue_rows(report, filters)
+    total_filtered = len(filtered_rows)
+    page_count = max(1, math.ceil(total_filtered / page_size))
+    page = min(max(page, 1), page_count)
+    start = (page - 1) * page_size
+    visible_rows = filtered_rows[start:start + page_size]
     rows = []
-    for position, row in enumerate(filtered_rows):
+    for position, row in enumerate(visible_rows, start=start):
         provider_text = ", ".join(
             str(value["provider"]) for value in row["providers"]
         )
@@ -98,6 +106,9 @@ def render_queue_page(
         scope_blocker_target_count=summary["scope_blocker_target_count"],
         unassigned_detection_count=summary["unassigned_detection_count"],
         mixed_detection_count=summary["mixed_detection_count"],
+        possible_duplicate_target_count=summary[
+            "possible_duplicate_target_count"
+        ],
         view_options=_select_options(
             ["all", "clean"],
             ""
@@ -124,8 +135,19 @@ def render_queue_page(
             empty_label="all providers",
         ),
         search=_e(filters.get("search", "")),
-        shown_count=len(filtered_rows),
+        shown_count=len(visible_rows),
+        shown_start=(start + 1 if visible_rows else 0),
+        shown_end=start + len(visible_rows),
+        filtered_count=total_filtered,
         total_count=len(all_rows),
+        page_size_options="".join(
+            f"<option value='{value}'{' selected' if value == page_size else ''}>"
+            f"{value}</option>"
+            for value in (50, 100, 250)
+        ),
+        pagination=_queue_pagination(
+            filters, page=page, page_count=page_count, page_size=page_size,
+        ),
         rows=(
             "".join(rows)
             or '<tr><td colspan="9" class="muted">'
@@ -133,6 +155,35 @@ def render_queue_page(
         ),
     )
     return render_page(f"SDB review: {sample}", body)
+
+
+def _queue_pagination(
+    filters: dict[str, str],
+    *,
+    page: int,
+    page_count: int,
+    page_size: int,
+) -> str:
+    def url(value: int) -> str:
+        return "/" + queue_query({
+            **filters,
+            "page": str(value),
+            "page_size": str(page_size),
+        })
+
+    previous = (
+        f"<a href='{_e(url(page - 1))}'>Previous</a>"
+        if page > 1 else "<span class='muted'>Previous</span>"
+    )
+    following = (
+        f"<a href='{_e(url(page + 1))}'>Next</a>"
+        if page < page_count else "<span class='muted'>Next</span>"
+    )
+    return (
+        f"<nav class='queue-pagination' aria-label='Queue pages'>{previous} "
+        f"<span>Page <strong>{page}</strong> of {page_count}</span> "
+        f"{following}</nav>"
+    )
 
 
 def render_catalogs_page(report: dict[str, object]) -> str:
@@ -145,6 +196,8 @@ def render_catalogs_page(report: dict[str, object]) -> str:
         ) or "—"
         science_tables = ", ".join(provider["science_tables"]) or "—"
         retained_tables = ", ".join(provider["retained_tables"]) or "—"
+        stored = provider["stored"]
+        stored_releases = ", ".join(stored["releases"]) or "—"
         snapshot = provider.get("snapshot")
         snapshot_detail = ""
         if snapshot:
@@ -176,7 +229,10 @@ def render_catalogs_page(report: dict[str, object]) -> str:
   <strong>match radius:</strong> {_e(str(provider['radius_arcsec']) + ' arcsec' if provider['radius_arcsec'] is not None else 'not used')} ·
   <strong>nearby review radius:</strong> {_e(str(provider['review_radius_arcsec']) + ' arcsec' if provider['review_radius_arcsec'] is not None else 'not used')}<br>
   <strong>Photometry:</strong> {_e(band_details)}<br>
-  <strong>Reference:</strong> <code>{_e(provider['bibliography'] or '—')}</code></p>
+  <strong>Reference:</strong> <code>{_e(provider['bibliography'] or '—')}</code><br>
+  <strong>Main SDB database:</strong> {stored['current_results']:,} current target results ·
+  {stored['measurements']:,} normalized measurements<br>
+  <strong>Stored current release(s):</strong> <code>{_e(stored_releases)}</code></p>
   {snapshot_detail}
   {f'<ul class="warning-list">{caveats}</ul>' if caveats else ''}
 </div>"""
@@ -188,7 +244,7 @@ def render_catalogs_page(report: dict[str, object]) -> str:
         local_state = {
             "remote": "on demand",
             "current": "available",
-            "missing": "missing",
+            "missing": "not loaded",
         }.get(provider["status"], provider["status"])
         rows.append(
             f"<details class='catalog-provider'><summary class='catalog-provider-summary'>"
@@ -207,6 +263,12 @@ def render_catalogs_page(report: dict[str, object]) -> str:
         remote_count=report["remote_count"],
         snapshot_current_count=report["snapshot_current_count"],
         snapshot_missing_count=report["snapshot_missing_count"],
+        stored_current_result_count=f"{report['stored_current_result_count']:,}",
+        stored_measurement_count=f"{report['stored_measurement_count']:,}",
+        reference_database=(
+            _e(report["reference_database"])
+            if report["reference_database"] is not None else "not configured"
+        ),
         rows="".join(rows),
     )
     return render_page("SDB catalog providers", body)
@@ -604,6 +666,14 @@ def render_target_page(
         if not readiness["rows"]
         else _e(readiness["rows"][0]["recommended_action"])
     )
+    if workspace.possible_duplicates:
+        candidates = ", ".join(
+            str(row["other_sdbid"] or row["other_target_id"])
+            for row in workspace.possible_duplicates
+        )
+        readiness_text = _e(
+            f"Possible duplicate target: compare with {candidates}."
+        )
     if navigation is None:
         back_url = "/"
         navigation_html = ""

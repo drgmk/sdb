@@ -301,6 +301,14 @@ def test_assignment_readiness_cli_table_and_json(
     value = json.loads(capsys.readouterr().out)
     assert value["summary"]["scope_target_count"] == 1
 
+    assert main([
+        "--database", str(db_path), "photometry", "fitting-groups",
+        "--view", "readiness", "--all", "--format", "json",
+    ]) == 0
+    all_value = json.loads(capsys.readouterr().out)
+    assert all_value["selection"]["kind"] == "all"
+    assert all_value["summary"]["scope_target_count"] == 1
+
 
 def test_sample_and_cli_report_same_canonical_group(tmp_path, session_factory, db_path, capsys):
     system, component_a, component_b = _configured_system(session_factory)
@@ -322,6 +330,25 @@ def test_sample_and_cli_report_same_canonical_group(tmp_path, session_factory, d
     cli_report = json.loads(capsys.readouterr().out)
     assert cli_report["groups"] == report["groups"]
     assert cli_report["invariants"]["valid"] is True
+
+    assert main([
+        "--database", str(db_path), "photometry", "fitting-groups", "--all",
+    ]) == 0
+    all_report = json.loads(capsys.readouterr().out)
+    assert all_report["selection"]["kind"] == "all"
+    assert all_report["summary"]["measurement_count"] == 1
+
+
+def test_fitting_group_assignments_view_requires_one_target(
+    session_factory, db_path, capsys,
+):
+    _configured_system(session_factory)
+
+    assert main([
+        "--database", str(db_path), "photometry", "fitting-groups",
+        "--view", "assignments", "--all",
+    ]) == 2
+    assert "assignments view requires one TARGET" in capsys.readouterr().err
 
 
 def test_fitting_groups_requires_exactly_one_selection(session_factory):

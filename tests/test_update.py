@@ -128,6 +128,35 @@ def test_update_all_uses_bulk_capable_simbad_metadata(session_factory, tmp_path)
     assert [context.target_id for context in provider.contexts] == [1, 2]
 
 
+def test_update_all_chunks_bulk_simbad_metadata(session_factory, tmp_path):
+    for ra_deg in range(5):
+        IdentityService(session_factory).add(
+            AddRequest(ra_deg=10 + ra_deg, dec_deg=-20)
+        )
+    provider = FakeBulkMetadataProvider(MetadataQueryResult("no_match"))
+    batches = []
+    original_query_many = provider.query_many
+
+    def query_many(contexts):
+        batches.append([context.target_id for context in contexts])
+        return original_query_many(contexts)
+
+    provider.query_many = query_many
+    updater = UpdateService(
+        session_factory,
+        ReferenceStore(tmp_path / "reference.sqlite"),
+        metadata_factory=lambda: MetadataService(session_factory, provider),
+        catalog_factory=lambda: CatalogAcquisitionService(session_factory, {}),
+        workers=2,
+        bulk_chunk_size=2,
+    )
+
+    result = updater.update_all(providers=("simbad",))
+
+    assert (result.refreshed, result.failed) == (5, 0)
+    assert batches == [[1, 2], [3, 4], [5]]
+
+
 def test_update_all_stores_simbad_aliases_before_applying_snapshots(
     session_factory,
     tmp_path,

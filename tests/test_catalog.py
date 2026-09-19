@@ -497,13 +497,19 @@ def test_failed_bulk_chunk_falls_back_to_individual_queries(session_factory):
     )
 
     assert len(adapter.contexts) == 2
+    assert [len(batch) for batch in adapter.batches] == [2, 1, 1]
     assert [result.status for result in results] == ["no_match", "no_match"]
     with session_factory() as session:
-        request = session.scalar(select(CatalogBatchRequest))
+        requests = list(session.scalars(select(CatalogBatchRequest).order_by(
+            CatalogBatchRequest.id
+        )))
         runs = list(session.scalars(select(CatalogRun)))
-    assert request.status == "fallback"
-    assert request.error == "bulk timeout"
-    assert {run.batch_request_id for run in runs} == {request.id}
+    assert [request.status for request in requests] == ["fallback"] * 3
+    assert {request.error for request in requests} == {"bulk timeout"}
+    assert {run.batch_request_id for run in runs} == {
+        requests[1].id,
+        requests[2].id,
+    }
 
 
 def test_allwise_review_only_source_can_match_nearby_target_independently(session_factory):

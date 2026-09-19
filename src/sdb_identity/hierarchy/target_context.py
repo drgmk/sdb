@@ -26,7 +26,13 @@ from .photometry import (
     target_photometry_context,
     target_photometry_context_summary,
 )
-from ..models.hierarchy import HierarchyMatchCandidate, HierarchyRecord
+from ..models.hierarchy import (
+    HierarchyMatchCandidate,
+    HierarchyRecord,
+    TargetLifecycleAction,
+    TargetSystem,
+    TargetSystemMember,
+)
 from ..models.identity import Target
 from ..providers import Astrometry
 from ..targets import resolve_target
@@ -48,6 +54,7 @@ class HierarchyTargetContextService:
         with self.session_factory() as session:
             target = _required_target(session, target_reference)
             semantic_identity = target_semantic_identity(session, target)
+            curated_systems = _curated_systems(session, target)
             candidate_rows, decision_basis = _effective_candidate_rows(
                 session, target.id,
             )
@@ -110,6 +117,7 @@ class HierarchyTargetContextService:
             nearest, closest_companion = _nearest_components(all_components)
             classification = _classification(
                 systems=systems,
+                curated_systems=curated_systems,
                 nearest_component=nearest,
                 review_required=review_required,
             )
@@ -139,10 +147,15 @@ class HierarchyTargetContextService:
                 "component_assignment": component_assignment,
                 "photometry_context": photometry_context,
                 "matched_systems": len(systems),
+                "curated_system_count": len(curated_systems),
                 "hierarchy_decision_basis": decision_basis,
+                "system_membership_basis": (
+                    "curated_system_membership" if curated_systems else "none"
+                ),
                 "nearest_component": nearest,
                 "closest_companion": closest_companion,
                 "systems": systems,
+                "curated_systems": curated_systems,
             }
 
     def target_context_summary(
@@ -157,6 +170,10 @@ class HierarchyTargetContextService:
             )
         if context["review_required"]:
             warnings.append("hierarchy review diagnostics are present")
+        if context["curated_system_count"] and not context["matched_systems"]:
+            warnings.append(
+                "curated system membership is present without provider hierarchy evidence"
+            )
         return {
             "classification": context["classification"],
             "review_required": context["review_required"],
@@ -170,7 +187,9 @@ class HierarchyTargetContextService:
                 context["photometry_context"],
             ),
             "matched_systems": context["matched_systems"],
+            "curated_system_count": context["curated_system_count"],
             "hierarchy_decision_basis": context["hierarchy_decision_basis"],
+            "system_membership_basis": context["system_membership_basis"],
             "nearest_component": context["nearest_component"],
             "nearby_components": sum(
                 len(system["components"]) for system in context["systems"]
@@ -433,16 +452,72 @@ def _nearest_components(
 def _classification(
     *,
     systems: list[dict[str, object]],
+    curated_systems: list[dict[str, object]],
     nearest_component: dict[str, object] | None,
     review_required: bool,
 ) -> str:
     if review_required:
         return "review_required"
     if not systems:
+        if curated_systems:
+            return "curated_system_member"
         return "single_or_no_known_hierarchy"
     if nearest_component is None:
         return "known_hierarchy_without_component_geometry"
     return "component_of_known_system"
+
+
+def _curated_systems(
+    session: Session,
+    target: Target,
+) -> list[dict[str, object]]:
+    """Project audited system membership separately from provider hierarchy."""
+    systems = list(session.scalars(
+        select(TargetSystem)
+        .join(
+            TargetSystemMember,
+            TargetSystemMember.system_id == TargetSystem.id,
+        )
+        .where(TargetSystemMember.target_id == target.id)
+        .order_by(TargetSystem.name, TargetSystem.id)
+    ))
+    result = []
+    for system in systems:
+        rows = list(session.execute(
+            select(TargetSystemMember, Target)
+            .join(Target, Target.id == TargetSystemMember.target_id)
+            .where(TargetSystemMember.system_id == system.id)
+            .order_by(TargetSystemMember.id)
+        ))
+        target_ids = [member.target_id for member, _member_target in rows]
+        latest_actions: dict[int, TargetLifecycleAction] = {}
+        if target_ids:
+            for action in session.scalars(
+                select(TargetLifecycleAction)
+                .where(TargetLifecycleAction.target_id.in_(target_ids))
+                .order_by(TargetLifecycleAction.id)
+            ):
+                latest_actions[action.target_id] = action
+        members = []
+        for member, member_target in rows:
+            action = latest_actions.get(member.target_id)
+            members.append({
+                "target_id": member.target_id,
+                "sdbid": member_target.sdbid,
+                "component_label": member.component_label,
+                "source": member.source,
+                "primary": system.primary_target_id == member.target_id,
+                "role": "unspecified" if action is None else action.role,
+                "state": "active" if action is None else action.state,
+            })
+        result.append({
+            "system_id": system.id,
+            "name": system.name,
+            "source": system.source,
+            "note": system.note,
+            "members": members,
+        })
+    return result
 
 
 def _filtered_photometry(

@@ -28,21 +28,29 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
         classification: str = "",
         provider: str = "",
         search: str = "",
+        page: int = 1,
+        page_size: int = 100,
     ):
-        if context.sample is None:
+        if context.sample is None and not context.all_targets:
             return render_page(
                 "SDB review",
                 "<main><h1>SDB review</h1><p>Start the server with "
-                "<code>--sample NAME</code> to populate the readiness queue."
+                "<code>--sample NAME</code> or <code>--all</code> to populate "
+                "the readiness queue."
                 "</p></main>",
             )
-        report = review_dashboard_report(
-            context.session_factory,
-            sample=context.sample,
-            catalog_providers=context.catalog_coverage_providers,
+        report = (
+            context.dashboard_cache.get(detect_external_changes=True)
+            if context.dashboard_cache is not None
+            else review_dashboard_report(
+                context.session_factory,
+                sample=context.sample,
+                all_targets=context.all_targets,
+                catalog_providers=context.catalog_coverage_providers,
+            )
         )
         return render_queue_page(
-            context.sample,
+            context.sample or "all targets",
             report,
             queue_filters(
                 view=view,
@@ -52,6 +60,8 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
                 provider=provider,
                 search=search,
             ),
+            page=page,
+            page_size=page_size if page_size in {50, 100, 250} else 100,
         )
 
     @app.get("/target/{sdbid}", response_class=HTMLResponse)
@@ -99,24 +109,31 @@ def register_page_routes(app: object, context: ReviewWebContext) -> None:
 
     @app.get("/api/readiness")
     def readiness_api():
-        if context.sample is None:
+        if context.sample is None and not context.all_targets:
             raise HTTPException(
                 status_code=400,
-                detail="server has no selected sample",
+                detail="server has no target selection",
             )
-        return review_dashboard_report(
-            context.session_factory,
-            sample=context.sample,
-            catalog_providers=context.catalog_coverage_providers,
+        return (
+            context.dashboard_cache.get(detect_external_changes=True)
+            if context.dashboard_cache is not None
+            else review_dashboard_report(
+                context.session_factory,
+                sample=context.sample,
+                all_targets=context.all_targets,
+                catalog_providers=context.catalog_coverage_providers,
+            )
         )
 
     @app.get("/catalogs", response_class=HTMLResponse)
     def catalogs_page():
-        return render_catalogs_page(catalog_overview(context.reference_store))
+        return render_catalogs_page(catalog_overview(
+            context.reference_store, context.session_factory,
+        ))
 
     @app.get("/api/catalogs")
     def catalogs_api():
-        return catalog_overview(context.reference_store)
+        return catalog_overview(context.reference_store, context.session_factory)
 
     @app.get("/api/target/{sdbid}")
     def target_api(
@@ -161,6 +178,7 @@ def _workspace(
         context.session_factory,
         sdbid,
         sample=context.sample,
+        all_targets=context.all_targets,
         filters=queue_filters(
             view=view,
             priority=priority,
@@ -175,5 +193,10 @@ def _workspace(
         nearby_import_available=(
             context.identity_service_factory is not None
             and context.catalog_update_factory is not None
+        ),
+        queue_report=(
+            None
+            if context.dashboard_cache is None
+            else context.dashboard_cache.get()
         ),
     )

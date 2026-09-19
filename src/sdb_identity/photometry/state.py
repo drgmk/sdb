@@ -231,11 +231,25 @@ def load_system_photometry_state(
     ):
         detection_targets_mutable[detection_id].add(target_id)
 
-    assignments = tuple(
-        effective_measurement_assignments(session, measurement_ids)
-    )
+    detection_target_ids = {
+        detection_id: frozenset(target_ids)
+        for detection_id, target_ids in detection_targets_mutable.items()
+    }
+    measurement_target_ids = {
+        measurement_id: detection_target_ids.get(
+            measurement.detection_id, frozenset()
+        )
+        for measurement_id, measurement in measurements.items()
+    }
+    assignments = tuple(effective_measurement_assignments(
+        session,
+        measurement_ids,
+        measurement_target_ids=measurement_target_ids,
+    ))
     eligibility = effective_measurement_eligibility(
-        session, measurement_ids
+        session,
+        measurement_ids,
+        detection_target_ids=detection_target_ids,
     )
     lifecycle = _lifecycle(session, context_ids)
     referenced_target_ids = context_ids | {
@@ -275,11 +289,7 @@ def load_system_photometry_state(
         raw_rows=raw_rows,
         raw_payloads=raw_payloads,
         catalog_provenance=catalog_provenance,
-        detection_target_ids={
-            detection_id: frozenset(target_ids)
-            for detection_id, target_ids
-            in detection_targets_mutable.items()
-        },
+        detection_target_ids=detection_target_ids,
         assignments=assignments,
         eligibility=eligibility,
     )

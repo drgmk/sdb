@@ -31,6 +31,8 @@ venv/
 sandbox.ipynb
 
 # Downloaded catalogs and local runtime databases
+sdb-cache.sqlite.catalogs/
+sdb-reference.sqlite.catalogs/
 databases/
 *.sqlite
 *.sqlite-shm

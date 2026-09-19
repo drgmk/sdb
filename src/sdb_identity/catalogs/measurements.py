@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .results import (
     effective_catalog_results,
-    effective_catalog_selected_rows,
+    effective_catalog_selected_rows_by_run,
 )
 from ..models.catalogs import (
     CatalogDetection,
@@ -102,11 +102,17 @@ def _effective_detection_target_ids(
         target_query = target_query.where(RawCatalogRow.detection_id.in_(ids))
     target_ids = set(session.scalars(target_query))
     implicit: dict[int, dict[int, int]] = {}
-    for result_row in effective_catalog_results(session, target_ids).values():
+    effective_results = tuple(
+        effective_catalog_results(session, target_ids).values()
+    )
+    selected_rows_by_run = effective_catalog_selected_rows_by_run(
+        session, effective_results,
+    )
+    for result_row in effective_results:
         if require_match and result_row.status != ProviderRunStatus.MATCH:
             continue
-        for raw_row, detection in effective_catalog_selected_rows(
-            session, result_row,
+        for raw_row, detection in selected_rows_by_run.get(
+            result_row.run.id, (),
         ):
             if ids is not None and detection.id not in ids:
                 continue
@@ -172,26 +178,40 @@ def current_measurement_encounters(
     ):
         latest_actions[(action.target_id, action.detection_id)] = action
 
+    effective_results = tuple(effective_catalog_results(session, ids).values())
+    selected_rows_by_run = effective_catalog_selected_rows_by_run(
+        session, effective_results,
+    )
+    selected_rows = [
+        (result_row, raw_row, detection)
+        for result_row in effective_results
+        if result_row.status == ProviderRunStatus.MATCH
+        for raw_row, detection in selected_rows_by_run.get(
+            result_row.run.id, (),
+        )
+    ]
+    measurements_by_detection: dict[int, list[NormalizedMeasurement]] = {}
+    detection_ids = {detection.id for _result, _raw, detection in selected_rows}
+    for chunk in _chunks(detection_ids):
+        for measurement in session.scalars(
+            select(NormalizedMeasurement)
+            .where(NormalizedMeasurement.detection_id.in_(chunk))
+            .order_by(
+                NormalizedMeasurement.provider,
+                NormalizedMeasurement.source_id,
+                NormalizedMeasurement.band,
+                NormalizedMeasurement.id,
+            )
+        ):
+            measurements_by_detection.setdefault(
+                measurement.detection_id, [],
+            ).append(measurement)
     queried_rows = []
-    for result_row in effective_catalog_results(session, ids).values():
+    for result_row, raw_row, detection in selected_rows:
         if result_row.status != ProviderRunStatus.MATCH:
             continue
-        for raw_row, detection in effective_catalog_selected_rows(
-            session, result_row,
-        ):
-            for measurement in session.scalars(
-                select(NormalizedMeasurement)
-                .where(
-                    NormalizedMeasurement.detection_id == detection.id
-                )
-                .order_by(
-                    NormalizedMeasurement.provider,
-                    NormalizedMeasurement.source_id,
-                    NormalizedMeasurement.band,
-                    NormalizedMeasurement.id,
-                )
-            ):
-                queried_rows.append((measurement, raw_row, result_row.run))
+        for measurement in measurements_by_detection.get(detection.id, ()):
+            queried_rows.append((measurement, raw_row, result_row.run))
     effective_targets = _effective_detection_target_ids(
         session,
         {measurement.detection_id for measurement, _raw, _run in queried_rows},
@@ -313,3 +333,9 @@ def current_measurement_target_ids(
                 encounter.target_id
             )
     return result
+
+
+def _chunks(values: Iterable[int], size: int = 5_000) -> Iterable[tuple[int, ...]]:
+    values = tuple(values)
+    for start in range(0, len(values), size):
+        yield values[start:start + size]

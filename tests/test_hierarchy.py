@@ -116,6 +116,52 @@ def test_hierarchy_service_creates_system_members_and_relationships(session_fact
     }
 
 
+def test_target_context_surfaces_curated_system_without_provider_hierarchy(
+    session_factory,
+):
+    identity = IdentityService(session_factory)
+    primary = identity.add(AddRequest(ra_deg=10.0, dec_deg=-20.0))
+    secondary = identity.add(AddRequest(ra_deg=10.001, dec_deg=-20.0))
+    service = HierarchyService(session_factory)
+    service.create_system("curated binary", primary=primary.sdbid)
+    service.add_member(
+        "curated binary", secondary.sdbid, component_label="B",
+    )
+
+    context = service.target_context(primary.sdbid)
+    summary = service.target_context_summary(primary.sdbid)
+
+    assert context["classification"] == "curated_system_member"
+    assert context["matched_systems"] == 0
+    assert context["curated_system_count"] == 1
+    assert context["system_membership_basis"] == "curated_system_membership"
+    assert context["curated_systems"] == [{
+        "system_id": context["curated_systems"][0]["system_id"],
+        "name": "curated binary",
+        "source": "manual",
+        "note": None,
+        "members": [{
+            "target_id": primary.target_id,
+            "sdbid": primary.sdbid,
+            "component_label": None,
+            "source": "manual",
+            "primary": True,
+            "role": "unspecified",
+            "state": "active",
+        }, {
+            "target_id": secondary.target_id,
+            "sdbid": secondary.sdbid,
+            "component_label": "B",
+            "source": "manual",
+            "primary": False,
+            "role": "unspecified",
+            "state": "active",
+        }],
+    }]
+    assert summary["curated_system_count"] == 1
+    assert "curated system membership" in summary["warnings"][0]
+
+
 def test_hierarchy_target_context_reports_photometry_blending(session_factory, tmp_path):
     target = IdentityService(session_factory).add(AddRequest(ra_deg=1.425, dec_deg=45.8166667))
     path = tmp_path / "wds.tsv"

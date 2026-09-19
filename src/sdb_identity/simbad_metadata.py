@@ -82,27 +82,49 @@ class AstroquerySimbadMetadata:
         contexts: tuple[MetadataQueryContext, ...],
     ) -> dict[int, MetadataQueryResult]:
         result = {context.target_id: MetadataQueryResult("no_match") for context in contexts}
-        by_identifier = {
-            context.preferred_identifier: context
-            for context in contexts
-            if context.preferred_identifier
-        }
+        by_identifier: dict[str, list[MetadataQueryContext]] = {}
+        for context in contexts:
+            if context.preferred_identifier:
+                by_identifier.setdefault(context.preferred_identifier, []).append(context)
         if by_identifier:
             rows_by_identifier = self._query_core_identifiers_many(tuple(by_identifier))
-            for identifier, context in by_identifier.items():
+            matched_rows: dict[int, Any] = {}
+            for identifier, identifier_contexts in by_identifier.items():
                 rows = rows_by_identifier.get(identifier, [])
                 if not rows:
                     continue
                 if len(rows) > 1:
-                    result[context.target_id] = MetadataQueryResult(
-                        "ambiguous",
-                        tuple(self._snapshot(row, enrich=False) for row in rows),
+                    value = MetadataQueryResult(
+                        "ambiguous", tuple(self._snapshot(row, enrich=False) for row in rows)
                     )
+                    for context in identifier_contexts:
+                        result[context.target_id] = value
                 else:
-                    result[context.target_id] = MetadataQueryResult(
-                        "match",
-                        (self._snapshot(rows[0], enrich=True),),
-                    )
+                    for context in identifier_contexts:
+                        matched_rows[context.target_id] = rows[0]
+
+            # Fetch the potentially expensive SIMBAD enrichments once for the
+            # whole input batch.  Previously each matched target made four
+            # additional serial TAP requests here.
+            enrichments = self._enrichments_many(tuple(matched_rows.values()))
+            snapshots_by_oid: dict[int, SimbadSnapshot] = {}
+            for target_id, row in matched_rows.items():
+                oid = _int(_value(row, "oid"))
+                if oid is None:
+                    snapshot = self._snapshot(row, enrich=False)
+                else:
+                    snapshot = snapshots_by_oid.get(oid)
+                    if snapshot is None:
+                        identifier_rows, type_rows, relationship_rows = enrichments[oid]
+                        snapshot = self._snapshot(
+                            row,
+                            enrich=True,
+                            identifier_rows=identifier_rows,
+                            type_rows=type_rows,
+                            relationship_rows=relationship_rows,
+                        )
+                        snapshots_by_oid[oid] = snapshot
+                result[target_id] = MetadataQueryResult("match", (snapshot,))
         for context in contexts:
             if result[context.target_id].status != "no_match":
                 continue
@@ -179,7 +201,15 @@ class AstroquerySimbadMetadata:
             "object_type_codes": tuple(code for code in raw_types.split("|") if code),
         }
 
-    def _snapshot(self, row, *, enrich: bool) -> SimbadSnapshot:
+    def _snapshot(
+        self,
+        row,
+        *,
+        enrich: bool,
+        identifier_rows=None,
+        type_rows=None,
+        relationship_rows=None,
+    ) -> SimbadSnapshot:
         core = self.parse_core_row(row)
         if not core["oid"] or not core["main_id"] or core["ra_deg"] is None or core["dec_deg"] is None:
             raise ProviderError("SIMBAD metadata response omitted oid, main_id, or coordinates")
@@ -193,16 +223,23 @@ class AstroquerySimbadMetadata:
             "relationships": [],
         }
         if enrich:
-            identifier_rows = self._identifier_rows(core["oid"])
+            if identifier_rows is None:
+                identifier_rows = self._identifier_rows(core["oid"])
             identifiers = tuple(
                 value
                 for value in (_text(_value(row, "id")) for row in identifier_rows)
                 if value
             )
-            object_types, type_rows = self._object_types(
-                core["object_type_codes"], core["primary_object_type"]
-            )
-            relationship_rows = self._relationship_rows(core["oid"])
+            if type_rows is None:
+                object_types, type_rows = self._object_types(
+                    core["object_type_codes"], core["primary_object_type"]
+                )
+            else:
+                object_types = self._parse_object_types(
+                    core["object_type_codes"], core["primary_object_type"], type_rows
+                )
+            if relationship_rows is None:
+                relationship_rows = self._relationship_rows(core["oid"])
             relationships = self.parse_relationship_rows(
                 core["ra_deg"], core["dec_deg"], relationship_rows
             )
@@ -235,6 +272,74 @@ class AstroquerySimbadMetadata:
     def _identifier_rows(self, oid: int):
         return self._query_rows(f"SELECT id FROM ident WHERE oidref={oid}")
 
+    def _enrichments_many(self, rows: tuple[Any, ...]):
+        oids = tuple(sorted({
+            oid for row in rows if (oid := _int(_value(row, "oid"))) is not None
+        }))
+        if not oids:
+            return {}
+        oid_literals = ",".join(str(oid) for oid in oids)
+
+        identifiers_by_oid = {oid: [] for oid in oids}
+        for row in self._query_rows(
+            f"SELECT oidref AS input_oid, id FROM ident WHERE oidref IN ({oid_literals})"
+        ):
+            oid = _int(_value(row, "input_oid"))
+            if oid in identifiers_by_oid:
+                value = _json_row(row)
+                value.pop("input_oid", None)
+                identifiers_by_oid[oid].append(value)
+
+        codes = tuple(sorted({
+            code
+            for row in rows
+            for code in self.parse_core_row(row)["object_type_codes"]
+        }))
+        type_rows = []
+        if codes:
+            literals = ",".join(_literal(code) for code in codes)
+            type_rows = self._query_rows(
+                "SELECT otype, label, description FROM otypedef "
+                f"WHERE otype IN ({literals})"
+            )
+
+        relationships_by_oid = {oid: [] for oid in oids}
+        parents = self._query_rows(f"""
+            SELECT h.child AS input_oid, 'parent' AS direction,
+                   p.oid AS related_oid, p.main_id AS related_main_id,
+                   p.ra AS related_ra, p.dec AS related_dec,
+                   p.otype AS related_otype, pa.otypes AS related_otypes,
+                   p.sp_type AS related_sp_type,
+                   p.sp_bibcode AS related_sp_bibcode,
+                   h.membership, h.link_bibcode
+            FROM h_link AS h JOIN basic AS p ON p.oid=h.parent
+            LEFT JOIN alltypes AS pa ON pa.oidref=p.oid
+            WHERE h.child IN ({oid_literals})
+        """)
+        children = self._query_rows(f"""
+            SELECT h.parent AS input_oid, 'child' AS direction,
+                   c.oid AS related_oid, c.main_id AS related_main_id,
+                   c.ra AS related_ra, c.dec AS related_dec,
+                   c.otype AS related_otype, ca.otypes AS related_otypes,
+                   c.sp_type AS related_sp_type,
+                   c.sp_bibcode AS related_sp_bibcode,
+                   h.membership, h.link_bibcode
+            FROM h_link AS h JOIN basic AS c ON c.oid=h.child
+            LEFT JOIN alltypes AS ca ON ca.oidref=c.oid
+            WHERE h.parent IN ({oid_literals})
+        """)
+        for row in (*parents, *children):
+            oid = _int(_value(row, "input_oid"))
+            if oid in relationships_by_oid:
+                value = _json_row(row)
+                value.pop("input_oid", None)
+                relationships_by_oid[oid].append(value)
+
+        return {
+            oid: (identifiers_by_oid[oid], type_rows, relationships_by_oid[oid])
+            for oid in oids
+        }
+
     def _object_types(self, codes: tuple[str, ...], primary: str | None):
         if not codes:
             return (), []
@@ -243,6 +348,10 @@ class AstroquerySimbadMetadata:
             "SELECT otype, label, description FROM otypedef "
             f"WHERE otype IN ({literals})"
         )
+        return self._parse_object_types(codes, primary, rows), rows
+
+    @staticmethod
+    def _parse_object_types(codes: tuple[str, ...], primary: str | None, rows):
         by_code = {_text(_value(row, "otype")): row for row in rows}
         values = tuple(
             ObjectTypeValue(
@@ -253,7 +362,7 @@ class AstroquerySimbadMetadata:
             )
             for code in codes
         )
-        return values, rows
+        return values
 
     def _relationship_rows(self, oid: int):
         parents = self._query_rows(f"""

@@ -31,6 +31,22 @@ def _proposal(
     }
 
 
+def test_apply_proposals_requires_exactly_one_target_selection(session_factory):
+    system, _component_a, _component_b = _configured_system(session_factory)
+
+    for kwargs in (
+        {},
+        {"target_reference": system.sdbid, "sample": "x"},
+        {"target_reference": system.sdbid, "all_targets": True},
+    ):
+        try:
+            apply_measurement_assignment_proposals(session_factory, **kwargs)
+        except ValueError as error:
+            assert "exactly one" in str(error)
+        else:
+            raise AssertionError("expected selection validation error")
+
+
 def test_apply_proposals_does_not_store_ordinary_derived_default(
     session_factory, monkeypatch,
 ):

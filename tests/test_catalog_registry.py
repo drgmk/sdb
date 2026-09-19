@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from astropy.table import Table
 
+from sdb_identity.catalogs.acquisition import CatalogAcquisitionService
 from sdb_identity.catalogs.overview import catalog_overview
 from sdb_identity.catalogs.registry import (
     CATALOG_PROVIDERS,
@@ -10,6 +11,8 @@ from sdb_identity.catalogs.registry import (
     build_catalog_adapter,
 )
 from sdb_identity.reference.store import ReferenceStore
+from sdb_identity.service import AddRequest, IdentityService
+from tests.test_catalog import FakeCatalog, candidate, measurement
 
 
 def test_registry_covers_remote_and_snapshot_catalogs():
@@ -63,3 +66,28 @@ def test_overview_combines_registry_with_reference_state(tmp_path):
     assert gaspar["status"] == "current"
     assert gaspar["snapshot"]["row_count"] == 2
     assert gaspar["retained_tables"] == ["J/ApJ/768/25/refs"]
+
+
+def test_overview_distinguishes_stored_data_from_reference_state(
+    session_factory,
+):
+    target = IdentityService(session_factory).add(
+        AddRequest(ra_deg=10, dec_deg=-20)
+    )
+    CatalogAcquisitionService(session_factory, {
+        "2mass": FakeCatalog([
+            candidate(measurements=[measurement(), measurement("2MH")]),
+        ]),
+    }).refresh(target.sdbid, "2mass")
+
+    report = catalog_overview(session_factory=session_factory)
+    two_mass = next(
+        row for row in report["providers"] if row["key"] == "2mass"
+    )
+    assert report["stored_current_result_count"] == 1
+    assert report["stored_measurement_count"] == 2
+    assert two_mass["stored"] == {
+        "current_results": 1,
+        "measurements": 2,
+        "releases": ["fake-2mass"],
+    }

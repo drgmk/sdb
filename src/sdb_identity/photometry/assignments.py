@@ -136,67 +136,95 @@ def assign_measurement_target(
     actor: str | None,
     reason: str | None = None,
 ) -> MeasurementTargetAssociation:
+    with session_factory.begin() as session:
+        return assign_measurement_target_in_session(
+            session,
+            measurement_id,
+            target_reference,
+            role=role,
+            method=method,
+            weight=weight,
+            actor=actor,
+            reason=reason,
+        )
+
+
+def assign_measurement_target_in_session(
+    session: Session,
+    measurement_id: int,
+    target_reference: str | int,
+    *,
+    role: str | MeasurementTargetRole = MeasurementTargetRole.CONTRIBUTOR,
+    method: str = "manual",
+    weight: float | None = None,
+    actor: str | None,
+    reason: str | None = None,
+) -> MeasurementTargetAssociation:
+    """Assign within a caller-owned transaction.
+
+    Bulk workflows use this entry point to retain the same audited semantics
+    without committing once per measurement.
+    """
     role = MeasurementTargetRole.parse(role, "role")
     method = method.strip().lower()
     if not method:
         raise ValueError("method is required")
     if weight is not None and weight < 0:
         raise ValueError("weight must be non-negative")
-    with session_factory.begin() as session:
-        measurement = session.get(NormalizedMeasurement, measurement_id)
-        if measurement is None:
-            raise KeyError(f"measurement not found: {measurement_id}")
-        target = resolve_target(session, target_reference)
-        if target is None:
-            raise KeyError(f"target not found: {target_reference}")
-        decision = DecisionContext.resolve(
-            actor=actor,
-            reason=reason,
-            suggested_reason=(
-                f"Assigned measurement {measurement.id} to {target.sdbid} "
-                f"as {role.replace('_', ' ')}"
-            ),
-        )
-        association = session.scalar(select(MeasurementTargetAssociation).where(
-            MeasurementTargetAssociation.measurement_id == measurement.id,
-            MeasurementTargetAssociation.target_id == target.id,
-            MeasurementTargetAssociation.role == role.value,
-        ))
-        if association is None:
-            association = MeasurementTargetAssociation(
-                measurement_id=measurement.id,
-                target_id=target.id,
-                role=role.value,
-                method=method,
-                weight=weight,
-                note=decision.reason,
-            )
-            session.add(association)
-        else:
-            association.method = method
-            association.weight = weight
-            association.note = decision.reason
-        action = MeasurementAssociationAction(
+    measurement = session.get(NormalizedMeasurement, measurement_id)
+    if measurement is None:
+        raise KeyError(f"measurement not found: {measurement_id}")
+    target = resolve_target(session, target_reference)
+    if target is None:
+        raise KeyError(f"target not found: {target_reference}")
+    decision = DecisionContext.resolve(
+        actor=actor,
+        reason=reason,
+        suggested_reason=(
+            f"Assigned measurement {measurement.id} to {target.sdbid} "
+            f"as {role.replace('_', ' ')}"
+        ),
+    )
+    association = session.scalar(select(MeasurementTargetAssociation).where(
+        MeasurementTargetAssociation.measurement_id == measurement.id,
+        MeasurementTargetAssociation.target_id == target.id,
+        MeasurementTargetAssociation.role == role.value,
+    ))
+    if association is None:
+        association = MeasurementTargetAssociation(
             measurement_id=measurement.id,
             target_id=target.id,
-            action=MeasurementAssociationActionKind.ASSIGN.value,
             role=role.value,
             method=method,
             weight=weight,
-            actor=decision.actor,
-            reason=decision.reason,
+            note=decision.reason,
         )
-        session.add(action)
-        session.flush()
-        for dirty_target_id in {measurement.target_id, target.id}:
-            mark_export_dirty(
-                session,
-                dirty_target_id,
-                source_type="measurement_assignment",
-                source_id=action.id,
-                reason="measurement contributor assignment changed",
-            )
-        return association
+        session.add(association)
+    else:
+        association.method = method
+        association.weight = weight
+        association.note = decision.reason
+    action = MeasurementAssociationAction(
+        measurement_id=measurement.id,
+        target_id=target.id,
+        action=MeasurementAssociationActionKind.ASSIGN.value,
+        role=role.value,
+        method=method,
+        weight=weight,
+        actor=decision.actor,
+        reason=decision.reason,
+    )
+    session.add(action)
+    session.flush()
+    for dirty_target_id in {measurement.target_id, target.id}:
+        mark_export_dirty(
+            session,
+            dirty_target_id,
+            source_type="measurement_assignment",
+            source_id=action.id,
+            reason="measurement contributor assignment changed",
+        )
+    return association
 
 
 def unassign_measurement_target(

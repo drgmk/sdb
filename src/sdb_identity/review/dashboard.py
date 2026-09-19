@@ -10,6 +10,7 @@ from ..catalogs.associations import resolved_ambiguous_catalog_results
 from ..catalogs.results import effective_catalog_results
 from ..photometry.readiness import assignment_readiness_report
 from ..fitting_groups import fitting_group_report
+from ..identity_duplicates import target_duplicate_reviews
 from ..models.identity import ExternalIdentifier
 from ..vocabulary import (
     INACTIVE_TARGET_STATES,
@@ -21,16 +22,24 @@ from ..vocabulary import (
 
 
 def review_dashboard_report(
-    session_factory: sessionmaker[Session], *, sample: str,
+    session_factory: sessionmaker[Session], *,
+    target_reference: str | int | None = None,
+    sample: str | None = None,
+    all_targets: bool = False,
     catalog_providers: Iterable[str] | None = None,
 ) -> dict[str, object]:
-    """Summarize every selected sample target from current stored review state.
+    """Summarize selected targets from current stored review state.
 
     This deliberately avoids recomputing the expensive positional/identifier
     proposal engine for the full sample. The target workspace still computes
     that richer evidence for one system when it is opened.
     """
-    graph = fitting_group_report(session_factory, sample=sample)
+    graph = fitting_group_report(
+        session_factory,
+        target_reference=target_reference,
+        sample=sample,
+        all_targets=all_targets,
+    )
     scope_report = assignment_readiness_report(
         session_factory, sample=sample, graph=graph,
     )
@@ -50,6 +59,10 @@ def review_dashboard_report(
         set(selected_targets),
         catalog_providers=catalog_providers,
     )
+    with session_factory() as session:
+        duplicate_review_by_target = target_duplicate_reviews(
+            session, selected_targets,
+        )
     measurements_by_target: dict[int, dict[int, dict[str, object]]] = defaultdict(dict)
     for measurement in graph["measurements"]:
         relevant_target_ids = set(measurement.get("encounter_target_ids") or [])
@@ -70,8 +83,9 @@ def review_dashboard_report(
         detections = _detection_rows(measurements)
         scope = scope_by_target.get(target_id)
         catalog_review = catalog_review_by_target.get(target_id, [])
+        duplicate_review = duplicate_review_by_target.get(target_id, [])
         classification, priority, action = _target_classification(
-            target, detections, scope, catalog_review,
+            target, detections, scope, catalog_review, duplicate_review,
         )
         providers = _provider_summary(measurements, catalog_review)
         rows.append({
@@ -105,6 +119,7 @@ def review_dashboard_report(
             "systems": target["systems"],
             "detections": detections,
             "catalog_review": catalog_review,
+            "possible_duplicates": duplicate_review,
             "importable_relative_count": (
                 0 if scope is None else scope["importable_relative_count"]
             ),
@@ -118,45 +133,59 @@ def review_dashboard_report(
     ))
     return {
         "selection": graph["selection"],
-        "summary": {
-            "target_count": len(rows),
-            "actionable_target_count": sum(
-                row["priority"] != ReviewPriority.NONE for row in rows
-            ),
-            "clean_target_count": sum(
-                row["priority"] == ReviewPriority.NONE for row in rows
-            ),
-            "scope_blocker_target_count": len(scope_by_target),
-            "mixed_ownership_target_count": sum(
-                row["mixed_detection_count"] > 0 for row in rows
-            ),
-            "unassigned_target_count": sum(
-                row["unassigned_detection_count"] > 0 for row in rows
-            ),
-            "no_photometry_target_count": sum(
-                row["detection_count"] == 0 for row in rows
-            ),
-            "catalog_review_target_count": sum(
-                bool(row["catalog_review"]) for row in rows
-            ),
-            "catalog_review_result_count": sum(
-                len(row["catalog_review"]) for row in rows
-            ),
-            "detection_count": sum(row["detection_count"] for row in rows),
-            "unassigned_detection_count": sum(
-                row["unassigned_detection_count"] for row in rows
-            ),
-            "mixed_detection_count": sum(
-                row["mixed_detection_count"] for row in rows
-            ),
-        },
+        "summary": review_dashboard_summary(rows),
         "rows": rows,
         "notes": [
-            "all current sample members are listed, including clean and no-photometry targets",
+            "all selected targets are listed, including clean and no-photometry targets",
             "dashboard states use accepted source associations and explicit attribution exceptions",
             "open a target to compute detailed identifier, position, hierarchy, and resolution proposals",
             "configured missing, failed, and ambiguous catalog results remain actionable until resolved",
         ],
+    }
+
+
+def review_dashboard_summary(
+    rows: Iterable[dict[str, object]],
+) -> dict[str, int]:
+    """Recompute queue totals from independently refreshable target rows."""
+
+    values = list(rows)
+    return {
+        "target_count": len(values),
+        "actionable_target_count": sum(
+            row["priority"] != ReviewPriority.NONE for row in values
+        ),
+        "clean_target_count": sum(
+            row["priority"] == ReviewPriority.NONE for row in values
+        ),
+        "scope_blocker_target_count": sum(
+            row["scope_classification"] is not None for row in values
+        ),
+        "mixed_ownership_target_count": sum(
+            row["mixed_detection_count"] > 0 for row in values
+        ),
+        "unassigned_target_count": sum(
+            row["unassigned_detection_count"] > 0 for row in values
+        ),
+        "no_photometry_target_count": sum(
+            row["detection_count"] == 0 for row in values
+        ),
+        "catalog_review_target_count": sum(
+            bool(row["catalog_review"]) for row in values
+        ),
+        "catalog_review_result_count": sum(
+            len(row["catalog_review"]) for row in values
+        ),
+        "possible_duplicate_target_count": sum(
+            bool(row["possible_duplicates"]) for row in values
+        ),
+        "detection_count": sum(row["detection_count"] for row in values),
+        "unassigned_detection_count": sum(
+            row["unassigned_detection_count"] for row in values
+        ),
+        "mixed_detection_count": sum(
+            row["mixed_detection_count"] for row in values
+        ),
     }
 
 
@@ -289,7 +318,17 @@ def _target_classification(
     detections: list[dict[str, object]],
     scope: dict[str, object] | None,
     catalog_review: list[dict[str, object]],
+    duplicate_review: list[dict[str, object]],
 ) -> tuple[str, str, str]:
+    if duplicate_review:
+        candidates = ", ".join(
+            str(row["other_sdbid"] or row["other_target_id"])
+            for row in duplicate_review
+        )
+        return (
+            "possible_duplicate_target", "highest",
+            f"compare with {candidates} and resolve the duplicate target",
+        )
     if scope is not None:
         return (
             str(scope["classification"]),

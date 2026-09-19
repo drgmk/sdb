@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..service import IdentityService
+from .dashboard_cache import ReviewDashboardCache
 
 
 @dataclass(frozen=True)
 class ReviewWebContext:
     session_factory: sessionmaker[Session]
     sample: str | None = None
+    all_targets: bool = False
     default_actor: str = ""
     review_session_id: str = ""
     identity_service_factory: Callable[[], IdentityService] | None = None
@@ -21,3 +23,4 @@ class ReviewWebContext:
     catalog_coverage_providers: tuple[str, ...] | None = None
     catalog_update_factory: Callable[[], object] | None = None
     reference_store: object | None = None
+    dashboard_cache: ReviewDashboardCache | None = None

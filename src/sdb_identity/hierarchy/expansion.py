@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 
 from sqlalchemy import select
@@ -33,6 +34,7 @@ from ..service import (
     UnresolvedTarget,
 )
 from ..ingestion import TargetIngestionPlan
+from ..update import UpdateSummary
 from ..target_lifecycle import set_target_lifecycle, target_lifecycle_status
 from ..targets import resolve_target
 from ..vocabulary import ProviderRunStatus, TargetRole, TargetState
@@ -51,6 +53,8 @@ class RelativeImportResult:
     skipped: int
     failed: int
     relatives: tuple[dict[str, object], ...]
+    update_summary: UpdateSummary | None = None
+    hierarchy_matches: tuple[dict[str, object], ...] = ()
 
     @property
     def already_imported(self) -> int:
@@ -61,6 +65,17 @@ class RelativeImportResult:
         value = asdict(self)
         value["already_imported"] = self.already_imported
         value["relatives"] = list(self.relatives)
+        value["update_summary"] = (
+            None
+            if self.update_summary is None
+            else {
+                **asdict(self.update_summary),
+                "items": [
+                    asdict(item) for item in self.update_summary.items
+                ],
+            }
+        )
+        value["hierarchy_matches"] = list(self.hierarchy_matches)
         return value
 
 
@@ -216,6 +231,8 @@ def import_immediate_relatives(
     actor: str | None,
     reason: str | None = None,
     selected_relationship_ids: set[int] | None = None,
+    followup_plan: TargetIngestionPlan | None = None,
+    providers: Iterable[str] = (),
 ) -> RelativeImportResult:
     preview = preview_immediate_relatives(session_factory, target_reference)
     actionable_ids = {
@@ -263,7 +280,7 @@ def import_immediate_relatives(
         reason=decision.reason,
     )
     rows = []
-    ingestion = TargetIngestionPlan(identity=identity_service)
+    ingestion = followup_plan or TargetIngestionPlan(identity=identity_service)
     counts = {
         "imported": 0,
         "reconciled": 0,
@@ -345,6 +362,18 @@ def import_immediate_relatives(
         counts[applied_action] += 1
         rows.append(row)
 
+    followup_sdbids = tuple(dict.fromkeys(
+        str(row["matched_sdbid"])
+        for row in rows
+        if row.get("action") in {"imported", "reconciled"}
+        and row.get("matched_sdbid")
+    ))
+    followup = (
+        ingestion.follow_up(followup_sdbids, providers=providers)
+        if followup_plan is not None
+        else None
+    )
+
     return RelativeImportResult(
         requested_sdbid=requested_sdbid,
         system_id=system.id,
@@ -357,6 +386,10 @@ def import_immediate_relatives(
         skipped=counts["skipped"],
         failed=counts["failed"],
         relatives=tuple(rows),
+        update_summary=(None if followup is None else followup.update_summary),
+        hierarchy_matches=(
+            () if followup is None else followup.hierarchy_matches
+        ),
     )
 
 

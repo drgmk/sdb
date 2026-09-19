@@ -443,7 +443,7 @@ document.getElementById('apply-eligibility').addEventListener('click',async()=>{
   const actor=rememberActor(document.getElementById('actor').value);
   const reason=document.getElementById('reason').value;
   if(!actor||!reason){alert('Actor and reason are required.');return;}
-  const payload={...currentEligibilityPayload,actor,reason,state_token:currentEligibilityPreview.state_token};
+  const payload={...currentEligibilityPayload,target:window.SDB_TARGET,actor,reason,state_token:currentEligibilityPreview.state_token};
   try{
     const value=await request('/api/eligibility/apply',payload);
     renderHumanSummary(document.getElementById('eligibility-preview'),value);

@@ -130,7 +130,9 @@ def _register_target_commands(
         "import-relatives",
         "Import immediate stellar SIMBAD relatives.",
         "Imports immediate stellar parents and children, then reconciles "
-        "membership, lifecycle roles, and SIMBAD relationship evidence.",
+        "membership, lifecycle roles, and SIMBAD relationship evidence. "
+        "Configured provider coverage and stored WDS/CCDM matching are then "
+        "run for every imported or reconciled relative.",
     )
     import_relatives.add_argument("target")
     add_actor_argument(import_relatives)
@@ -642,11 +644,19 @@ def _run_target_state(context: CliContext, service) -> None:
         with context.provider_output():
             from ..live_providers import AstroqueryGaia, AstroquerySimbad
             from ..hierarchy.expansion import import_immediate_relatives
+            from ..hierarchy.matching import HierarchyMatchingService
+            from ..ingestion import TargetIngestionPlan
+            from ..update import DEFAULT_PROVIDERS
+            from .services import build_update_service
 
             identity = IdentityService(
                 sessions,
                 simbad=AstroquerySimbad(),
                 gaia=AstroqueryGaia(),
+            )
+            providers = (
+                "simbad",
+                *context.config.catalog_providers(DEFAULT_PROVIDERS[1:]),
             )
             value = import_immediate_relatives(
                 sessions,
@@ -654,6 +664,16 @@ def _run_target_state(context: CliContext, service) -> None:
                 identity_service=identity,
                 actor=args.actor,
                 reason=args.reason,
+                followup_plan=TargetIngestionPlan(
+                    identity=identity,
+                    update=build_update_service(
+                        sessions,
+                        context.reference_database_path,
+                        reporter=context.reporter,
+                    ),
+                    hierarchy=HierarchyMatchingService(sessions),
+                ),
+                providers=providers,
             )
         print(context.json(value.as_dict()))
     elif args.hierarchy_command == "target-state":
